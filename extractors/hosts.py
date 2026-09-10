@@ -1,0 +1,2505 @@
+# -*- coding: utf-8 -*-
+"""Host resolvers + the extract_stream entry point.
+
+PHASE-2 SPLIT of base.py's resolver layer. Audit fixes baked in:
+
+  * _ORDERED_RESOLVER_KEYS: longest-key-first dispatch — the insertion-
+    order substring scan let "vidtube" (topcinema resolver) shadow
+    "vidtube.one" (hanerix resolver) so the vidtube.one entries were
+    unreachable dead code.
+  * resolve_host passes the CALLER's referer through to resolvers that
+    accept it (was: accepted and silently dropped).
+  * resolve_generic_embed takes a referer (was: ignored).
+  * resolve_streamruby's egydead probe list kept verbatim — it's probe
+    logic, not a referer default; referers.py owns defaults.
+  * resolve_hgcloud's self-import deleted; resolve_vidtube's identical
+    re-request fixed (second fetch now uses a different referer).
+  * All f-strings converted to .format() (py2-compat policy).
+
+Extracted from base.py (Phase-2): Unbaser/packer, every resolve_*
+function, HOST_RESOLVERS, the dispatch chain, extract_stream(_all).
+"""
+
+import re
+import json
+import time
+import base64
+import random
+from urllib.parse import urlparse, urljoin
+
+from .net import fetch, log, UA
+from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
+                        _best_media_url, get_last_quality_variants,
+                        get_synthesized_variants, _correct_stream_url,
+                        _is_placeholder_media_url, extract_iframes,
+                        _quality_tls)
+from .referers import get_referer
+
+
+# ─── Video Host Resolvers ─────────────────────────────────────────────────────
+
+def resolve_streamtape(url):
+    try:
+        html, _ = fetch(url, referer="https://streamtape.com/")
+        if not html:
+            return None
+        m = re.search(r"robotlink\)\.innerHTML\s*=\s*'([^']+)'\s*\+\s*'([^']+)'", html)
+        if m:
+            link = m.group(1) + m.group(2)
+            if not link.startswith("http"):
+                link = "https:" + link
+            return link.replace("//streamtape.com", "https://streamtape.com")
+        m = re.search(r"robotlink\)\.innerHTML\s*=\s*['\"]([^'\"]+)['\"]", html)
+        if m:
+            link = m.group(1)
+            return ("https:" + link) if link.startswith("//") else link
+        m = re.search(r'(/get_video\?[^"\'&\s]+)', html)
+        if m:
+            return "https://streamtape.com" + m.group(1)
+        return find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_doodstream(url):
+    DOOD_DOMAINS = [
+        "dood.re", "dood.to", "dood.so", "dood.pm", "dood.ws",
+        "dood.watch", "dood.sh", "dood.la", "dood.li", "dood.cx",
+        "dood.xyz", "dood.wf", "d0o0d.com", "dsvplay.com",
+        "doods.pro", "ds2play.com", "dooood.com", "doodstream.com",
+    ]
+    try:
+        working_html = None
+        working_url = url
+
+        # Try the URL as-given FIRST (the common case) — the old code
+        # iterated up to ~20 mirror domains before ever trying the original.
+        html, _final = fetch(url, referer=url)
+        if html and "pass_md5" in html:
+            working_html = html
+
+        if not working_html:
+            tried = 0
+            for dom in DOOD_DOMAINS:
+                if tried >= 8:  # cap the worst case
+                    break
+                candidate = re.sub(
+                    r'dood\.[a-z]+|dsvplay\.[a-z]+|d0o0d\.[a-z]+|doodstream\.[a-z]+',
+                    dom, url)
+                if candidate == url:
+                    continue
+                tried += 1
+                html, _final = fetch(candidate, referer=candidate)
+                if html and "pass_md5" in html:
+                    working_html = html
+                    working_url = candidate
+                    break
+        if not working_html:
+            return None
+        m = re.search(r'\$\.get\(["\'](/pass_md5/[^"\']+)["\']', working_html)
+        if not m:
+            m = re.search(r'pass_md5/([^"\'.\s&]+)', working_html)
+            if m:
+                pass_path = "/pass_md5/" + m.group(1)
+            else:
+                return None
+        else:
+            pass_path = m.group(1)
+        parsed = urlparse(working_url)
+        dood_base = "{}://{}".format(parsed.scheme, parsed.netloc)
+        token_html, _ = fetch(dood_base + pass_path, referer=working_url)
+        if not token_html:
+            return None
+        chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        rand = "".join(random.choice(chars) for _ in range(10))
+        token = pass_path.split("/")[-1]
+        return "{}{}?token={}&expiry={}".format(
+            token_html.strip(), rand, token, int(time.time() * 1000)
+        )
+    except Exception:
+        pass
+    return None
+
+
+def resolve_vidbom(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        return find_m3u8(html) or find_mp4(html) or find_packed_links(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_uqload(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        m = re.search(r'sources:\s*\["([^"]+)"\]', html)
+        if m:
+            main = m.group(1)
+            variants = find_mp4_all(html) or find_m3u8_all(html)
+            _quality_tls.variants = variants if main in variants else ([main] + variants)
+            return main
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_govid(url):
+    try:
+        if '.m3u8' in url:
+            log("resolve_govid: direct m3u8 URL")
+            return url
+        html, _ = fetch(url, referer="https://faselhd.rip/")
+        if not html:
+            return None
+        m3u8 = find_m3u8(html)
+        if m3u8:
+            log("resolve_govid: found m3u8: {}".format(m3u8[:80]))
+            return m3u8
+        return find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_upstream(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_mixdrop(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        log("Mixdrop fetched {} bytes, MDCore present: {}".format(len(html), "MDCore" in html))
+        m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', html)
+        if m:
+            link = m.group(1)
+            if link.startswith("//"):
+                link = "https:" + link
+            return link + "|Referer=https://mixdrop.to/"
+        for txt in _unpack_all(html):
+            m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', txt)
+            if m:
+                link = m.group(1)
+                if link.startswith("//"):
+                    link = "https:" + link
+                return link + "|Referer=https://mixdrop.to/"
+    except Exception:
+        pass
+    return None
+
+
+def resolve_voe(url):
+    try:
+        html, final = fetch(url, referer="https://voe.sx/")
+        if not html:
+            return None
+
+        for pat in [
+            r"'hls'\s*:\s*'([^']+)'",
+            r'"hls"\s*:\s*"([^"]+)"',
+            r"sources\s*=\s*\[{[^}]*file\s*:\s*'([^']+)'",
+            r'"file"\s*:\s*"([^"]+\.m3u8[^"]*)"',
+            r'(https?://[^\s"\']+\.cloudwindow-route\.com[^\s"\']+\.m3u8[^\s"\']*)',
+        ]:
+            m = re.search(pat, html, re.I)
+            if m:
+                stream_url = m.group(1).replace("\\/", "/")
+                if stream_url.startswith("//"):
+                    stream_url = "https:" + stream_url
+                if "cloudwindow-route.com" in stream_url:
+                    log("resolve_voe: Found cloudwindow-route.com stream: {}".format(stream_url[:80]))
+                    return stream_url
+                if ".m3u8" in stream_url:
+                    log("resolve_voe: Found m3u8 stream: {}".format(stream_url[:80]))
+                    return stream_url
+
+        for enc in re.finditer(r'atob\([\'"]([A-Za-z0-9+/=]+)[\'"]\)', html):
+            try:
+                dec = base64.b64decode(enc.group(1) + "==").decode("utf-8", errors="ignore")
+                mm = re.search(r'(https?://[^\s\'"<>]+\.(?:m3u8|txt|woff2)[^\s\'"<>]*)', dec)
+                if mm:
+                    stream_url = _correct_stream_url(mm.group(1))
+                    if "cloudwindow-route.com" in stream_url:
+                        log("resolve_voe: Found cloudwindow-route.com in base64: {}".format(stream_url[:80]))
+                        return stream_url
+                    if ".m3u8" in stream_url:
+                        log("resolve_voe: Found m3u8 in base64: {}".format(stream_url[:80]))
+                        return stream_url
+            except Exception:
+                pass
+
+        for txt in _unpack_all(html):
+            cloud_match = re.search(r'(https?://[^\s"\']+\.cloudwindow-route\.com[^\s"\']+\.m3u8[^\s"\']*)', txt, re.I)
+            if cloud_match:
+                stream_url = cloud_match.group(1).replace("\\/", "/")
+                log("resolve_voe: Found cloudwindow-route.com in unpacked JS: {}".format(stream_url[:80]))
+                return stream_url
+
+            m3u8_match = re.search(r'(https?://[^\s"\']+\.m3u8[^\s"\']*)', txt, re.I)
+            if m3u8_match:
+                stream_url = m3u8_match.group(1).replace("\\/", "/")
+                if _is_placeholder_media_url(stream_url):
+                    continue
+                log("resolve_voe: Found m3u8 in unpacked JS: {}".format(stream_url[:80]))
+                return stream_url
+
+        js_redirect = _find_js_redirect(html)
+        if js_redirect:
+            log("resolve_voe: Following JS redirect to {}".format(js_redirect[:100]))
+            h2, final2 = fetch(js_redirect, referer="https://voe.sx/")
+            if h2:
+                cloud_match = re.search(r'(https?://[^\s"\']+\.cloudwindow-route\.com[^\s"\']+\.m3u8[^\s"\']*)', h2, re.I)
+                if cloud_match:
+                    stream_url = cloud_match.group(1).replace("\\/", "/")
+                    log("resolve_voe: Found cloudwindow-route.com after redirect: {}".format(stream_url[:80]))
+                    return stream_url
+
+                m3u8_match = find_m3u8(h2) or find_mp4(h2)
+                if m3u8_match and not _is_placeholder_media_url(m3u8_match):
+                    log("resolve_voe: Found stream after redirect: {}".format(m3u8_match[:80]))
+                    return m3u8_match
+
+                for txt in _unpack_all(h2):
+                    cloud_match = re.search(r'(https?://[^\s"\']+\.cloudwindow-route\.com[^\s"\']+\.m3u8[^\s"\']*)', txt, re.I)
+                    if cloud_match:
+                        stream_url = cloud_match.group(1).replace("\\/", "/")
+                        log("resolve_voe: Found cloudwindow-route.com in redirect unpacked JS: {}".format(stream_url[:80]))
+                        return stream_url
+
+        for embed_url in extract_iframes(html, js_redirect or url):
+            if not embed_url.startswith('http') or 'voe.sx' in embed_url:
+                continue
+            log("resolve_voe: Found wrapped embed iframe: {}".format(embed_url))
+            result = resolve_host(embed_url)
+            if result and not _is_placeholder_media_url(result):
+                return result
+
+        video_match = re.search(r'<video[^>]+src=["\']([^"\']+\.m3u8[^"\']*)["\']', html, re.I)
+        if video_match:
+            stream_url = video_match.group(1)
+            log("resolve_voe: Found video element stream: {}".format(stream_url[:80]))
+            return stream_url
+
+        direct = find_m3u8(html) or find_mp4(html)
+        if direct and not _is_placeholder_media_url(direct):
+            return direct
+
+        return None
+    except Exception as e:
+        log("resolve_voe error: {}".format(e))
+        return None
+
+
+def _parse_hls_master_variants(playlist_url, body):
+    """
+    Parse an HLS master playlist's #EXT-X-STREAM-INF lines into
+    (label, absolute_url) tuples, ordered highest quality first.
+    """
+    if not body or "#EXT-X-STREAM-INF" not in body:
+        return []
+    variants = []
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith("#EXT-X-STREAM-INF"):
+            continue
+        target = ""
+        for j in range(i + 1, len(lines)):
+            candidate = lines[j].strip()
+            if candidate and not candidate.startswith("#"):
+                target = candidate
+                break
+        if not target:
+            continue
+        if target.startswith("//"):
+            target = "https:" + target
+        elif not target.startswith("http"):
+            target = urljoin(playlist_url, target)
+
+        res_m = re.search(r'RESOLUTION=\d+x(\d+)', line)
+        if res_m:
+            h = int(res_m.group(1))
+            label = "{}p".format(h)
+        else:
+            bw_m = re.search(r'BANDWIDTH=(\d+)', line)
+            label = "Quality {}".format(len(variants) + 1) if not bw_m else "{}kbps".format(int(bw_m.group(1)) // 1000)
+        variants.append((label, _correct_stream_url(target)))
+
+    order = {"2160p": 0, "1440p": 1, "1080p": 2, "720p": 3, "480p": 4, "360p": 5, "240p": 6}
+    variants.sort(key=lambda v: order.get(v[0], 50))
+    return variants
+
+
+def resolve_streamruby(url):
+    try:
+        log("resolve_streamruby: Processing {}...".format(url[:100]))
+
+        url = url.split('|')[0].strip()
+
+        if '.m3u8' in url and 't=' in url and 's=' in url:
+            log("resolve_streamruby: Direct stream URL with tokens")
+            return _correct_stream_url(url)
+
+        referers = [
+            "https://egydead.live/",
+            "https://tv10.egydead.live/",
+            "https://www.egydead.live/",
+            "https://egydead.com/",
+            "https://tv.egydead.live/",
+        ]
+
+        def _maybe_expand_master(stream_url, referer_for_fetch):
+            """If stream_url is an HLS master (multi-variant) playlist,
+            fetch and parse it, stash the real variants in the
+            thread-local so get_last_quality_variants() works downstream,
+            and return the single best-quality variant URL instead of
+            the master URL itself."""
+            try:
+                body, _ = fetch(stream_url, referer=referer_for_fetch)
+            except Exception:
+                body = None
+            if not body or "#EXT-X-STREAM-INF" not in body:
+                return stream_url
+            variants = _parse_hls_master_variants(stream_url, body)
+            if not variants:
+                return stream_url
+            _quality_tls.variants = [u for _, u in variants]
+            log("resolve_streamruby: expanded master playlist into {} variant(s)".format(len(variants)))
+            return variants[0][1]
+
+        for referer in referers:
+            try:
+                log("resolve_streamruby: Trying with referer: {}".format(referer))
+
+                headers = {
+                    "Referer": referer,
+                    "Origin": referer.rstrip('/'),
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "cross-site",
+                    "User-Agent": UA,
+                    "Accept": "*/*",
+                    "Accept-Language": "ar-EG,ar;q=0.9,en;q=0.8",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                }
+
+                html, final_url = fetch(url, referer=referer, extra_headers=headers)
+
+                if not html:
+                    log("resolve_streamruby: No HTML received")
+                    continue
+
+                streamruby_patterns = [
+                    # FIX: real master URLs look like "..._,l,n,h,o,.urlset/master.m3u8"
+                    # (leading AND trailing comma around the quality list) - the old
+                    # pattern required a bare l/n/h/o immediately after '_' with no
+                    # leading comma, so it could never match real traffic.
+                    r'(https?://[^\s"\']+streamruby\.net[^\s"\']+_,(?:l,|n,|h,|o,)*\.urlset/[^\s"\']+\.m3u8[^\s"\']*)',
+                    r'(https?://[^\s"\']+\.streamruby\.net[^\s"\']+\.m3u8[^\s"\']*)',
+                    r'(https?://[^\s"\']+\.streamruby\.net[^\s"\']+\.txt[^\s"\']*)',
+                ]
+
+                for pattern in streamruby_patterns:
+                    matches = re.findall(pattern, html, re.I)
+                    for stream_url in matches:
+                        stream_url = stream_url.replace("\\/", "/").replace("&amp;", "&").strip()
+                        if _is_placeholder_media_url(stream_url):
+                            continue
+                        stream_url = _correct_stream_url(stream_url)
+                        if "t=" in stream_url and "s=" in stream_url:
+                            log("resolve_streamruby: Found stream URL with tokens: {}...".format(stream_url[:100]))
+                            return _maybe_expand_master(stream_url, referer)
+
+                patterns = [
+                    r'"(https?://[^\s"\']+\.(?:m3u8|txt|woff2)[^\s"\']*)"',
+                    r"'(https?://[^\s\"']+\.(?:m3u8|txt|woff2)[^\s\"']*)'",
+                    r'(https?://[^\s"\'<>]+\.(?:m3u8|txt|woff2)[^\s"\'<>]*)',
+                    r'file:\s*["\']([^"\']+\.(?:m3u8|txt|woff2)[^"\']*)["\']',
+                    r'source:\s*["\']([^"\']+\.(?:m3u8|txt|woff2)[^"\']*)["\']',
+                    r'hls\.loadSource\(["\']([^"\']+)["\']',
+                    r'"url"\s*:\s*"([^"]+\.(?:m3u8|txt|woff2)[^"]*)"',
+                ]
+
+                for pattern in patterns:
+                    matches = re.findall(pattern, html, re.I)
+                    for stream_url in matches:
+                        stream_url = stream_url.replace("\\/", "/").replace("&amp;", "&").strip()
+                        if _is_placeholder_media_url(stream_url):
+                            continue
+                        stream_url = _correct_stream_url(stream_url)
+                        if "t=" in stream_url and "s=" in stream_url:
+                            log("resolve_streamruby: Found stream URL: {}...".format(stream_url[:100]))
+                            return _maybe_expand_master(stream_url, referer)
+
+                for txt in _unpack_all(html):
+                    for pattern in patterns:
+                        matches = re.findall(pattern, txt, re.I)
+                        for stream_url in matches:
+                            stream_url = stream_url.replace("\\/", "/").replace("&amp;", "&").strip()
+                            if _is_placeholder_media_url(stream_url):
+                                continue
+                            stream_url = _correct_stream_url(stream_url)
+                            if "t=" in stream_url and "s=" in stream_url:
+                                log("resolve_streamruby: Found stream URL in unpacked JS: {}...".format(stream_url[:100]))
+                                return _maybe_expand_master(stream_url, referer)
+
+            except Exception as e:
+                log("resolve_streamruby: Error with referer {}: {}".format(referer, e))
+                continue
+
+        log("resolve_streamruby: No stream found, trying to construct from original URL")
+        if 'streamruby.net' in url and 'master.m3u8' in url:
+            variant_url = url.replace('_,l,n,h,o,.urlset/', '_o/')
+            if variant_url != url:
+                log("resolve_streamruby: Constructed variant URL: {}".format(variant_url[:100]))
+                return _correct_stream_url(variant_url)
+
+        log("resolve_streamruby: No stream URL found")
+        return None
+
+    except Exception as e:
+        log("resolve_streamruby error: {}".format(e))
+        return None
+
+
+def _resolve_with_retry(resolver_func, url, max_retries=3, delay=2):
+    """
+    Generic retry helper for resolvers.
+    """
+    for attempt in range(max_retries):
+        try:
+            log("_resolve_with_retry: Trying {} (attempt {}/{})".format(
+                resolver_func.__name__, attempt + 1, max_retries))
+            result = resolver_func(url)
+            if result:
+                log("_resolve_with_retry: {} succeeded".format(resolver_func.__name__))
+                return result
+            if attempt < max_retries - 1:
+                log("_resolve_with_retry: {} failed, retrying in {}s".format(
+                    resolver_func.__name__, delay))
+                time.sleep(delay)
+        except Exception as e:
+            log("_resolve_with_retry: {} error: {}".format(resolver_func.__name__, e))
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+    return None
+
+
+def _find_js_redirect(html):
+    if not html:
+        return None
+    m = re.search(r'(?:top\.|window\.)?location(?:\.href)?\s*(?:=|\.replace\()\s*["\']([^"\']+)["\']', html, re.I)
+    if not m:
+        return None
+    url = m.group(1).replace("\\/", "/")
+    if url.startswith("//"):
+        url = "https:" + url
+    if url.startswith("http"):
+        return url
+    return None
+
+
+def resolve_hanerix_style(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        res = find_m3u8(html) or find_mp4(html)
+        if res:
+            return res
+        all_variants = []
+        best = None
+        for txt in _unpack_all(html):
+            m3u8s = find_m3u8_all(txt)
+            mp4s = find_mp4_all(txt)
+            found = m3u8s or mp4s
+            if found:
+                if best is None:
+                    best = found[0]
+                for u in found:
+                    if u not in all_variants:
+                        all_variants.append(u)
+        if best:
+            _quality_tls.variants = all_variants
+            return best
+        return _best_media_url(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_vinovo(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        m = re.search(r'<video\b[^>]*\bsrc=(["\'])(https?://[^"\']+)\1', html, re.I)
+        if m:
+            return m.group(2)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_vidaraa(url):
+    """
+    Resolver for vidaraa.cc: the embed page POSTs to
+    https://vidaraa.cc/api/stream and gets back JSON with a
+    "streaming_url" field pointing at the real HLS master playlist.
+    """
+    try:
+        m = re.search(r'/e/([A-Za-z0-9]+)', url)
+        file_code = m.group(1) if m else ""
+        if not file_code:
+            return None
+        api_url = "https://vidaraa.cc/api/stream"
+        headers = {
+            "Referer": url,
+            "Origin": "https://vidaraa.cc",
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        body, _ = fetch(api_url, referer=url, extra_headers=headers,
+                        post_data={"filecode": file_code})
+        if not body:
+            return None
+        try:
+            data = json.loads(body)
+        except Exception:
+            return _best_media_url(body)
+        stream_url = data.get("streaming_url") or data.get("stream_url") or ""
+        if stream_url:
+            return _correct_stream_url(stream_url.replace("\\/", "/"))
+        return None
+    except Exception as e:
+        log("resolve_vidaraa error: {}".format(e))
+        return None
+
+
+def resolve_hgcloud(url):
+    try:
+        html, final_url = fetch(url, referer="https://hgcloud.to/")
+        if not html:
+            return None
+        iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+masukestin\.com[^"\']+)["\']', html, re.I)
+        if iframe_match:
+            embed_url = iframe_match.group(1)
+            log("hgcloud: Found masukestin embed: {}".format(embed_url))
+            result = resolve_host(embed_url)
+            if result:
+                return result
+        meta_refresh = re.search(r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\']\d+;\s*url=([^"\']+)["\']', html, re.I)
+        if meta_refresh:
+            redirect_url = meta_refresh.group(1)
+            if "masukestin" in redirect_url:
+                log("hgcloud: Redirecting to masukestin: {}".format(redirect_url))
+                result = resolve_host(redirect_url)
+                if result:
+                    return result
+        if "masukestin" in html:
+            masukestin_urls = re.findall(r'(https?://masukestin\.com/[^\s"\']+)', html)
+            for masukestin_url in masukestin_urls:
+                log("hgcloud: Found masukestin URL: {}".format(masukestin_url))
+                result = resolve_host(masukestin_url)
+                if result:
+                    return result
+        # real hgcloud.to traffic redirects to vibuxer.com using a
+        # "/dl?op=view&file_code=...&hash=..." path shape — dedicated scan
+        # so this doesn't silently fall through to the two fallback loops.
+        if "vibuxer.com" in html:
+            vibuxer_urls = re.findall(r'(https?://vibuxer\.com/[^\s"\']+)', html)
+            for vibuxer_url in vibuxer_urls:
+                vibuxer_url = vibuxer_url.replace("&amp;", "&")
+                log("hgcloud: Found vibuxer.com URL: {}".format(vibuxer_url))
+                result = resolve_host(vibuxer_url)
+                if result:
+                    return result
+        for embed_url in extract_iframes(html, final_url or url):
+            if not embed_url.startswith('http') or 'hgcloud.to' in embed_url or 'masukestin.com' in embed_url:
+                continue
+            log("hgcloud: Found non-masukestin embed iframe: {}".format(embed_url))
+            result = resolve_host(embed_url)
+            if result:
+                return result
+        for embed_url in re.findall(r'(https?://[a-z0-9.-]+\.[a-z]{2,}/(?:[ev]/[a-zA-Z0-9]+|dl\?op=view[^\s"\']+))', html, re.I):
+            embed_url = embed_url.replace("&amp;", "&")
+            if 'hgcloud.to' in embed_url or 'masukestin.com' in embed_url:
+                continue
+            log("hgcloud: Found non-masukestin embed URL in page script: {}".format(embed_url))
+            result = resolve_host(embed_url)
+            if result:
+                return result
+        js_redirect = _find_js_redirect(html)
+        if js_redirect and "hgcloud.to" not in js_redirect:
+            log("hgcloud: Following JS redirect: {}".format(js_redirect))
+            result = resolve_host(js_redirect)
+            if result:
+                return result
+            h2, final2 = fetch(js_redirect, referer=url)
+            if h2:
+                best = _best_media_url(h2)
+                if best:
+                    return best
+                for txt in _unpack_all(h2):
+                    best = _best_media_url(txt)
+                    if best:
+                        return best
+        return None
+    except Exception as e:
+        log("resolve_hgcloud error: {}".format(e))
+        return None
+
+
+def resolve_vidtube(url):
+    try:
+        html, _ = fetch(url, referer="https://topcinema.fan/")
+        if not html or "restricted for this domain" in html.lower():
+            # FIX: different referer, not an identical re-request
+            html, _ = fetch(url, referer="https://topcinemaa.top/")
+        if not html:
+            return None
+        best = _best_media_url(html)
+        if best:
+            return best
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+    except Exception:
+        pass
+    return None
+
+
+def resolve_masukestin(url):
+    try:
+        html, final_url = fetch(url, referer="https://masukestin.com/")
+        if not html:
+            return None
+        stream_patterns = [
+            r'(https?://masukestin\.com/stream/[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)',
+            r'(https?://masukestin\.com/stream/[^\s"\']+)',
+            r'streamUrl\s*:\s*["\']([^"\']+)["\']',
+            r'videoUrl\s*:\s*["\']([^"\']+)["\']',
+            r'src:\s*["\']([^"\']+\.(?:m3u8|txt)[^"\']*)["\']',
+            r'file:\s*["\']([^"\']+\.(?:m3u8|txt)[^"\']*)["\']',
+        ]
+        for pattern in stream_patterns:
+            match = re.search(pattern, html, re.I)
+            if match:
+                stream_url = match.group(1)
+                stream_url = stream_url.replace("\\/", "/").replace("&amp;", "&")
+                if stream_url.startswith("//"):
+                    stream_url = "https:" + stream_url
+                stream_url = _correct_stream_url(stream_url)
+                if ".m3u8" in stream_url:
+                    log("masukestin: Found m3u8 stream: {}".format(stream_url[:80]))
+                    return stream_url
+        script_tags = re.findall(r'<script[^>]*>(.*?)</script>', html, re.S | re.I)
+        for script in script_tags:
+            for pattern in stream_patterns:
+                match = re.search(pattern, script, re.I)
+                if match:
+                    stream_url = match.group(1)
+                    stream_url = _correct_stream_url(stream_url)
+                    if ".m3u8" in stream_url:
+                        log("masukestin: Found m3u8 in script: {}".format(stream_url[:80]))
+                        return stream_url
+        b64_patterns = [
+            r'atob\(["\']([A-Za-z0-9+/=]+)["\']\)',
+            r'Base64\.decode\(["\']([A-Za-z0-9+/=]+)["\']\)',
+        ]
+        for pattern in b64_patterns:
+            for match in re.findall(pattern, html):
+                try:
+                    decoded = base64.b64decode(match).decode('utf-8')
+                    stream_match = re.search(r'(https?://masukestin\.com/stream/[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', decoded)
+                    if stream_match:
+                        stream_url = _correct_stream_url(stream_match.group(1))
+                        log("masukestin: Found m3u8 in base64: {}".format(stream_url[:80]))
+                        return stream_url
+                except Exception:
+                    pass
+        log("masukestin: No stream URL found")
+        return None
+    except Exception as e:
+        log("resolve_masukestin error: {}".format(e))
+        return None
+
+
+def resolve_streamwish(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        best = _best_media_url(html)
+        if best:
+            return best
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_filemoon(url):
+    try:
+        html, _ = fetch(url, referer="https://filemoon.sx/")
+        if not html:
+            return None
+        best = _best_media_url(html)
+        if best:
+            return best
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+        for b64 in re.findall(r'atob\(["\']([A-Za-z0-9+/=]{40,})["\']\)', html, re.I):
+            try:
+                dec = base64.b64decode(b64 + "==").decode("utf-8", "ignore")
+                best = _best_media_url(dec)
+                if best:
+                    return best
+            except Exception:
+                pass
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_lulustream(url):
+    try:
+        html, _ = fetch(url, referer="https://1fo1ndyf09qz.tnmr.org",
+                        extra_headers={"Origin": "https://lulustream.com"})
+        if not html:
+            html, _ = fetch(url, referer="https://lulustream.com/")
+        if not html:
+            return None
+        best = _best_media_url(html)
+        if best:
+            return best
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_okru(url):
+    try:
+        m = re.search(r'ok\.ru/(?:video(?:embed)?/|videoembed/)(\d+)', url)
+        if not m:
+            m = re.search(r'/(\d{10,})', url)
+        if not m:
+            return None
+        video_id = m.group(1)
+        api_url = "https://ok.ru/dk/video.playJSON?movieId={}".format(video_id)
+        mobile_ua = ("Mozilla/5.0 (iPad; U; CPU OS 3_2 like Mac OS X; en-us) "
+                     "AppleWebKit/531.21.10 (KHTML, like Gecko) "
+                     "Version/4.0.4 Mobile/7B334b Safari/531.21.10")
+        body, _ = fetch(api_url,
+                        referer=url,
+                        extra_headers={
+                            "User-Agent": mobile_ua,
+                            "Accept": "application/json",
+                        })
+        if body:
+            try:
+                data = json.loads(body)
+                hls = data.get("hlsManifestUrl", "")
+                if hls:
+                    return _correct_stream_url(hls.replace("\\u0026", "&").replace("\\/", "/"))
+                for vid in (data.get("videos") or []):
+                    u = vid.get("url") or ""
+                    if u.startswith("http"):
+                        return u.replace("\\u0026", "&").replace("\\/", "/")
+            except Exception:
+                pass
+        embed_url = "https://ok.ru/videoembed/{}".format(video_id)
+        html, _ = fetch(embed_url, referer="https://ok.ru/",
+                        extra_headers={"User-Agent": mobile_ua})
+        if html:
+            best = _best_media_url(html)
+            if best:
+                return best
+            m2 = re.search(r'"hlsManifestUrl"\s*:\s*"([^"]+)"', html)
+            if m2:
+                return _correct_stream_url(m2.group(1).replace("\\u0026", "&").replace("\\/", "/"))
+    except Exception:
+        pass
+    return None
+
+
+def resolve_vidguard(url):
+    try:
+        html, _ = fetch(url, referer="https://vidguard.to/")
+        if not html:
+            return None
+        for pat in [
+            r'stream_url\s*=\s*["\']([^"\']+)["\']',
+            r'"(?:file|src|url)"\s*:\s*"([^"]+\.(?:m3u8|txt)[^"]*)"',
+            r"'(?:file|src|url)'\s*:\s*'([^']+\.(?:m3u8|txt)[^']*)'",
+        ]:
+            m = re.search(pat, html, re.I)
+            if m:
+                u = m.group(1).replace("\\/", "/").replace("\\u0026", "&")
+                return _correct_stream_url(u)
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+        for b64 in re.findall(r'atob\(["\']([A-Za-z0-9+/=]{40,})["\']\)', html, re.I):
+            try:
+                dec = base64.b64decode(b64 + "==").decode("utf-8", "ignore")
+                best = _best_media_url(dec)
+                if best:
+                    return best
+            except Exception:
+                pass
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        pass
+    return None
+
+
+def resolve_fastvid(url):
+    try:
+        html, final_url = fetch(url, referer="https://fastvid.cam/")
+        if not html:
+            return None
+        patterns = [
+            r'(https?://[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)',
+            r'"(https?://[^"]+\.(?:m3u8|txt)[^"]+)"',
+            r"'(https?://[^']+\.(?:m3u8|txt)[^']+)'",
+            r'stream/([^\s"\']+\.(?:m3u8|txt))',
+        ]
+        found_urls = []
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for match in matches:
+                if match.startswith('/'):
+                    parsed = urlparse(final_url or url)
+                    full_url = "{}://{}{}".format(parsed.scheme, parsed.netloc, match)
+                    found_urls.append(full_url)
+                elif match.startswith('http'):
+                    found_urls.append(match)
+        for u in found_urls:
+            u = _correct_stream_url(u)
+            if 'master.m3u8' in u:
+                log("resolve_fastvid: found master.m3u8: {}".format(u))
+                return u
+        for u in found_urls:
+            u = _correct_stream_url(u)
+            if 'index-f2' in u:
+                log("resolve_fastvid: found 720p stream: {}".format(u))
+                return u
+        for u in found_urls:
+            u = _correct_stream_url(u)
+            if 'index-f1' in u:
+                log("resolve_fastvid: found 480p stream: {}".format(u))
+                return u
+        for u in found_urls:
+            u = _correct_stream_url(u)
+            if '.m3u8' in u:
+                log("resolve_fastvid: found m3u8: {}".format(u))
+                return u
+        jw_pattern = r'file:\s*["\']([^"\']+\.(?:m3u8|txt)[^"\']*)["\']'
+        match = re.search(jw_pattern, html, re.I)
+        if match:
+            stream_url = match.group(1)
+            if stream_url.startswith('/'):
+                parsed = urlparse(final_url or url)
+                stream_url = "{}://{}{}".format(parsed.scheme, parsed.netloc, stream_url)
+            stream_url = _correct_stream_url(stream_url)
+            log("resolve_fastvid: found JWPlayer stream: {}".format(stream_url))
+            return stream_url
+        return None
+    except Exception as e:
+        log("resolve_fastvid error: {}".format(e))
+        return None
+
+
+def resolve_rpmvip(url):
+    if '.m3u8' in url or '.txt' in url:
+        return _correct_stream_url(url)
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return url if '.m3u8' in url else None
+
+
+def resolve_upshare(url):
+    if '.m3u8' in url or '.txt' in url:
+        return _correct_stream_url(url)
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return url if '.m3u8' in url else None
+
+
+def resolve_cleantechworld(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        if "#EXTM3U" in html:
+            return url
+        m = re.search(r'(https?://[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', html)
+        if m:
+            return _correct_stream_url(m.group(1))
+        return None
+    except Exception as e:
+        log("resolve_cleantechworld error: {}".format(e))
+        return None
+
+
+def resolve_scdns(url):
+    try:
+        if '.m3u8' in url or '.txt' in url:
+            log("resolve_scdns: direct stream URL")
+            return _correct_stream_url(url)
+        html, final_url = fetch(url, referer="https://www.fasel-hd.cam/")
+        if html:
+            m3u8_patterns = [
+                r'(https?://[^\s"\']+\.scdns\.io[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)',
+                r'(https?://[^\s"\']+\.c\.scdns\.io[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)',
+                r'(https?://master\.[^\s"\']+\.scdns\.io[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)',
+                r'(https?://r[0-9]+--[^\s"\']+\.c\.scdns\.io[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)',
+            ]
+            for pattern in m3u8_patterns:
+                matches = re.findall(pattern, html, re.I)
+                for stream_url in matches:
+                    stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                    if 'hd1080' in stream_url or '1080' in stream_url:
+                        log("resolve_scdns: found 1080p stream")
+                        return stream_url
+                    elif 'hd720' in stream_url or '720' in stream_url:
+                        log("resolve_scdns: found 720p stream")
+                        return stream_url
+            stream = find_m3u8(html)
+            if stream:
+                log("resolve_scdns: found m3u8 via generic finder")
+                return stream
+        return None
+    except Exception as e:
+        log("resolve_scdns error: {}".format(e))
+        return None
+
+
+def resolve_datahowa(url):
+    try:
+        log("resolve_datahowa: processing {}".format(url[:80]))
+        if '.ts' in url:
+            base_m3u8 = re.sub(r'/seg_[0-9]+\.ts.*$', '/playlist.m3u8', url)
+            if base_m3u8 != url:
+                log("resolve_datahowa: converting segment to playlist: {}".format(base_m3u8[:80]))
+                return base_m3u8
+        if '.m3u8' in url or '.txt' in url:
+            return _correct_stream_url(url)
+        html, _ = fetch(url, referer="https://faselhd.rip/")
+        if html:
+            m3u8 = find_m3u8(html)
+            if m3u8:
+                return m3u8
+        return None
+    except Exception as e:
+        log("resolve_datahowa error: {}".format(e))
+        return None
+
+
+def resolve_downet(url):
+    try:
+        log("resolve_downet: processing {}".format(url[:80]))
+        if '.mp4' in url or '.m3u8' in url or '.txt' in url:
+            return _correct_stream_url(url)
+        html, _ = fetch(url, referer="https://akwam.com.co/")
+        if html:
+            mp4 = find_mp4(html) or find_m3u8(html)
+            if mp4:
+                return mp4
+        return None
+    except Exception as e:
+        log("resolve_downet error: {}".format(e))
+        return None
+
+
+def resolve_tnmr(url):
+    try:
+        if '.m3u8' in url or '.txt' in url:
+            log("resolve_tnmr: direct stream URL, returning as-is")
+            return _correct_stream_url(url)
+        html, _ = fetch(url, referer="https://wecima.cx/")
+        if not html:
+            return None
+        m = re.search(r'(https?://[^\s"\']+\.tnmr\.org[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', html)
+        if m:
+            return _correct_stream_url(m.group(1))
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return None
+
+
+def resolve_mxcontent(url):
+    try:
+        if '.mp4' in url:
+            return url
+        html, _ = fetch(url, referer="https://wecima.cx/")
+        if html:
+            return find_mp4(html)
+    except Exception:
+        return None
+
+
+def resolve_delucloud(url):
+    try:
+        if '.m3u8' in url or '.txt' in url:
+            log("resolve_delucloud: direct stream URL, returning as-is")
+            return _correct_stream_url(url)
+        html, _ = fetch(url, referer="https://wecima.cx/")
+        if not html:
+            return None
+        m = re.search(r'(https?://[^\s"\']+\.delucloud\.xyz[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', html)
+        if m:
+            return _correct_stream_url(m.group(1))
+        return find_m3u8(html)
+    except Exception:
+        return None
+
+
+def resolve_savefiles(url):
+    try:
+        if '.m3u8' in url or '.txt' in url:
+            log("resolve_savefiles: direct stream URL, returning as-is")
+            return _correct_stream_url(url)
+
+        # savefiles.com/e/{code} never embeds the stream URL statically —
+        # the page's xupload.js POSTs to {base}/dl with op=embed... and
+        # gets back JSON (sources[0].file) with the real master.m3u8.
+        m_code = re.search(r'/e/([A-Za-z0-9]+)', url)
+        file_code = m_code.group(1) if m_code else ""
+        if file_code:
+            try:
+                base_m = re.match(r'(https?://[^/]+)', url)
+                base = base_m.group(1) if base_m else "https://savefiles.com"
+            except Exception:
+                base = "https://savefiles.com"
+
+            # Visit the embed page first so the session/CF cookies needed
+            # by /dl are present (fetch() shares a persistent cookie jar).
+            fetch(url, referer="https://wecima.cx/")
+
+            dl_url = base + "/dl"
+            headers = {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": base,
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            }
+            post_data = {
+                "op": "embed",
+                "file_code": file_code,
+                "auto": "1",
+                "referer": "",
+            }
+            dl_body, _ = fetch(dl_url, referer=url, extra_headers=headers, post_data=post_data)
+            if dl_body:
+                try:
+                    data = json.loads(dl_body)
+                    sources = data.get("sources") or []
+                    if sources and isinstance(sources, list):
+                        stream_url = sources[0].get("file", "")
+                        if stream_url:
+                            log("resolve_savefiles: got stream via /dl JSON: {}".format(stream_url[:100]))
+                            return _correct_stream_url(stream_url)
+                except Exception as e:
+                    log("resolve_savefiles: /dl JSON parse failed: {}".format(e))
+                m2 = re.search(r'(https?://s[0-9]+\.savefiles\.com[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', dl_body)
+                if m2:
+                    return _correct_stream_url(m2.group(1))
+
+        # Legacy fallback: static-HTML scan.
+        html, _ = fetch(url, referer="https://wecima.cx/")
+        if not html:
+            return None
+        m = re.search(r'(https?://s[0-9]+\.savefiles\.com[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', html)
+        if m:
+            return _correct_stream_url(m.group(1))
+        return find_m3u8(html)
+    except Exception:
+        return None
+
+
+def resolve_sprintcdn(url):
+    try:
+        if '.m3u8' in url or '.txt' in url:
+            log("resolve_sprintcdn: direct stream URL, returning as-is")
+            return _correct_stream_url(url)
+        html, _ = fetch(url, referer="https://wecima.cx/")
+        if not html:
+            return None
+        return find_m3u8(html)
+    except Exception:
+        return None
+
+
+def resolve_aurorafieldnetwork(url):
+    try:
+        html, _ = fetch(url, referer="https://wecima.cx/")
+        if not html:
+            return None
+        if '.txt' in url:
+            content, _ = fetch(url, referer="https://wecima.cx/")
+            if content:
+                m = re.search(r'(https?://[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', content)
+                if m:
+                    return _correct_stream_url(m.group(1))
+        return find_m3u8(html)
+    except Exception:
+        return None
+
+
+def resolve_abstream(url):
+    try:
+        html, _ = fetch(url, referer="https://abstream.to/")
+        if not html:
+            return None
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return None
+
+
+def resolve_byselapuix(url):
+    try:
+        html, _ = fetch(url, referer="https://byselapuix.com/")
+        if not html:
+            return None
+        best = _best_media_url(html)
+        if best:
+            return best
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return None
+
+
+def resolve_dhcplay(url):
+    return resolve_doodstream(url)
+
+
+def resolve_go_akwam(url):
+    try:
+        html, final_url = fetch(url, referer="https://akwam.com.co/")
+        if not html:
+            return None
+        source_match = re.search(r'<source[^>]+src="([^"]+\.(?:mp4|m3u8|txt)[^"]*)"', html, re.I)
+        if source_match:
+            return _correct_stream_url(source_match.group(1))
+        downet_match = re.search(r'(https?://s\d+\.downet\.net[^\s"\']+\.(?:mp4|m3u8|txt)[^\s"\']*)', html, re.I)
+        if downet_match:
+            return _correct_stream_url(downet_match.group(1))
+        meta_match = re.search(r'<meta[^>]+http-equiv="refresh"[^>]+content="\d+;\s*url=([^"]+)"', html, re.I)
+        if meta_match:
+            redirect_url = meta_match.group(1)
+            if redirect_url.startswith("//"):
+                redirect_url = "https:" + redirect_url
+            return resolve_host(redirect_url, referer=url)
+        iframe_match = re.search(r'<iframe[^>]+src="([^"]+)"[^>]*>', html, re.I)
+        if iframe_match:
+            iframe_url = iframe_match.group(1)
+            if iframe_url.startswith("//"):
+                iframe_url = "https:" + iframe_url
+            return resolve_host(iframe_url, referer=url)
+        return None
+    except Exception as e:
+        log("resolve_go_akwam error: {}".format(e))
+        return None
+
+
+def resolve_savefiles_akwam(url):
+    try:
+        html, _ = fetch(url, referer="https://savefiles.com/")
+        if not html:
+            return None
+        m = re.search(r'(https?://s[0-9]+\.savefiles\.com[^\s"\']+\.(?:m3u8|txt)[^\s"\']*)', html)
+        if m:
+            return _correct_stream_url(m.group(1))
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return None
+
+
+# ─── NEW: Stream resolvers from LINKS.txt ──────────────────────────────────
+
+def resolve_streamrk(url):
+    """Resolver for streamrk.site and similar CDN URLs"""
+    try:
+        log("resolve_streamrk: Processing {}".format(url[:100]))
+
+        if '.mp4' in url or '.m3u8' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://streamrk.site/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.hakunaymatata\.com[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+/convert-h264/[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+/bt/[^\s"\']+\.mp4[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_streamrk: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        stream = find_m3u8(html) or find_mp4(html)
+        if stream:
+            return stream
+
+        return None
+    except Exception as e:
+        log("resolve_streamrk error: {}".format(e))
+        return None
+
+
+def resolve_moviepire(url):
+    """Resolver for moviepire.co and hakunaymatata.com URLs"""
+    try:
+        log("resolve_moviepire: Processing {}".format(url[:100]))
+
+        if '.mp4' in url or '.m3u8' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://moviepire.co/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.hakunaymatata\.com[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+/convert-h264/[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+/bt/[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+/resource/[^\s"\']+\.mp4[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_moviepire: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        script_match = re.search(r'file\s*:\s*["\']([^"\']+\.mp4[^"\']*)["\']', html, re.I)
+        if script_match:
+            stream_url = _correct_stream_url(script_match.group(1))
+            if not _is_placeholder_media_url(stream_url):
+                log("resolve_moviepire: Found stream URL in script: {}".format(stream_url[:100]))
+                return stream_url
+
+        return find_mp4(html) or find_m3u8(html)
+    except Exception as e:
+        log("resolve_moviepire error: {}".format(e))
+        return None
+
+
+def resolve_polarcandy(url):
+    """Resolver for polarcandy.top and peakstorm.top URLs"""
+    try:
+        log("resolve_polarcandy: Processing {}".format(url[:100]))
+
+        if '.mp4' in url or '.m3u8' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://peakstorm.top/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.polarcandy\.top[^\s"\']+\.mp4[^\s"\']*)',
+            r'(https?://[^\s"\']+/vd/[^\s"\']+\.mp4[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_polarcandy: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_polarcandy error: {}".format(e))
+        return None
+
+
+def resolve_xpass(url):
+    """Resolver for xpass.top and 1x2.space URLs"""
+    try:
+        log("resolve_xpass: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://play.xpass.top/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.1x2\.space[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+/playlist/[^\s"\']+\.m3u8[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_xpass: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_xpass error: {}".format(e))
+        return None
+
+
+def resolve_scalablecontentengine(url):
+    """Resolver for scalablecontentengine.site URLs"""
+    try:
+        log("resolve_scalablecontentengine: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://nextgencloudfabric.com/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.scalablecontentengine\.site[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+/pl/[^\s"\']+\.m3u8[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_scalablecontentengine: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_scalablecontentengine error: {}".format(e))
+        return None
+
+
+def resolve_cloudorchestra(url):
+    """Resolver for cloudorchestranova.com and panoplypalaver.site URLs"""
+    try:
+        log("resolve_cloudorchestra: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://cloudorchestranova.com/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.panoplypalaver\.site[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+/pl/[^\s"\']+\.m3u8[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_cloudorchestra: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_cloudorchestra error: {}".format(e))
+        return None
+
+
+def resolve_viduki(url):
+    """Resolver for viduki.net and 1shows.app URLs"""
+    try:
+        log("resolve_viduki: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://viduki.net/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.1shows\.app[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+/e/[^\s"\']+\.m3u8[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_viduki: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_viduki error: {}".format(e))
+        return None
+
+
+def resolve_moviesapi(url):
+    """Resolver for moviesapi.to and netrocdn.site URLs"""
+    try:
+        log("resolve_moviesapi: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://moviesapi.to/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.netrocdn\.site[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+/hls2/[^\s"\']+\.m3u8[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_moviesapi: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_moviesapi error: {}".format(e))
+        return None
+
+
+def resolve_shows_st(url):
+    """Resolver for shows.st API URLs"""
+    try:
+        log("resolve_shows_st: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.ts' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://shows.st/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.shows\.st/api[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+\.shows\.st/api[^\s"\']+&seg=[^\s"\']+\.ts[^\s"\']*)',
+            r'(https?://[^\s"\']+/api\?[^\s"\']+&seg=[^\s"\']+\.ts[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_shows_st: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        master_match = re.search(r'(https?://[^\s"\']+\.shows\.st/api[^\s"\']+)', html, re.I)
+        if master_match:
+            master_url = master_match.group(1)
+            if 'seg=' not in master_url:
+                master_url += '&seg=index.m3u8'
+            log("resolve_shows_st: Constructed master URL: {}".format(master_url[:100]))
+            return master_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_shows_st error: {}".format(e))
+        return None
+
+
+def resolve_vaplayer(url):
+    """Resolver for vaplayer.ru URLs"""
+    try:
+        log("resolve_vaplayer: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        html, final_url = fetch(url, referer="https://vaplayer.ru/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\']+\.vaplayer\.ru[^\s"\']+\.m3u8[^\s"\']*)',
+            r'(https?://[^\s"\']+\.streamdata\.vaplayer\.ru[^\s"\']+\.m3u8[^\s"\']*)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_vaplayer: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        return find_m3u8(html) or find_mp4(html)
+    except Exception as e:
+        log("resolve_vaplayer error: {}".format(e))
+        return None
+
+
+# ─── SuperFlix API Resolver ─────────────────────────────────────────────────
+
+def resolve_superflixapi(url):
+    """
+    Resolver for superflixapi.buzz/sbs and similar players.
+    Extracts the video URL from the API response.
+    """
+    try:
+        log("resolve_superflixapi: Processing {}".format(url[:100]))
+
+        parsed = urlparse(url)
+        path_parts = parsed.path.strip('/').split('/')
+
+        content_type = path_parts[0] if len(path_parts) > 0 else None
+        content_id = path_parts[1] if len(path_parts) > 1 else None
+
+        if not content_id:
+            log("resolve_superflixapi: Could not parse content ID")
+            return None
+
+        html, final_url = fetch(url, referer="https://vidsrc.win/")
+        if not html:
+            log("resolve_superflixapi: Failed to fetch page")
+            return None
+
+        page_token_match = re.search(r'var PAGE_TOKEN\s*=\s*"([^"]+)"', html)
+        csrf_token_match = re.search(r'var CSRF_TOKEN\s*=\s*"([^"]+)"', html)
+        api_url_match = re.search(r'var API_URL_SOURCE\s*=\s*"([^"]+)"', html)
+        content_type_match = re.search(r'var CONTENT_TYPE\s*=\s*"([^"]+)"', html)
+        content_id_match = re.search(r'var INITIAL_CONTENT_ID\s*=\s*(\d+)', html)
+
+        page_token = page_token_match.group(1) if page_token_match else None
+        csrf_token = csrf_token_match.group(1) if csrf_token_match else None
+        api_source = api_url_match.group(1) if api_url_match else "/player/source"
+        ct = content_type_match.group(1) if content_type_match else "filme"
+        initial_id = content_id_match.group(1) if content_id_match else content_id
+
+        if not page_token:
+            log("resolve_superflixapi: No PAGE_TOKEN found")
+            return None
+
+        headers = {
+            "Referer": final_url or url,
+            "Origin": "https://" + parsed.netloc,
+            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": UA,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        }
+
+        if csrf_token:
+            headers["X-CSRF-TOKEN"] = csrf_token
+
+        api_url = "https://" + parsed.netloc + api_source
+
+        data = {
+            "video_id": initial_id,
+            "page_token": page_token,
+            "host": parsed.netloc,
+            "site": parsed.netloc,
+            "_token": csrf_token or "",
+            "type": ct,
+        }
+
+        log("resolve_superflixapi: Calling API: {}".format(api_url))
+        api_response, _ = fetch(api_url, referer=final_url, extra_headers=headers, post_data=data)
+
+        if not api_response:
+            return None
+
+        try:
+            result = json.loads(api_response)
+
+            if result and result.get('data') and result['data'].get('video_url'):
+                stream_url = result['data']['video_url']
+                log("resolve_superflixapi: Found video URL: {}".format(stream_url[:100]))
+                return _correct_stream_url(stream_url)
+
+            if result and result.get('video_url'):
+                stream_url = result['video_url']
+                log("resolve_superflixapi: Found video URL: {}".format(stream_url[:100]))
+                return _correct_stream_url(stream_url)
+
+        except Exception:
+            log("resolve_superflixapi: Not JSON, trying regex")
+            stream_url = find_m3u8(api_response) or find_mp4(api_response)
+            if stream_url:
+                log("resolve_superflixapi: Found stream URL in response: {}".format(stream_url[:100]))
+                return _correct_stream_url(stream_url)
+
+        for iframe_url in extract_iframes(html, final_url or url):
+            result = resolve_host(iframe_url)
+            if result:
+                return result
+
+        stream_url = find_m3u8(html) or find_mp4(html)
+        if stream_url:
+            return _correct_stream_url(stream_url)
+
+        return None
+
+    except Exception as e:
+        log("resolve_superflixapi error: {}".format(e))
+        return None
+
+
+# ─── ZXC Stream Resolver ─────────────────────────────────────────────────────
+
+def resolve_zxcstream(url):
+    """
+    Resolver for zxcstream.xyz and similar Next.js-based players.
+    Extracts the video URL from the React app's data.
+    """
+    try:
+        log("resolve_zxcstream: Processing {}".format(url[:100]))
+
+        parsed = urlparse(url)
+        path_parts = parsed.path.strip('/').split('/')
+
+        media_type = path_parts[1] if len(path_parts) > 1 else None
+        content_id = path_parts[2] if len(path_parts) > 2 else None
+
+        if not content_id:
+            log("resolve_zxcstream: Could not parse content ID")
+            return None
+
+        html, final_url = fetch(url, referer="https://vidsrc.win/")
+        if not html:
+            log("resolve_zxcstream: Failed to fetch page")
+            return None
+
+        next_data_match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+        if next_data_match:
+            try:
+                data = json.loads(next_data_match.group(1))
+
+                def find_streams(obj, path=""):
+                    if isinstance(obj, dict):
+                        for key, value in obj.items():
+                            if key in ['url', 'src', 'source', 'video', 'stream', 'playlist', 'file']:
+                                if isinstance(value, str) and ('.m3u8' in value or '.mp4' in value):
+                                    log("resolve_zxcstream: Found URL in Next.js data at {}: {}".format(path + '.' + key, value[:100]))
+                                    return value
+                            result = find_streams(value, path + '.' + key)
+                            if result:
+                                return result
+                    elif isinstance(obj, list):
+                        for i, item in enumerate(obj):
+                            result = find_streams(item, path + '[' + str(i) + ']')
+                            if result:
+                                return result
+                    return None
+
+                stream_url = find_streams(data)
+                if stream_url:
+                    return _correct_stream_url(stream_url)
+
+            except Exception:
+                log("resolve_zxcstream: Failed to parse __NEXT_DATA__")
+
+        video_match = re.search(r'<video[^>]*src=["\']([^"\']+)["\']', html, re.I)
+        if video_match:
+            stream_url = video_match.group(1)
+            log("resolve_zxcstream: Found video element: {}".format(stream_url[:100]))
+            return _correct_stream_url(stream_url)
+
+        stream_url = find_m3u8(html) or find_mp4(html)
+        if stream_url:
+            return _correct_stream_url(stream_url)
+
+        for iframe_url in extract_iframes(html, final_url or url):
+            result = resolve_host(iframe_url)
+            if result:
+                return result
+
+        return None
+
+    except Exception as e:
+        log("resolve_zxcstream error: {}".format(e))
+        return None
+
+
+def resolve_braflix(url):
+    """
+    Resolver for braflix.win and similar players.
+    """
+    try:
+        log("resolve_braflix: Processing {}".format(url[:100]))
+
+        html, final_url = fetch(url, referer="https://vidsrc.win/")
+        if not html:
+            return None
+
+        patterns = [
+            r'(https?://[^\s"\'<>]+\.(?:m3u8|mp4)[^\s"\'<>]*)',
+            r'"url"\s*:\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"',
+            r'"file"\s*:\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"',
+            r'"src"\s*:\s*"([^"]+\.(?:m3u8|mp4)[^"]*)"',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.I)
+            for stream_url in matches:
+                stream_url = _correct_stream_url(stream_url.replace('\\/', '/').replace('&amp;', '&'))
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_braflix: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        for iframe_url in extract_iframes(html, final_url or url):
+            result = resolve_host(iframe_url)
+            if result:
+                return result
+
+        return find_m3u8(html) or find_mp4(html)
+
+    except Exception as e:
+        log("resolve_braflix error: {}".format(e))
+        return None
+
+
+def resolve_vidcore(url):
+    """Resolver for vidcore.io and similar React-based players"""
+    try:
+        log("resolve_vidcore: Processing {}".format(url[:100]))
+
+        parsed = urlparse(url)
+        path_parts = parsed.path.strip('/').split('/')
+
+        media_type = path_parts[0] if len(path_parts) > 0 else None
+        media_id = path_parts[1] if len(path_parts) > 1 else None
+        season = path_parts[2] if len(path_parts) > 2 else None
+        episode = path_parts[3] if len(path_parts) > 3 else None
+
+        if not media_id:
+            log("resolve_vidcore: Could not parse media ID from URL")
+            return None
+
+        html, final_url = fetch(url, referer="https://vidsrc.win/")
+        if not html:
+            return None
+
+        token_match = re.search(r'"en":"([^"]+)"', html)
+        token = token_match.group(1) if token_match else None
+
+        api_match = re.search(r'(https?://[^\s"\']+\.vidcore\.io/api/[^\s"\']+)', html, re.I)
+        api_url = api_match.group(1) if api_match else None
+
+        if not api_url:
+            if media_type == 'tv':
+                api_url = "https://vidcore.io/api/play?id={}&type=tv&season={}&episode={}".format(media_id, season, episode)
+            else:
+                api_url = "https://vidcore.io/api/play?id={}&type=movie".format(media_id)
+
+        headers = {
+            "Referer": "https://vidcore.io/",
+            "Origin": "https://vidcore.io",
+            "User-Agent": UA,
+            "Accept": "application/json, text/plain, */*",
+        }
+
+        if token:
+            headers["Authorization"] = "Bearer {}".format(token)
+            api_url += "&token={}".format(token)
+
+        log("resolve_vidcore: Calling API: {}".format(api_url[:100]))
+        api_response, _ = fetch(api_url, referer="https://vidcore.io/", extra_headers=headers)
+
+        if not api_response:
+            return None
+
+        try:
+            data = json.loads(api_response)
+
+            stream_urls = []
+
+            if isinstance(data, dict):
+                for key in ['url', 'file', 'src', 'source', 'hls', 'playlist', 'stream', 'stream_url', 'video_url', 'm3u8']:
+                    if key in data and isinstance(data[key], str):
+                        if '.m3u8' in data[key] or '.mp4' in data[key]:
+                            stream_urls.append(data[key])
+
+                if 'sources' in data and isinstance(data['sources'], list):
+                    for source in data['sources']:
+                        if isinstance(source, dict):
+                            for key in ['url', 'file', 'src']:
+                                if key in source and isinstance(source[key], str):
+                                    if '.m3u8' in source[key] or '.mp4' in source[key]:
+                                        stream_urls.append(source[key])
+
+                if 'data' in data and isinstance(data['data'], dict):
+                    for key in ['url', 'file', 'src', 'source', 'hls', 'playlist', 'stream', 'stream_url', 'video_url']:
+                        if key in data['data'] and isinstance(data['data'][key], str):
+                            if '.m3u8' in data['data'][key] or '.mp4' in data['data'][key]:
+                                stream_urls.append(data['data'][key])
+
+                    if 'sources' in data['data'] and isinstance(data['data']['sources'], list):
+                        for source in data['data']['sources']:
+                            if isinstance(source, dict):
+                                for key in ['url', 'file', 'src']:
+                                    if key in source and isinstance(source[key], str):
+                                        if '.m3u8' in source[key] or '.mp4' in source[key]:
+                                            stream_urls.append(source[key])
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        for key in ['url', 'file', 'src', 'source']:
+                            if key in item and isinstance(item[key], str):
+                                if '.m3u8' in item[key] or '.mp4' in item[key]:
+                                    stream_urls.append(item[key])
+
+            if not stream_urls:
+                stream_urls = extract_stream_urls_from_text(api_response)
+
+            for stream_url in stream_urls:
+                stream_url = _correct_stream_url(stream_url)
+                if not _is_placeholder_media_url(stream_url):
+                    log("resolve_vidcore: Found stream URL: {}".format(stream_url[:100]))
+                    return stream_url
+
+        except Exception:
+            stream = find_m3u8(api_response) or find_mp4(api_response)
+            if stream:
+                return stream
+
+        stream = find_m3u8(html) or find_mp4(html)
+        if stream:
+            return stream
+
+        return None
+    except Exception as e:
+        log("resolve_vidcore error: {}".format(e))
+        return None
+
+
+# ─── Helper: Extract stream URLs from text (for API responses) ──────────────
+
+def extract_stream_urls_from_text(text):
+    """Extract stream URLs from text using regex patterns"""
+    if not text or not isinstance(text, str):
+        return []
+
+    urls = []
+    patterns = [
+        r'https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.ts[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+master\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+index-f[0-9]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/pl/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/hls2/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/hls/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/e/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/playlist/[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/api\?[^\s"\'<>]+&seg=[^\s"\'<>]+\.(?:m3u8|ts)[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.hakunaymatata\.com[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/convert-h264/[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/bt/[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/resource/[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.polarcandy\.top[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+/vd/[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.1x2\.space[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.scalablecontentengine\.site[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.panoplypalaver\.site[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.1shows\.app[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.netrocdn\.site[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.shows\.st[^\s"\'<>]+\.(?:m3u8|ts)[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.streamrk\.site[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.vaplayer\.ru[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.streamdata\.vaplayer\.ru[^\s"\'<>]+\.m3u8[^\s"\'<>]*',
+        r'https?://[^\s"\'<>]+\.moviepire\.co[^\s"\'<>]+\.mp4[^\s"\'<>]*',
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, text, re.I)
+        for match in matches:
+            url = match.replace('\\/', '/').replace('&amp;', '&').strip()
+            if url and url not in urls:
+                urls.append(url)
+
+    return urls
+
+
+# ─── Host dispatcher ──────────────────────────────────────────────────────────
+
+HOST_RESOLVERS = {
+    "streamtape":  resolve_streamtape,
+    "dood":        resolve_doodstream,
+    "dsvplay":     resolve_doodstream,
+    "d0o0d":       resolve_doodstream,
+    "doods":       resolve_doodstream,
+    "ds2play":     resolve_doodstream,
+    "dooood":      resolve_doodstream,
+    "playmogo":    resolve_doodstream,
+    "playmogo.com": resolve_doodstream,
+    "vidbom":      resolve_vidbom,
+    "vidshare":    resolve_vidbom,
+    "uqload":      resolve_uqload,
+    "govid":       resolve_govid,
+    "upstream":    resolve_upstream,
+    "mixdrop":     resolve_mixdrop,
+    "miixdrop":    resolve_mixdrop,
+    "miixdrop.top": resolve_mixdrop,
+    "voe":         resolve_voe,
+    "streamruby":  resolve_streamruby,
+    "hgcloud":     resolve_hgcloud,
+    "masukestin":  resolve_masukestin,
+    "masukestin.com": resolve_masukestin,
+    "vidtube":     resolve_vidtube,
+    "streamwish":  resolve_streamwish,
+    "wishfast":    resolve_streamwish,
+    "filelion":    resolve_streamwish,
+    "filelions":   resolve_streamwish,
+    "vidhide":     resolve_streamwish,
+    "streamhide":  resolve_streamwish,
+    "dhtpre":      resolve_streamwish,
+    "embedrise":   resolve_streamwish,
+    "hglamioz":    resolve_streamwish,
+    "filemoon":    resolve_filemoon,
+    "lulustream":  resolve_lulustream,
+    "ok.ru":       resolve_okru,
+    "okru":        resolve_okru,
+    "vidguard":    resolve_vidguard,
+    "vgfplay":     resolve_vidguard,
+    "fastvid":     resolve_fastvid,
+    "fastvid.cam": resolve_fastvid,
+    "rpmvip":      resolve_rpmvip,
+    "upshare":     resolve_upshare,
+    "upn.one":     resolve_upshare,
+    "cleantechworld": resolve_cleantechworld,
+    "cleantechworld.shop": resolve_cleantechworld,
+    "scdns":              resolve_scdns,
+    "scdns.io":           resolve_scdns,
+    "c.scdns.io":         resolve_scdns,
+    "datahowa":           resolve_datahowa,
+    "datahowa.asia":      resolve_datahowa,
+    "govid.live":         resolve_govid,
+    "downet":             resolve_downet,
+    "downet.net":         resolve_downet,
+    "tnmr.org":        resolve_tnmr,
+    "tnmr":            resolve_tnmr,
+    "mxcontent":       resolve_mxcontent,
+    "mxcontent.net":   resolve_mxcontent,
+    "delucloud":       resolve_delucloud,
+    "delucloud.xyz":   resolve_delucloud,
+    "savefiles":       resolve_savefiles,
+    "savefiles.com":   resolve_savefiles,
+    "abstream":        resolve_abstream,
+    "abstream.to":     resolve_abstream,
+    "byselapuix":      resolve_byselapuix,
+    "byselapuix.com":  resolve_byselapuix,
+    "dhcplay":         resolve_dhcplay,
+    "dhcplay.com":     resolve_dhcplay,
+    "sprintcdn":       resolve_sprintcdn,
+    "sprintcdn.com":   resolve_sprintcdn,
+    "aurorafieldnetwork": resolve_aurorafieldnetwork,
+    "aurorafieldnetwork.store": resolve_aurorafieldnetwork,
+    "go.akwam.com.co":  resolve_go_akwam,
+    "go.akwam":         resolve_go_akwam,
+    "hanerix":          resolve_hanerix_style,
+    "hanerix.com":      resolve_hanerix_style,
+    "cdn-video":        resolve_hanerix_style,
+    "cdn-video.xyz":    resolve_hanerix_style,
+    "vibuxer.com":      resolve_hanerix_style,
+    "morencius.com":    resolve_hanerix_style,
+    "luluvdo.com":      resolve_hanerix_style,
+    "audinifer":        resolve_hanerix_style,
+    "audinifer.com":    resolve_hanerix_style,
+    "vidtube.one":      resolve_hanerix_style,
+    "down.vidtube.one": resolve_hanerix_style,
+    "earnvids.xyz":     resolve_hanerix_style,
+    "vinovo.to":        resolve_vinovo,
+    "vidaraa.cc":       resolve_vidaraa,
+    "vidaraa":          resolve_vidaraa,
+
+    # ─── Modern CDN resolvers from LINKS.txt ──────────────────────────────
+    "streamrk.site":        resolve_streamrk,
+    "moviepire.co":         resolve_moviepire,
+    "hakunaymatata.com":    resolve_moviepire,
+    "polarcandy.top":       resolve_polarcandy,
+    "peakstorm.top":        resolve_polarcandy,
+    "xpass.top":            resolve_xpass,
+    "1x2.space":            resolve_xpass,
+    "scalablecontentengine.site": resolve_scalablecontentengine,
+    "nextgencloudfabric.com": resolve_scalablecontentengine,
+    "cloudorchestranova.com": resolve_cloudorchestra,
+    "panoplypalaver.site":  resolve_cloudorchestra,
+    "viduki.net":           resolve_viduki,
+    "1shows.app":           resolve_viduki,
+    "moviesapi.to":         resolve_moviesapi,
+    "netrocdn.site":        resolve_moviesapi,
+    "shows.st":             resolve_shows_st,
+    "vaplayer.ru":          resolve_vaplayer,
+    "streamdata.vaplayer.ru": resolve_vaplayer,
+
+    # ─── SuperFlix and ZXC resolvers ───────────────────────────────────────
+    "superflixapi.buzz": resolve_superflixapi,
+    "superflixapi.sbs": resolve_superflixapi,
+    "zxcstream.xyz": resolve_zxcstream,
+    "braflix.win": resolve_braflix,
+    "vidcore.io": resolve_vidcore,
+    "vidcloud.icu": resolve_vidcore,
+    "embed.su": resolve_vidcore,
+}
+
+# Longest-key-first matching: substring dispatch must try the most
+# specific key before a shorter one it contains ("down.vidtube.one"
+# must reach the vidtube.one entry, not "vidtube"). All current
+# overlapping keys map to the same resolver, so this only un-breaks
+# dead entries — it changes nothing else.
+_ORDERED_RESOLVER_KEYS = sorted(HOST_RESOLVERS.items(), key=lambda kv: -len(kv[0]))
+
+
+# ─── Packer decoder with Unbaser (full base62/95 support) ────────────────────
+
+class Unbaser(object):
+    """
+    Decodes P.A.C.K.E.R.'s symbol table indices back to natural numbers,
+    for whatever radix the packer actually used.
+    """
+    ALPHABET = {
+        62: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        95: (
+            " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+        ),
+    }
+
+    def __init__(self, base):
+        self.base = base
+        if 36 < base < 62 and base not in self.ALPHABET:
+            self.ALPHABET[base] = self.ALPHABET[62][:base]
+        if 2 <= base <= 36:
+            self.unbase = lambda string: int(string, base)
+        else:
+            try:
+                self.dictionary = dict(
+                    (cipher, index) for index, cipher in enumerate(self.ALPHABET[base])
+                )
+            except KeyError:
+                raise TypeError("Unsupported base encoding.")
+            self.unbase = self._dictunbaser
+
+    def __call__(self, string):
+        return self.unbase(string)
+
+    def _dictunbaser(self, string):
+        ret = 0
+        for index, cipher in enumerate(string[::-1]):
+            ret += (self.base ** index) * self.dictionary[cipher]
+        return ret
+
+
+def _extract_packer_blocks(html):
+    blocks = []
+    marker = "eval(function(p,a,c,k,e,d){"
+    tail   = ".split('|')))"
+    pos = 0
+    while True:
+        start = (html or "").find(marker, pos)
+        if start == -1:
+            break
+        end = (html or "").find(tail, start)
+        if end == -1:
+            break
+        blocks.append(html[start : end + len(tail)])
+        pos = end + len(tail)
+    return blocks
+
+
+def decode_packer(packed):
+    """
+    Decode P.A.C.K.E.R. obfuscated JavaScript using the full Unbaser
+    class that supports base62 and base95 (not just base36).
+    """
+    try:
+        def read_js_string(text, start_idx):
+            quote = text[start_idx]
+            i = start_idx + 1
+            out = []
+            while i < len(text):
+                ch = text[i]
+                if ch == "\\" and i + 1 < len(text):
+                    out.append(text[i + 1])
+                    i += 2
+                    continue
+                if ch == quote:
+                    return "".join(out), i + 1
+                out.append(ch)
+                i += 1
+            return "", -1
+
+        start = packed.find("}(")
+        if start == -1:
+            return ""
+        idx = start + 2
+        while idx < len(packed) and packed[idx] in " \t\r\n":
+            idx += 1
+        if idx >= len(packed) or packed[idx] not in ("'", '"'):
+            return ""
+
+        p, idx = read_js_string(packed, idx)
+        if idx == -1:
+            return ""
+
+        nums = re.match(r"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*", packed[idx:], re.S)
+        if not nums:
+            return ""
+        a, c = nums.group(1), nums.group(2)
+        idx += nums.end()
+        if idx >= len(packed) or packed[idx] not in ("'", '"'):
+            return ""
+
+        k, idx = read_js_string(packed, idx)
+        if idx == -1:
+            return ""
+
+        a, c = int(a), int(c)
+        k = k.split("|")
+
+        unbase = Unbaser(a)
+
+        def lookup(match):
+            word = match.group(0)
+            try:
+                idx = unbase(word)
+            except (KeyError, ValueError):
+                return word
+            if 0 <= idx < len(k) and k[idx]:
+                return k[idx]
+            return word
+
+        return re.sub(r'\b\w+\b', lookup, p)
+    except Exception:
+        return ""
+
+
+def find_packed_links(html):
+    for ev in _extract_packer_blocks(html):
+        dec = decode_packer(ev)
+        if dec:
+            res = find_m3u8(dec) or find_mp4(dec)
+            if res:
+                return res
+    for ev in re.findall(r"eval\(function\(p,a,c,k,e,d\).*?}\(.*?\)\)", html, re.S):
+        dec = decode_packer(ev)
+        if dec:
+            res = find_m3u8(dec) or find_mp4(dec)
+            if res:
+                return res
+    return None
+
+
+def _unpack_all(html):
+    texts = [html]
+    for block in _extract_packer_blocks(html):
+        dec = decode_packer(block)
+        if dec:
+            texts.append(dec)
+    return texts
+
+
+def resolve_generic_embed(url, referer=None):
+    try:
+        html, final = fetch(url, referer=referer or url)
+        if not html:
+            return None
+        best = _best_media_url(html)
+        if best:
+            return best
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                return best
+        js_redirect = _find_js_redirect(html)
+        if js_redirect and js_redirect != url:
+            log("resolve_generic_embed: following JS redirect to {}".format(js_redirect[:100]))
+            h2, final2 = fetch(js_redirect, referer=referer or url)
+            if h2:
+                best = _best_media_url(h2)
+                if best:
+                    return best
+                for txt in _unpack_all(h2):
+                    best = _best_media_url(txt)
+                    if best:
+                        return best
+                for iframe_url in extract_iframes(h2, final2 or js_redirect)[:3]:
+                    h3, _ = fetch(iframe_url, referer=js_redirect)
+                    if h3:
+                        best = _best_media_url(h3)
+                        if best:
+                            return best
+        for iframe_url in extract_iframes(html, final or url)[:3]:
+            h2, _ = fetch(iframe_url, referer=referer or url)
+            if h2:
+                best = _best_media_url(h2)
+                if best:
+                    return best
+    except Exception:
+        pass
+    return None
+
+
+# ─── Main host dispatcher ─────────────────────────────────────────────────────
+
+def resolve_host(url, referer=None):
+    domain = urlparse(url).netloc.lower()
+    log("resolve_host: domain={} url={}".format(domain, url[:80]))
+    for key, resolver in _ORDERED_RESOLVER_KEYS:
+        if key in domain:
+            log("Using resolver: {} (referer {})".format(key, "kept" if referer else "default"))
+            # Referer-aware call first; fall back for 1-arg resolvers.
+            try:
+                result = resolver(url, referer=referer) if referer else resolver(url)
+            except TypeError:
+                result = resolver(url)
+            if result:
+                return result
+            log("Resolver {} returned nothing, trying generic".format(key))
+            break
+    log("Generic fallback for: {}{}".format(domain, "" if not referer else " (with caller referer)"))
+    return resolve_generic_embed(url, referer=referer)
+
+
+# ─── iframe chain resolver ────────────────────────────────────────────────────
+
+def resolve_iframe_chain(url, referer=None, depth=0, max_depth=8):
+    if depth > max_depth:
+        return None, ""
+    html, final_url = fetch(url, referer=referer)
+    if not html:
+        return None, ""
+    active_url = final_url or url
+    domain = urlparse(active_url).netloc.lower()
+    stream = find_m3u8(html) or find_mp4(html) or find_packed_links(html)
+    if stream:
+        return stream, domain
+    m = re.search(
+        r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\']\d+\s*;\s*url=([^"\']+)["\']',
+        html, re.I
+    )
+    if m:
+        new_url = m.group(1).strip()
+        if new_url.startswith("//"):
+            new_url = "https:" + new_url
+        elif not new_url.startswith("http"):
+            new_url = urljoin(active_url, new_url)
+        if new_url != active_url:
+            return resolve_iframe_chain(new_url, referer=active_url, depth=depth + 1, max_depth=max_depth)
+    m = re.search(r'(?:window\.location(?:\.href)?\s*=|location\.replace\()\s*["\']([^"\']+)["\']', html, re.I)
+    if m:
+        new_url = m.group(1).strip()
+        if new_url.startswith("//"):
+            new_url = "https:" + new_url
+        elif not new_url.startswith("http"):
+            new_url = urljoin(active_url, new_url)
+        if new_url != active_url and "://" in new_url:
+            return resolve_iframe_chain(new_url, referer=active_url, depth=depth + 1, max_depth=max_depth)
+    iframe_srcs = re.findall(
+        r'<(?:iframe|embed|frame)[^>]+(?:src|data-src|data-url|data-lazy-src)=["\']([^"\']+)["\']',
+        html, re.I
+    )
+    for src in iframe_srcs:
+        if src.startswith("//"):
+            src = "https:" + src
+        elif not src.startswith("http"):
+            p = urlparse(active_url)
+            if src.startswith("/"):
+                src = "{}://{}{}".format(p.scheme, p.netloc, src)
+            else:
+                continue
+        if any(x in src.lower() for x in ("facebook.com", "twitter.com", "googletag", "doubleclick", "analytics")):
+            continue
+        src_domain = urlparse(src).netloc.lower()
+        for key, resolver in _ORDERED_RESOLVER_KEYS:
+            if key in src_domain:
+                try:
+                    result = resolver(src) if not referer else resolver(src, referer=referer)
+                except TypeError:
+                    result = resolver(src)
+                if result:
+                    return result, src_domain
+                break
+        res, h = resolve_iframe_chain(src, referer=active_url, depth=depth + 1, max_depth=max_depth)
+        if res:
+            return res, h
+    return None, ""
+
+
+# ─── extract_stream_all (multi-quality) ──────────────────────────────────────
+
+def extract_stream_all(url):
+    """
+    Extract ALL quality variants from a server URL.
+    Returns list of (stream_url, quality_label) tuples.
+    """
+    log("extract_stream_all: {}".format(url[:80]))
+
+    result = extract_stream(url)
+
+    variants = []
+    if result and len(result) >= 4:
+        main_url, quality, ref, extra_variants = result[0], result[1], result[2], result[3]
+        if main_url:
+            variants.append((main_url, quality or "HD"))
+        for lbl, u in extra_variants:
+            if u != main_url:
+                variants.append((u, lbl))
+    elif result and len(result) >= 3:
+        main_url, quality, ref = result[0], result[1], result[2]
+        if main_url:
+            variants.append((main_url, quality or "HD"))
+    elif result and len(result) >= 1:
+        variants.append((result[0], "HD"))
+
+    if not variants:
+        for lbl, u in get_synthesized_variants(url):
+            if u not in [v[0] for v in variants]:
+                variants.append((u, lbl))
+
+    if not variants:
+        return []
+
+    quality_order = {"Original": 0, "1080p": 1, "720p": 2, "480p": 3, "360p": 4, "240p": 5, "HD": 6}
+    variants.sort(key=lambda v: quality_order.get(v[1], 99))
+
+    return variants
+
+
+# ─── extract_stream (main entry point) ──────────────────────────────────────
+
+def extract_stream(url):
+    """
+    Standard entry point used by all extractors.
+    Returns (stream_url, quality_label, referer, variants).
+    """
+    log("--- extract_stream START: {} ---".format(url))
+    _quality_tls.variants = []
+    raw_url = (url or "").strip()
+    if not raw_url:
+        return None, "", url, []
+
+    piped_headers = {}
+    main_url = raw_url
+    if "|" in raw_url:
+        main_url, raw_hdrs = raw_url.split("|", 1)
+        for part in raw_hdrs.split("&"):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                piped_headers[k.strip()] = v.strip()
+
+    # Correct disguised extensions
+    main_url = _correct_stream_url(main_url)
+    lower = main_url.lower()
+
+    # ─── DIRECT STREAM URL (m3u8/mp4/etc) ───────────────────────────────────
+    if main_url.startswith("http") and any(ext in lower for ext in (".m3u8", ".mp4", ".mkv", ".mp3", ".ts", ".txt", ".woff2")):
+        ref = piped_headers.get("Referer")
+        if not ref:
+            # was: ~20-branch elif chain — now the single referers.py table
+            ref = get_referer(main_url)
+
+        # Determine quality from URL
+        q = "HD"
+        if "1080" in lower or "fhd" in lower or "hd1080" in lower or "1080p" in lower:
+            q = "1080p"
+        elif "720" in lower or "hd" in lower or "hd720" in lower or "720p" in lower:
+            q = "720p"
+        elif "480" in lower or "480p" in lower:
+            q = "480p"
+        elif "index-f2" in lower:
+            q = "720p"
+        elif "index-f1" in lower:
+            q = "480p"
+        elif "master.m3u8" in lower:
+            q = "HD"
+
+        log("extract_stream DIRECT: {}".format(main_url))
+        return main_url, q, ref, []
+
+    # ─── RESOLVE VIA HOST RESOLVERS ────────────────────────────────────────
+    stream = resolve_host(main_url, referer=piped_headers.get("Referer"))
+    if not stream:
+        log("resolve_host failed, trying iframe chain")
+        stream, _ = resolve_iframe_chain(main_url, referer=piped_headers.get("Referer"))
+
+    if stream:
+        stream = _correct_stream_url(stream)
+
+        q = "HD"
+        stream_lower = stream.lower()
+        if "1080" in stream_lower or "fhd" in stream_lower or "hd1080" in stream_lower:
+            q = "1080p"
+        elif "720" in stream_lower or "hd" in stream_lower or "hd720" in stream_lower:
+            q = "720p"
+        elif "480" in stream_lower:
+            q = "480p"
+        elif "index-f2" in stream_lower:
+            q = "720p"
+        elif "index-f1" in stream_lower:
+            q = "480p"
+
+        variants = [(lbl, u) for lbl, u in get_last_quality_variants() if u != stream]
+        if not variants:
+            variants = [(lbl, u) for lbl, u in get_synthesized_variants(stream) if u != stream]
+
+        log("extract_stream SUCCESS: {} ({}), {} extra variant(s)".format(stream[:120], q, len(variants)))
+        return stream, q, main_url, variants
+
+    log("extract_stream FAILED for: {}".format(main_url))
+    return None, "", main_url, []

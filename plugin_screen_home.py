@@ -1,0 +1,1147 @@
+# -*- coding: utf-8 -*-
+"""NovaPlay — Home screen.
+
+The hub: site grid (health dots), Continue-Watching strip, poster grid
+and carousel modes. MODULAR EXTRACTION of AdvancedArabicPlayerHome
+with the full UX update set baked in:
+
+  * registry-driven site tiles (get_home_sites) + per-site health dots
+  * Continue-Watching strip with zone navigation (Fixes A–D applied)
+  * static focus — the blink timers are gone entirely
+  * poster placeholders (plugin_assets) in grid + carousel
+  * resume badge bars (grid layer, mode-gated) + carousel resume marks
+  * category-list cache (Bug E) + keybar reset + pager in list mode
+  * backdrop = real fanart only (Option A — no poster fallback)
+  * search scope honored + 6-worker search cap (Bugs A & H)
+"""
+
+import os
+import threading
+import time
+
+from Screens.Screen import Screen
+from Screens.MessageBox import MessageBox
+from Components.ActionMap import ActionMap
+from Components.Label import Label
+from Components.Pixmap import Pixmap
+from enigma import eTimer, ePoint, eSize
+
+from plugin_common import my_log, PLUGIN_PATH, _PLUGIN_VERSION
+from extractors import get_extractor, get_home_sites, get_search_site_order
+from extractors.base import get_curl_failed_needs_proxy
+from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
+    build_pixmap_widgets_xml, build_poster_pixmap_widgets_xml,
+    build_poster_badge_widgets_xml,
+    build_carousel_xml, build_continue_row_xml,
+    HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
+    HOME_CELL_MARGIN, HOME_BORDER_W, HOME_ICON_PAD_TOP, HOME_ICON_W, HOME_ICON_H,
+    POSTER_GRID_COLS, POSTER_GRID_ROWS, POSTER_W, POSTER_H,
+    _CAROUSEL_GEOMETRY,
+    CONT_SLOTS, CONT_W, CONT_H, CONT_GAP, CONT_X0, CONT_Y)
+import plugin_imagecache
+import plugin_health
+from plugin_assets import placeholder_for_item
+from plugin_state import (_get_config, _set_config,
+    _is_favorite, _get_saved_position,
+    _continue_items, _library_search_suggestions)
+from plugin_util import (_site_label, _site_tagline, _site_search_item,
+    _wrap_ui_text, _single_line_text, _dedupe_items, _rank_search_items,
+    _strip_arabic_from_english_title)
+from plugin_tmdb import _tmdb_enabled, _tmdb_search_metadata
+from plugin_screen_detail import AdvancedArabicPlayerDetail
+from plugin_screen_search import AdvancedArabicPlayerSearch
+from novaplay_thread import callInMainThread
+
+_SEARCH_SITE_ORDER = get_search_site_order()
+
+
+class AdvancedArabicPlayerHome(Screen):
+    skin = """
+    <screen name="AdvancedArabicPlayerHome" position="center,center" size="1920,1080" title="NovaPlay Media Center" flags="wfNoBorder" backgroundColor="#0D1117">
+        <eLabel position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="0" />
+        <ePixmap position="0,0" size="1920,1080" pixmap="{plugin_path}/images/background.jpg" zPosition="1" alphatest="blend" />
+        <widget name="backdropImg" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" scale="1" />
+        <widget name="shade_overlay" position="0,0" size="1920,1080" backgroundColor="#0D1117" transparency="150" zPosition="2" />
+        <widget name="title_bar"  position="0,0"     size="1920,80" backgroundColor="#0D1117" zPosition="6" />
+        <widget name="title_text" position="45,6"    size="1100,36" font="Regular;28" foregroundColor="#00E5FF" transparent="1" zPosition="7" />
+        <widget name="status"     position="1150,8"  size="725,30"  font="Regular;22" foregroundColor="#FFD740" transparent="1" halign="right" zPosition="7" />
+        <widget name="content_title" position="40,95"  size="1200,50"  font="Bold;38" foregroundColor="#00E5FF" transparent="1" zPosition="5" halign="left" valign="top" />
+        <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="5" halign="left" />
+        <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
+        <widget name="home_grid" position="20,330" size="1880,632" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        {home_grid_pics}
+        <widget name="poster_grid" position="40,90" size="1840,820" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        {poster_grid_pics}
+        {poster_badge_xml}
+        {carousel_xml}
+        {continue_xml}
+        <widget name="grid_status_left"  position="40,965"  size="900,32" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="left" zPosition="7" />
+        <widget name="grid_status_right" position="940,965" size="900,32" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="7" />
+        <widget name="btn_bar"    position="0,1015"  size="1920,65" backgroundColor="#0D1117" zPosition="6" />
+        <widget name="key_red"    position="45,1028" size="420,32" font="Regular;22" foregroundColor="#FF6B6B" transparent="1" halign="center" zPosition="7" />
+        <widget name="key_green"  position="510,1028" size="420,32" font="Regular;22" foregroundColor="#39D98A" transparent="1" halign="center" zPosition="7" />
+        <widget name="key_yellow" position="975,1028" size="420,32" font="Regular;22" foregroundColor="#FFD740" transparent="1" halign="center" zPosition="7" />
+        <widget name="key_blue"   position="1440,1028" size="420,32" font="Regular;22" foregroundColor="#58A6FF" transparent="1" halign="center" zPosition="7" />
+    </screen>
+    """
+
+    _HOME_GRID_X = 20
+    _HOME_GRID_Y = 330
+    _POSTER_GRID_X = 40
+    _POSTER_GRID_Y = 90
+    carousel_slots = 7
+    carousel_center = 3
+
+    def __init__(self, session):
+        self.skin = AdvancedArabicPlayerHome.skin.format(
+            plugin_path=PLUGIN_PATH,
+            home_grid_pics=build_pixmap_widgets_xml(
+                self._HOME_GRID_X, self._HOME_GRID_Y,
+                HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
+                HOME_CELL_MARGIN, HOME_BORDER_W, HOME_ICON_PAD_TOP, HOME_ICON_W, HOME_ICON_H,
+            ),
+            poster_grid_pics=build_poster_pixmap_widgets_xml(self._POSTER_GRID_X, self._POSTER_GRID_Y),
+            poster_badge_xml=build_poster_badge_widgets_xml(self._POSTER_GRID_X, self._POSTER_GRID_Y),
+            carousel_xml=build_carousel_xml(),
+            continue_xml=build_continue_row_xml(),
+        )
+        Screen.__init__(self, session)
+        self.session = session
+        self._items  = []
+        self._page   = 1
+        self._source = "home"
+        self._site   = "egydead"
+        self._m_type = "movie"
+        self._last_query = ""
+        self._nav_stack = []
+        self._content_title_base = ""
+        self._content_subtitle = ""
+        self.widget_map = list(range(self.carousel_slots))
+        self._layout_style = _get_config("layout_style", "carousel") or "carousel"
+        self._next_page_url = None
+        self._page_history = []
+        self._focus_end = False
+        self._tmdb_token = 0
+        self._cats_cache = {}
+
+        self["backdropImg"] = Pixmap()
+        self["shade_overlay"] = Label("")
+        self._current_backdrop_path = ""
+        self["title_bar"]  = Label("")
+        self["title_text"] = Label("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
+        self["status"]     = Label("جاري التحميل...")
+        self["content_title"] = Label("")
+        self["info_meta"]  = Label("")
+        self["info_plot"]  = Label("")
+        self["btn_bar"]    = Label("")
+        self["key_red"]    = Label("خروج")
+        self["key_green"]  = Label("المفضلة")
+        self["key_yellow"] = Label("بحث")
+        self["key_blue"]   = Label("الإعدادات")
+
+        self["home_grid"] = HomeMenuGrid()
+        self["home_grid"].onSelectionChanged = self._onGridSelectionChanged
+        for _r in range(HOME_GRID_ROWS):
+            for _c in range(HOME_GRID_COLS):
+                self["pic_%d_%d" % (_r, _c)] = Pixmap()
+
+        self["poster_grid"] = PosterCardGrid()
+        self["poster_grid"].onSelectionChanged = self._onPosterGridSelectionChanged
+        for _r in range(POSTER_GRID_ROWS):
+            for _c in range(POSTER_GRID_COLS):
+                self["poster_%d_%d" % (_r, _c)] = Pixmap()
+                self["pbadge_%d_%d" % (_r, _c)] = Label("")
+
+        for i in range(self.carousel_slots):
+            self["cfocus%d" % i] = Label("")
+            self["cposter%d" % i] = Label("")
+            self["cposterImg%d" % i] = Pixmap()
+            self["cfavMark%d" % i] = Label("")
+            self["cratingBadge%d" % i] = Label("")
+            self["cresumeMark%d" % i] = Label("")
+
+        # ── Continue-watching strip ──
+        self["cont_title"] = Label("")
+        self["contSel"] = Label("")
+        for i in range(CONT_SLOTS):
+            self["cont%d" % i] = Pixmap()
+        self._cont_items = []
+        self._cont_index = 0
+        self._focus_zone = "grid"
+        self.onExecBegin.append(self._paintContinueRow)
+
+        self["grid_status_left"] = Label("")
+        self["grid_status_right"] = Label("")
+
+        self._display_mode = "home"
+        self.onClose.append(self._onPluginClose)
+
+        self["actions"] = ActionMap(
+            ["OkCancelActions", "ColorActions", "DirectionActions", "InfobarMenuActions"],
+            {
+                "ok":     self._onOk,
+                "cancel": self._onBack,
+                "red":    self._onBack,
+                "green":  self._onGreen,
+                "yellow": self._onSearch,
+                "blue":   self._onBlue,
+                "up":     self._navUp,
+                "down":   self._navDown,
+                "left":   self._navLeft,
+                "right":  self._navRight,
+            }, -1
+        )
+
+        # Static focus — NO blink timers (removed: carouselFocusBlinkTimer,
+        # gridFocusBlinkTimer and both _*FocusBlink methods).
+
+        self._artworkPollTimer = eTimer()
+        self._artworkPollTimer.callback.append(self._pollArtworkCache)
+
+        self.onLayoutFinish.append(self._init)
+
+    def _init(self):
+        for _r in range(HOME_GRID_ROWS):
+            for _c in range(HOME_GRID_COLS):
+                try: self["pic_%d_%d" % (_r, _c)].instance.setScale(1)
+                except: pass
+        self._applyCarouselGeometry()
+        self._showHome()
+
+    def _moveResize(self, key, x, y, w, h):
+        try:
+            inst = self[key].instance
+            if inst:
+                inst.move(ePoint(int(x), int(y)))
+                inst.resize(eSize(max(1, int(w)), max(1, int(h))))
+        except Exception as e:
+            my_log("UI moveResize error for {}: {}".format(key, e))
+
+    def _applyCarouselGeometry(self):
+        for logical_slot in range(self.carousel_slots):
+            widget_id = self.widget_map[logical_slot]
+            x, y, w, h = _CAROUSEL_GEOMETRY.get(logical_slot, (0, 0, 1, 1))
+            is_big = (logical_slot == self.carousel_center)
+            pad = 12 if is_big else 8
+            self._moveResize('cposter%d' % widget_id, x, y, w, h)
+            self._moveResize('cposterImg%d' % widget_id, x + pad, y + pad, max(1, w - pad * 2), max(1, h - pad * 2))
+            rb_w = 38 if is_big else 34
+            rb_h = 40 if is_big else 34
+            self._moveResize('cratingBadge%d' % widget_id, x + w - rb_w - 14, y + 22, rb_w, rb_h)
+            self._moveResize('cfavMark%d' % widget_id, x + 10, y + 10, 42, 42)
+            self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
+            if logical_slot == self.carousel_center:
+                focus_extra = 7
+                self._moveResize('cfocus%d' % self.carousel_center, x - focus_extra, y - focus_extra, w + (focus_extra * 2), h + (focus_extra * 2))
+            else:
+                self._moveResize('cfocus%d' % logical_slot, 0, 0, 1, 1)
+
+    def _showHome(self):
+        self._source = "home"
+        self._display_mode = "home"
+        self._page   = 1
+        self._nav_stack = []
+        self["title_text"].setText("NovaPlay Media Center")
+        self["status"].setText("")
+        site_items = []
+        for key, title, tagline in get_home_sites():
+            site_items.append({
+                "title": title,
+                "tagline": tagline,
+                "_action": "site_" + key,
+                "_health": plugin_health.get(key),
+            })
+        blocked = plugin_health.blocked_sites()
+        if blocked:
+            self["status"].setText("⚠ %d موقع محجوب (Cloudflare) — فعّل بروكسي المتصفح من الإعدادات" % len(blocked))
+        self._items = site_items
+        self["home_grid"].setList(self._items)
+        self._showHomeMode()
+        self._onGridSelectionChanged()
+
+    def _showHomeMode(self):
+        self._focus_zone = "grid"
+        self._artworkPollTimer.stop()
+        self["backdropImg"].hide()
+        self["shade_overlay"].hide()
+        self["content_title"].hide()
+        self["info_meta"].hide()
+        self["info_plot"].hide()
+        self._current_backdrop_path = ""
+        self._tmdb_token += 1
+        self["grid_status_left"].hide()
+        self["grid_status_right"].hide()
+        for i in range(self.carousel_slots):
+            self["cfocus%d" % i].hide()
+            self["cposter%d" % i].hide()
+            self["cposterImg%d" % i].hide()
+            self["cfavMark%d" % i].hide()
+            self["cratingBadge%d" % i].hide()
+            self["cresumeMark%d" % i].hide()
+        self["poster_grid"].hide()
+        for i in range(POSTER_GRID_ROWS):
+            for _c in range(POSTER_GRID_COLS):
+                self["poster_%d_%d" % (i, _c)].hide()
+                self["pbadge_%d_%d" % (i, _c)].hide()
+        self["home_grid"].show()
+        for i in range(HOME_GRID_ROWS):
+            for _c in range(HOME_GRID_COLS):
+                self["pic_%d_%d" % (i, _c)].show()
+        self["key_red"].setText("خروج")
+        self["key_green"].setText("المفضلة")
+        self["key_yellow"].setText("بحث")
+        self["key_blue"].setText("الإعدادات")
+        self._paintContinueRow()
+
+    def _showPosterMode(self):
+        self["home_grid"].hide()
+        for i in range(HOME_GRID_ROWS):
+            for _c in range(HOME_GRID_COLS):
+                self["pic_%d_%d" % (i, _c)].hide()
+        for i in range(CONT_SLOTS):
+            self["cont%d" % i].hide()
+        self["cont_title"].hide()
+        try: self["contSel"].hide()
+        except Exception: pass
+        for i in range(self.carousel_slots):
+            self["cfocus%d" % i].hide()
+            self["cposter%d" % i].hide()
+            self["cposterImg%d" % i].hide()
+            self["cfavMark%d" % i].hide()
+            self["cratingBadge%d" % i].hide()
+            self["cresumeMark%d" % i].hide()
+        self["poster_grid"].hide()
+        for i in range(POSTER_GRID_ROWS):
+            for _c in range(POSTER_GRID_COLS):
+                self["poster_%d_%d" % (i, _c)].hide()
+                self["pbadge_%d_%d" % (i, _c)].hide()
+        if self._layout_style == "grid":
+            self["poster_grid"].show()
+            self["backdropImg"].hide()
+            self["shade_overlay"].hide()
+            self["content_title"].hide()
+            self["info_meta"].hide()
+            self["info_plot"].hide()
+            self._current_backdrop_path = ""
+            self["key_green"].setText("تبديل العرض (Carousel)")
+        else:
+            self["content_title"].show()
+            self["info_meta"].show()
+            self["info_plot"].show()
+            for i in range(self.carousel_slots):
+                self["cposter%d" % i].show()
+            self._applyCarouselGeometry()
+            self._syncCarouselFocusVisible()
+            self["key_green"].setText("تبديل العرض (Grid)")
+        self["key_red"].setText("الصفحة السابقة")
+        self["key_yellow"].setText("بحث")
+        self["key_blue"].setText("الصفحة التالية")
+        self["grid_status_left"].show()
+        self["grid_status_right"].show()
+        self._artworkPollTimer.start(600, False)
+
+    def _carouselPositionForSlot(self, slot):
+        total = len(self._items)
+        if total <= 0: return -1
+        if total <= self.carousel_slots:
+            pos = self.index + slot - self.carousel_center
+            return pos if 0 <= pos < total else -1
+        return (self.index - self.carousel_center + slot) % total
+
+    def _updateCarouselSlot(self, widget_id, pos):
+        total_items = len(self._items)
+        if pos < 0 or pos >= total_items:
+            self["cposter%d" % widget_id].hide()
+            self["cposterImg%d" % widget_id].hide()
+            self["cfavMark%d" % widget_id].hide()
+            self["cratingBadge%d" % widget_id].hide()
+            self["cresumeMark%d" % widget_id].hide()
+            return
+        item = self._items[pos]
+        self["cposter%d" % widget_id].show()
+        if item.get("_is_next_page"):
+            self["cposterImg%d" % widget_id].hide()
+            self["cratingBadge%d" % widget_id].hide()
+            self["cfavMark%d" % widget_id].hide()
+            self["cresumeMark%d" % widget_id].hide()
+            self["cposter%d" % widget_id].setText("الصفحة التالية")
+            return
+        if item.get("_is_prev_page"):
+            self["cposterImg%d" % widget_id].hide()
+            self["cratingBadge%d" % widget_id].hide()
+            self["cfavMark%d" % widget_id].hide()
+            self["cresumeMark%d" % widget_id].hide()
+            self["cposter%d" % widget_id].setText("الصفحة السابقة")
+            return
+        self["cposter%d" % widget_id].setText("")
+        url = item.get("poster") or ""
+        path = plugin_imagecache.getCachedImage(url, target_size=(340, 510)) if url else ""
+        if path:
+            try:
+                self["cposterImg%d" % widget_id].instance.setPixmapFromFile(path)
+                self["cposterImg%d" % widget_id].show()
+            except: self["cposterImg%d" % widget_id].hide()
+        else:
+            ph = placeholder_for_item(item)
+            if ph:
+                try:
+                    self["cposterImg%d" % widget_id].instance.setScale(1)
+                    self["cposterImg%d" % widget_id].instance.setPixmapFromFile(ph)
+                    self["cposterImg%d" % widget_id].show()
+                except Exception:
+                    self["cposterImg%d" % widget_id].hide()
+            else:
+                self["cposterImg%d" % widget_id].hide()
+            if url: plugin_imagecache.requestImageAsync(url, target_size=(340, 510))
+        if _is_favorite(item.get("url", "")):
+            self["cfavMark%d" % widget_id].setText("★")
+            self["cfavMark%d" % widget_id].show()
+        else:
+            self["cfavMark%d" % widget_id].hide()
+        rating = item.get("rating", "")
+        if rating:
+            self["cratingBadge%d" % widget_id].setText(" %s " % rating)
+            self["cratingBadge%d" % widget_id].show()
+        else:
+            self["cratingBadge%d" % widget_id].hide()
+        saved_pos = _get_saved_position(item.get("url", ""))
+        if saved_pos > 30:
+            mm, ss = divmod(saved_pos, 60)
+            hh, mm = divmod(mm, 60)
+            tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
+            self["cresumeMark%d" % widget_id].setText("متابعة " + tstr)
+            self["cresumeMark%d" % widget_id].show()
+        else:
+            self["cresumeMark%d" % widget_id].hide()
+
+    def _paintCarousel(self):
+        for logical_slot in range(self.carousel_slots):
+            widget_id = self.widget_map[logical_slot]
+            pos = self._carouselPositionForSlot(logical_slot)
+            self._updateCarouselSlot(widget_id, pos)
+        self._updateBackdrop()
+
+    def _moveCarousel(self, delta):
+        total = len(self._items)
+        if total <= 0: return
+        self.index += delta
+        if self.index < 0: self.index = total - 1
+        elif self.index >= total: self.index = 0
+        if delta == 1: self.widget_map = self.widget_map[1:] + [self.widget_map[0]]
+        elif delta == -1: self.widget_map = [self.widget_map[-1]] + self.widget_map[:-1]
+        self._applyCarouselGeometry()
+        self._paintCarousel()
+
+    def _syncCarouselFocusVisible(self):
+        # Static focus (blink removed): center card's frame simply shows.
+        for i in range(self.carousel_slots):
+            self["cfocus%d" % i].hide()
+        if len(self._items) > 0:
+            self["cfocus%d" % self.carousel_center].show()
+
+    def _onPosterGridSelectionChanged(self):
+        self._updateGridFooter()
+        self._updatePosterPixmaps()
+        self._updateBackdrop()
+
+    def _updateGridFooter(self):
+        # Works for both grids: poster mode (PosterCardGrid) and the
+        # category list (HomeMenuGrid) — geometry differs per grid.
+        if self._display_mode == "poster":
+            grid, cols, rows = self["poster_grid"], POSTER_GRID_COLS, POSTER_GRID_ROWS
+        else:
+            grid, cols, rows = self["home_grid"], HOME_GRID_COLS, HOME_GRID_ROWS
+        page, total_pages = grid.getPageInfo()
+        total = len(self._items)
+        per_page = cols * rows
+        start = (page - 1) * per_page + 1
+        end = min(start + per_page - 1, total)
+        self["grid_status_left"].setText("Shows {}-{} / {}".format(start, end, total))
+        self["grid_status_right"].setText("Page {} / {}".format(page, total_pages))
+
+    def _updatePosterPixmaps(self):
+        visible = {}
+        for row, col, item in self["poster_grid"].getPageItems():
+            visible[(row, col)] = item
+        for r in range(POSTER_GRID_ROWS):
+            for c in range(POSTER_GRID_COLS):
+                widget = self["poster_%d_%d" % (r, c)]
+                badge = self["pbadge_%d_%d" % (r, c)]
+                item = visible.get((r, c))
+                if not item:
+                    widget.hide()
+                    badge.hide()
+                    continue
+                url = item.get("poster") or ""
+                path = ""
+                if url:
+                    path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
+                if path:
+                    try:
+                        widget.instance.setPixmapFromFile(path)
+                        widget.show()
+                    except Exception:
+                        widget.hide()
+                else:
+                    ph = placeholder_for_item(item)
+                    if ph:
+                        try:
+                            widget.instance.setScale(1)
+                            widget.instance.setPixmapFromFile(ph)
+                            widget.show()
+                        except Exception:
+                            widget.hide()
+                    else:
+                        widget.hide()
+                    if url:
+                        plugin_imagecache.requestImageAsync(url, target_size=(POSTER_W, POSTER_H))
+                # Resume badge: gold bar with the resume time at the poster's
+                # bottom edge, ABOVE the poster pixmap (mode-gated so a late
+                # poll callback can never paint it outside grid-poster mode).
+                saved_pos = _get_saved_position(item.get("url", "")) if item.get("url") else 0
+                if saved_pos > 30 and self._display_mode == "poster" and self._layout_style == "grid":
+                    mm, ss = divmod(saved_pos, 60)
+                    hh, mm = divmod(mm, 60)
+                    tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
+                    badge.setText("متابعة " + tstr)
+                    badge.show()
+                else:
+                    badge.hide()
+
+    def _updateBackdrop(self, skip_tmdb=False):
+        if self._display_mode != "poster" or self._layout_style != "carousel":
+            self["backdropImg"].hide()
+            self["content_title"].setText("")
+            self["info_meta"].setText("")
+            self["info_plot"].setText("")
+            self._current_backdrop_path = ""
+            return
+        if not (0 <= getattr(self, 'index', -1) < len(self._items)):
+            item = None
+        else:
+            item = self._items[self.index]
+        if not skip_tmdb:
+            self._tmdb_token += 1
+        if not item or item.get("_is_next_page") or item.get("_is_prev_page"):
+            self["backdropImg"].hide()
+            self["content_title"].setText("")
+            self["info_meta"].setText("")
+            self["info_plot"].setText("")
+            self._current_backdrop_path = ""
+            return
+        display_title = _strip_arabic_from_english_title(item.get("title", "") or "")
+        year = item.get("year") or ""
+        display_with_year = "{} {}".format(display_title, year).strip() if year else display_title
+        self["content_title"].setText(_single_line_text(display_with_year, width=42, fallback=""))
+        if not skip_tmdb:
+            current_token = self._tmdb_token
+            threading.Thread(target=self._bgFetchTmdbText, args=(item, current_token)).start()
+        target_size = (1920, 1080)
+        # Backdrop = real fanart/backdrop only (Option A — poster fallback
+        # removed: it cover-cropped a portrait poster into a zoomed strip).
+        backdrop_url = item.get("fanart") or item.get("backdrop") or ""
+        target_url = backdrop_url
+        is_real_backdrop = bool(backdrop_url)
+        if not target_url:
+            self["backdropImg"].hide()
+            self._current_backdrop_path = ""
+        else:
+            path = plugin_imagecache.getCachedImage(target_url, target_size=target_size)
+            if path and path != self._current_backdrop_path:
+                try:
+                    self["backdropImg"].instance.setPixmapFromFile(path)
+                    self["backdropImg"].show()
+                    self._current_backdrop_path = path
+                    my_log("_updateBackdrop: painted {} ({})".format(path, "real backdrop" if is_real_backdrop else "poster fallback"))
+                except Exception as e:
+                    my_log("_updateBackdrop: setPixmapFromFile threw for {}: {}".format(path, e))
+            elif not path:
+                plugin_imagecache.requestImageAsyncPriority(target_url, target_size=target_size)
+        # (backdrop fetch merged into _bgFetchTmdbText — no second thread)
+
+    def _bgFetchTmdbText(self, item, token):
+        try:
+            meta = _tmdb_search_metadata(item.get("title", ""), item.get("year", ""), item.get("type", "movie"))
+            if token == self._tmdb_token:
+                callInMainThread(self._paintTmdbText, meta, token)
+                # Merged: the backdrop image fetch rides the SAME metadata
+                # call (the old separate thread re-ran the full search —
+                # 2x TMDB traffic per selection).
+                if (meta and meta.get("backdrop_url")
+                        and not (item.get("fanart") or item.get("backdrop"))):
+                    item["fanart"] = meta["backdrop_url"]
+                    target_size = (1920, 1080)
+                    path = plugin_imagecache.getCachedImage(meta["backdrop_url"], target_size=target_size)
+                    if not path:
+                        data = plugin_imagecache.downloadUrl(meta["backdrop_url"], timeout=8)
+                        if data:
+                            processed = plugin_imagecache.resizeCover(data, target_size, darken=0.45)
+                            if processed is not None:
+                                cache_path = plugin_imagecache.buildCachePath(meta["backdrop_url"], target_size=target_size)
+                                if plugin_imagecache.writeFileAtomic(cache_path, processed):
+                                    path = cache_path
+                    if path:
+                        callInMainThread(self._paintTmdbBackdrop, path, token)
+        except Exception as e:
+            my_log("_bgFetchTmdbText error: {}".format(e))
+
+    def _paintTmdbText(self, meta, token):
+        if token != self._tmdb_token: return
+        if meta:
+            meta_str = "★ %s  |  %s  |  %s" % (meta.get("rating", "N/A"), meta.get("year", ""), meta.get("genres", ""))
+            self["info_meta"].setText(meta_str)
+            self["info_plot"].setText(meta.get("plot", ""))
+        else:
+            self["info_meta"].setText("")
+            self["info_plot"].setText("")
+
+    def _bgFetchTmdbBackdrop(self, item, token):
+        try:
+            meta = _tmdb_search_metadata(item.get("title", ""), item.get("year", ""), item.get("type", "movie"))
+            if token != self._tmdb_token: return
+            if meta and meta.get("backdrop_url"):
+                backdrop_url = meta["backdrop_url"]
+                item["fanart"] = backdrop_url
+                target_size = (1920, 1080)
+                path = plugin_imagecache.getCachedImage(backdrop_url, target_size=target_size)
+                if not path:
+                    data = plugin_imagecache.downloadUrl(backdrop_url, timeout=8)
+                    if data:
+                        processed = plugin_imagecache.resizeCover(data, target_size, darken=0.45)
+                        if processed is not None:
+                            cache_path = plugin_imagecache.buildCachePath(backdrop_url, target_size=target_size)
+                            ok = plugin_imagecache.writeFileAtomic(cache_path, processed)
+                            if ok:
+                                path = cache_path
+                if path and token == self._tmdb_token:
+                    callInMainThread(self._paintTmdbBackdrop, path, token)
+        except Exception as e:
+            my_log("_bgFetchTmdbBackdrop error: {}".format(e))
+
+    def _paintTmdbBackdrop(self, path, token):
+        if token == self._tmdb_token and path:
+            try:
+                self["backdropImg"].instance.setPixmapFromFile(path)
+                self["backdropImg"].show()
+                self._current_backdrop_path = path
+            except Exception as e:
+                my_log("_paintTmdbBackdrop: setPixmapFromFile threw for {}: {}".format(path, e))
+
+    def _pollArtworkCache(self):
+        if self._display_mode != "poster": return
+        if self._layout_style == "grid":
+            self._updatePosterPixmaps()
+            self._updateGridFooter()
+            self._updateBackdrop(skip_tmdb=True)
+        else:
+            for logical_slot in range(self.carousel_slots):
+                widget_id = self.widget_map[logical_slot]
+                pos = self._carouselPositionForSlot(logical_slot)
+                self._updateCarouselSlot(widget_id, pos)
+            self._updateBackdrop(skip_tmdb=True)
+
+    def _onGridSelectionChanged(self):
+        self._updateIcons()
+        # Keep the category-list pager in sync while navigating.
+        if self._display_mode == "list":
+            self._updateGridFooter()
+
+    def _updateIcons(self):
+        for _r in range(HOME_GRID_ROWS):
+            for _c in range(HOME_GRID_COLS):
+                self["pic_%d_%d" % (_r, _c)].hide()
+        # Site icons belong to the home tiles only. Category/list cells
+        # are text-only — default.png fallback must not paint over names.
+        if self._display_mode != "home":
+            return
+        for row, col, item in self["home_grid"].getPageItems():
+            icon_path = resolve_icon_path(item, PLUGIN_PATH)
+            if not icon_path: continue
+            widget = self["pic_%d_%d" % (row, col)]
+            try:
+                widget.instance.setPixmapFromFile(icon_path)
+                widget.show()
+            except: pass
+
+    # ── Continue-watching row ───────────────────────────────────────────
+    def _paintContinueRow(self):
+        if self._display_mode != "home":
+            return
+        try:
+            self._cont_items = _continue_items(CONT_SLOTS)
+        except Exception:
+            self._cont_items = []
+        if self._cont_index >= len(self._cont_items):
+            self._cont_index = max(0, len(self._cont_items) - 1)
+        for i in range(CONT_SLOTS):
+            widget = self["cont%d" % i]
+            if i < len(self._cont_items):
+                item = self._cont_items[i]
+                url = item.get("poster") or ""
+                path = plugin_imagecache.getCachedImage(url, target_size=(CONT_W, CONT_H)) if url else ""
+                if not path and url:
+                    plugin_imagecache.requestImageAsyncPriority(url, target_size=(CONT_W, CONT_H))
+                if not path:
+                    path = placeholder_for_item(item)
+                if path:
+                    try:
+                        widget.instance.setScale(1)
+                        widget.instance.setPixmapFromFile(path)
+                        widget.show()
+                    except Exception:
+                        widget.hide()
+                else:
+                    widget.hide()
+            else:
+                widget.hide()
+        if self._cont_items:
+            self["cont_title"].show()
+            if self._focus_zone == "row":
+                self._moveContinueSel()
+            else:
+                try: self["contSel"].hide()
+                except Exception: pass
+            self._updateContinueLabel()
+        else:
+            self["cont_title"].hide()
+            try: self["contSel"].hide()
+            except Exception: pass
+
+    def _updateContinueLabel(self):
+        if not (0 <= self._cont_index < len(self._cont_items)):
+            self["cont_title"].setText("متابعة المشاهدة")
+            return
+        item = self._cont_items[self._cont_index]
+        pos = _get_saved_position(item.get("url", ""))
+        mm, ss = divmod(max(pos, 0), 60)
+        hh, mm = divmod(mm, 60)
+        tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
+        title = _single_line_text(item.get("title", ""), width=40, fallback="")
+        if title:
+            self["cont_title"].setText("متابعة المشاهدة  •  {}  •  {}".format(title, tstr))
+        else:
+            self["cont_title"].setText("متابعة المشاهدة")
+
+    def _moveContinueSel(self):
+        if not (0 <= self._cont_index < len(self._cont_items)):
+            try: self["contSel"].hide()
+            except Exception: pass
+            return
+        pad = 6
+        x = CONT_X0 + self._cont_index * (CONT_W + CONT_GAP)
+        self._moveResize("contSel", x - pad, CONT_Y - pad, CONT_W + pad * 2, CONT_H + pad * 2)
+        self["contSel"].show()
+        self._updateContinueLabel()
+
+    # ── Key handlers ────────────────────────────────────────────────────
+    def _onOk(self):
+        if self._display_mode == "home":
+            if self._focus_zone == "row" and self._cont_items:
+                item = self._cont_items[min(self._cont_index, len(self._cont_items) - 1)]
+                self._focus_zone = "grid"
+                try: self["contSel"].hide()
+                except Exception: pass
+                if item: self._openItem(item)
+                return
+            item = self["home_grid"].getCurrent()
+            if not item: return
+            a = item.get("_action", "")
+            if a.startswith("site_"):
+                self._site = a.replace("site_", "")
+                self._showSiteCategories()
+            return
+        if self._display_mode == "list":
+            item = self["home_grid"].getCurrent()
+            if not item: return
+            if item.get("_action") == "search_site":
+                self._onSearch(item.get("_site", self._site))
+            elif item.get("type") == "category":
+                self._loadCategory(item["url"], item["title"], is_new=True)
+            return
+        if self._display_mode == "poster":
+            if self._layout_style == "grid":
+                item = self["poster_grid"].getCurrent()
+                if item: self._openItem(item)
+            else:
+                if 0 <= self.index < len(self._items):
+                    item = self._items[self.index]
+                    if item.get("_is_next_page"):
+                        self._nextPage()
+                    elif item.get("_is_prev_page"):
+                        self._prevPage()
+                    else:
+                        self._openItem(item)
+            return
+
+    def _navUp(self):
+        if self._display_mode == "home" and self._focus_zone == "row":
+            return                          # row is the topmost zone
+        if self._display_mode == "home":
+            pg = self["home_grid"]
+            if self._cont_items and pg.currentRow == 0 and pg.currentPage == 0:
+                self._focus_zone = "row"
+                self._moveContinueSel()
+                return
+            pg.moveUp()
+            return
+        if self._display_mode == "list":
+            self["home_grid"].moveUp()
+        elif self._display_mode == "poster" and self._layout_style == "grid":
+            self["poster_grid"].moveUp()
+
+    def _navDown(self):
+        if self._display_mode == "home" and self._focus_zone == "row":
+            self._focus_zone = "grid"
+            try: self["contSel"].hide()
+            except Exception: pass
+            return
+        if self._display_mode == "home":
+            self["home_grid"].moveDown()
+            return
+        if self._display_mode == "list":
+            self["home_grid"].moveDown()
+        elif self._display_mode == "poster" and self._layout_style == "grid":
+            self["poster_grid"].moveDown()
+
+    def _navLeft(self):
+        if self._display_mode == "home" and self._focus_zone == "row":
+            if self._cont_items:
+                self._cont_index = (self._cont_index - 1) % len(self._cont_items)
+                self._moveContinueSel()
+            return
+        if self._display_mode in ("home", "list"):
+            self["home_grid"].moveLeft()
+        elif self._display_mode == "poster":
+            if self._layout_style == "grid": self["poster_grid"].moveLeft()
+            else: self._moveCarousel(-1)
+
+    def _navRight(self):
+        if self._display_mode == "home" and self._focus_zone == "row":
+            if self._cont_items:
+                self._cont_index = (self._cont_index + 1) % len(self._cont_items)
+                self._moveContinueSel()
+            return
+        if self._display_mode in ("home", "list"):
+            self["home_grid"].moveRight()
+        elif self._display_mode == "poster":
+            if self._layout_style == "grid": self["poster_grid"].moveRight()
+            else: self._moveCarousel(1)
+
+    def _setList(self, items):
+        show_adult = _get_config("show_adult", "false") == "true"
+        adult_words = ["18+", "للكبار", "سكس", "xxx", "adult", "إباح", "sex"]
+        if not show_adult:
+            items = [i for i in items if not any(w in (i.get("title", "") + i.get("category_name", "")).lower() for w in adult_words)]
+        content_items = [i for i in items if i.get("type") in ("movie", "series", "episode")]
+        if content_items:
+            self._items = content_items
+            self._display_mode = "poster"
+            if self._layout_style == "carousel":
+                if self._page > 1 and self._source == "category":
+                    content_items.insert(0, {"title": "Previous Page", "_is_prev_page": True, "type": "movie"})
+                if getattr(self, "_next_page_url", None):
+                    content_items.append({"title": "Next Page", "_is_next_page": True, "type": "movie"})
+                has_prev = self._page > 1 and self._source == "category"
+                has_next = getattr(self, "_next_page_url", None) is not None
+                if getattr(self, "_focus_end", False):
+                    if has_next:
+                        self.index = len(content_items) - 2
+                    else:
+                        self.index = len(content_items) - 1
+                    self._focus_end = False
+                else:
+                    if has_prev:
+                        self.index = 1
+                    else:
+                        self.index = 0
+            else:
+                self.index = 0
+            self.widget_map = list(range(self.carousel_slots))
+            self._showPosterMode()
+            if self._layout_style == "grid":
+                self["poster_grid"].setList(content_items)
+                self._onPosterGridSelectionChanged()
+            else:
+                self._paintCarousel()
+        else:
+            self._items = items
+            self._display_mode = "list"
+            self._artworkPollTimer.stop()
+            for i in range(CONT_SLOTS):
+                self["cont%d" % i].hide()
+            self["cont_title"].hide()
+            try: self["contSel"].hide()
+            except Exception: pass
+
+            self["backdropImg"].hide()
+            self["shade_overlay"].hide()
+            self["content_title"].setText("")
+            self["info_meta"].setText("")
+            self["info_plot"].setText("")
+            self._current_backdrop_path = ""
+
+            # List mode: pager ON (Fix 2a), and both grids' widgets hidden.
+            self["grid_status_left"].show()
+            self["grid_status_right"].show()
+
+            self["poster_grid"].hide()
+            for i in range(self.carousel_slots):
+                self["cfocus%d" % i].hide()
+                self["cposter%d" % i].hide()
+                self["cposterImg%d" % i].hide()
+                self["cfavMark%d" % i].hide()
+                self["cratingBadge%d" % i].hide()
+                self["cresumeMark%d" % i].hide()
+            for i in range(POSTER_GRID_ROWS):
+                for _c in range(POSTER_GRID_COLS):
+                    self["poster_%d_%d" % (i, _c)].hide()
+                    self["pbadge_%d_%d" % (i, _c)].hide()
+            for i in range(HOME_GRID_ROWS):
+                for _c in range(HOME_GRID_COLS):
+                    self["pic_%d_%d" % (i, _c)].hide()
+            self["home_grid"].show()
+            self["home_grid"].setList(items)
+            self["status"].setText("{} عنصر".format(len(items)))
+            # Category-list keybar: reset labels left over from
+            # _showPosterMode. Red = back to home, yellow = search.
+            self["key_red"].setText("رجوع")
+            self["key_green"].setText("")
+            self["key_yellow"].setText("بحث")
+            self["key_blue"].setText("")
+            self._updateGridFooter()
+
+    def _showSiteCategories(self):
+        # Bug E fix: cache the category list per site — Back from a
+        # category must not re-fetch the whole list every time.
+        cached = self._cats_cache.get(self._site)
+        if cached is not None:
+            self._source = "categories"
+            self._setList(cached)
+            self["title_text"].setText("تصنيفات {}".format(_site_label(self._site)))
+            self["status"].setText("اختر القسم")
+            return
+        try:
+            extractor = _get_extractor(self._site)
+            get_categories = getattr(extractor, "get_categories", None)
+            if not get_categories:
+                cats = [{"title": "لا توجد أقسام", "type": "error"}]
+            else:
+                if self._site in ["egydead", "egydead_coupons"]:
+                    movie_cats = get_categories("movie")
+                    series_cats = get_categories("series")
+                    cats = [_site_search_item(self._site)]
+                    for item in movie_cats:
+                        updated = dict(item); updated["_m_type"] = "movie"; cats.append(updated)
+                    for item in series_cats:
+                        updated = dict(item); updated["_m_type"] = "series"; cats.append(updated)
+                else:
+                    cats = [_site_search_item(self._site)] + (get_categories() or [])
+            plugin_health.record(self._site, "ok")
+        except Exception as e:
+            cats = [{"title": "فشل جلب الأقسام", "type": "error"}]
+            plugin_health.record(self._site, "blocked" if get_curl_failed_needs_proxy() else "down", str(e))
+        self._cats_cache[self._site] = cats
+        self._source = "categories"
+        self._setList(cats)
+        self["title_text"].setText("تصنيفات {}".format(_site_label(self._site)))
+        self["status"].setText("اختر القسم")
+
+    def _loadCategory(self, url, name, is_new=False):
+        self._source = "category"
+        self._cat_name = name
+        if is_new:
+            self._cat_url = url
+            self._page = 1
+            self._page_history = [(url, self._page)]
+        else:
+            key = (url, self._page)
+            if key not in self._page_history:
+                self._page_history.append(key)
+                if self._site not in ["egydead", "egydead_coupons", "fasel", "faselhdx"]:
+                    self._page += 1
+        self["status"].setText("جاري تحميل {}...".format(name))
+        threading.Thread(target=self._bgLoadCategory, args=(url,), daemon=True).start()
+
+    def _bgLoadCategory(self, url):
+        try:
+            extractor = _get_extractor(self._site)
+            get_category_items = getattr(extractor, "get_category_items", None)
+            if not get_category_items: return
+            if self._site in ["egydead", "egydead_coupons", "fasel", "faselhdx"]:
+                items = get_category_items(url, page=self._page)
+            else:
+                items = get_category_items(url)
+            plugin_health.record(self._site, "ok")
+            callInMainThread(self._onCategoryLoaded, items)
+        except Exception as e:
+            plugin_health.record(self._site, "down", str(e))
+            callInMainThread(self["status"].setText, "فشل: {}".format(str(e)[:60]))
+
+    def _onCategoryLoaded(self, items):
+        if not items:
+            self["status"].setText("لا توجد نتائج")
+            return
+        next_page_item = next((i for i in items if i.get("_action") == "category" and i.get("url")), None)
+        self._next_page_url = next_page_item["url"] if next_page_item else None
+        self._setList(_dedupe_items(items))
+
+    def _loadMovies(self):
+        self._m_type = "movie"
+        self._showSiteCategories()
+
+    def _loadSeries(self):
+        self._m_type = "series"
+        self._showSiteCategories()
+
+    def _openSettings(self):
+        from plugin_screen_settings import AdvancedArabicPlayerSettings
+        self.session.open(AdvancedArabicPlayerSettings, self._site)
+
+    def _showLibrary(self, kind):
+        if kind == "favorites": items = _get_favorite_items_list()
+        else: items = _history_items()
+        self._setList(items)
+        self["title_text"].setText("المفضلة" if kind == "favorites" else "السجل")
+        self["status"].setText("")
+
+    def _onSearch(self, forced_scope=None):
+        self.session.openWithCallback(self._onSearchQuery, AdvancedArabicPlayerSearch, current_site=self._site, default_scope=forced_scope or "all", query=self._last_query)
+
+    def _onSearchQuery(self, result=None):
+        if not result: return
+        # Bug A fix: honor the chosen scope (was: always "all").
+        if isinstance(result, str):
+            query, scope = result, "all"
+        else:
+            query = result[0]
+            scope = result[1] if len(result) > 1 else "all"
+        if not query: return
+        self._last_query = query
+        self["status"].setText("بحث عن: {}...".format(query))
+        threading.Thread(target=self._bgSearch, args=(query, scope or "all"), daemon=True).start()
+
+    def _bgSearch(self, query, scope="all"):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _search_one(name):
+            try:
+                extractor = _get_extractor(name)
+                results = extractor.search(query) or []
+                for item in results:
+                    item["_site"] = name
+                plugin_health.record(name, "ok")
+                return name, results
+            except Exception as e:
+                my_log("Search failed for site {}: {}".format(name, e))
+                plugin_health.record(name, "down", str(e))
+                return name, []
+
+        items = []
+        # Bug H fix: scope honored + 6 workers, not 17 simultaneous
+        # curl_cffi TLS sessions (RAM spike + CF bot-burst signature).
+        sites = list(_SEARCH_SITE_ORDER) if scope in ("all", "", None) else [scope]
+        with ThreadPoolExecutor(max_workers=min(6, len(sites))) as ex:
+            futures = [ex.submit(_search_one, name) for name in sites]
+            for future in as_completed(futures):
+                name, results = future.result()
+                items.extend(results)
+
+        callInMainThread(self._onSearchResults, items, query)
+
+    def _onSearchResults(self, items, query):
+        if not items:
+            self["status"].setText("لا توجد نتائج")
+            return
+        self._setList(_rank_search_items(items, query))
+
+    def _openItem(self, item):
+        self.session.open(AdvancedArabicPlayerDetail, item=item, site=item.get("_site", self._site), m_type=item.get("type", self._m_type))
+
+    def _nextPage(self):
+        next_url = getattr(self, "_next_page_url", None)
+        cat_url  = getattr(self, "_cat_url",  None)
+        cat_name = getattr(self, "_cat_name", "")
+        if self._source == "category" and (next_url or cat_url):
+            if self._site in ["egydead", "egydead_coupons", "fasel", "faselhdx"]:
+                self._page += 1
+                fetch_url = cat_url
+            else:
+                fetch_url = next_url
+            if fetch_url:
+                self._loadCategory(fetch_url, cat_name)
+
+    def _prevPage(self):
+        if len(self._page_history) > 1:
+            self._page_history.pop()
+            prev_url, prev_page = self._page_history[-1]
+            cat_name = getattr(self, "_cat_name", "")
+            self._page = prev_page
+            if self._layout_style == "carousel":
+                self._focus_end = True
+            self["status"].setText("جاري تحميل {}...".format(cat_name))
+            threading.Thread(target=self._bgLoadCategory, args=(prev_url,), daemon=True).start()
+
+    def _onGreen(self):
+        if self._display_mode == "poster":
+            current = _get_config("layout_style", "carousel")
+            self._layout_style = "grid" if current == "carousel" else "carousel"
+            _set_config("layout_style", self._layout_style)
+            saved_index = self.index
+            if current == "grid":
+                saved_index = self["poster_grid"].currentIndex
+            self._showPosterMode()
+            if self._layout_style == "grid":
+                self["poster_grid"].setList(self._items)
+                target_idx = saved_index
+                pg = self["poster_grid"]
+                if 0 <= target_idx < len(self._items):
+                    pg.currentPage = target_idx // pg.itemsPerPage
+                    remainder = target_idx % pg.itemsPerPage
+                    pg.currentRow = remainder // pg.cols
+                    pg.currentCol = remainder % pg.cols
+                    pg.currentIndex = target_idx
+                    pg._redraw()
+                    pg._notify()
+            else:
+                self.index = saved_index
+                self._paintCarousel()
+        else:
+            # List/home: green = favorites (the old _loadSeries re-fetch
+            # on categories was a confusing no-op — Bug D fix).
+            self._showLibrary("favorites")
+
+    def _onBlue(self):
+        if self._source == "home": self._openSettings()
+        else: self._nextPage()
+
+    def _onBack(self):
+        if self._display_mode == "poster":
+            if len(getattr(self, "_page_history", [])) > 1 and self._source == "category":
+                self._prevPage()
+            else:
+                self._showSiteCategories()
+        elif self._source != "home":
+            self._showHome()
+        else:
+            if self._focus_zone == "row":
+                self._focus_zone = "grid"
+                try: self["contSel"].hide()
+                except Exception: pass
+                return
+            self.close()
+
+    def _onPluginClose(self):
+        try: self._artworkPollTimer.stop()
+        except: pass
+        try: plugin_imagecache.cancelAsyncImages()
+        except: pass
+
+
+def _get_favorite_items_list():
+    # local alias keeps the class body identical to the monolith's
+    from plugin_state import _favorite_items as _fi
+    return _fi()
+
+
+def _get_extractor(site):
+    return get_extractor(site)

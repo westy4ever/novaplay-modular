@@ -1,0 +1,4 @@
+cd /usr/lib/enigma2/python/Plugins/Extensions/AdvancedArabicPlayer
+python3 run_tests.py
+
+python3 run_release_gate.py

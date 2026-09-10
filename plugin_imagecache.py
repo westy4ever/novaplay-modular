@@ -1,0 +1,549 @@
+# -*- coding: utf-8 -*-
+"""
+Advanced Arabic Player - async poster/artwork cache
+=======================================================
+Ported from westy4ever's XtreamNew plugin (imagecache.py), renamed to fit
+this project. No business-logic dependency - pure disk cache + a bounded
+background-download worker pool.
+
+Design (unchanged from the source): GUI code calls getCachedImage(url) to
+check the local cache instantly (no network call from the Enigma2 UI
+thread), and requestImageAsync()/requestImageAsyncPriority() to queue a
+background download if it's not cached yet. There is no completion
+callback - callers are expected to poll getCachedImage() again on a
+short timer (see AdvancedArabicPlayerHome._artworkPollTimer in plugin.py),
+which is the same pattern the source plugin's carousel screens use.
+
+Changes in this revision (audit fix):
+  * Bounded cache. CACHE_MAX_AGE is effectively "never", so the images
+    dir used to grow forever on /media/hdd. evictCacheIfLarge() now
+    caps the file count (oldest-mtime first — and getCachedImage()'s
+    touch() makes that an LRU: actively displayed posters stay hot).
+    It runs automatically: a time-throttled check (at most once per
+    _EVICT_INTERVAL) inside requestImageAsync*() spawns a worker
+    thread, so the UI thread never lists the directory. The function
+    is also public for a manual call (e.g. from a settings action).
+"""
+
+from __future__ import absolute_import, print_function
+
+import os
+import time
+import hashlib
+import threading
+import re
+
+try:
+    import urllib2 as urllib_request
+except Exception:
+    import urllib.request as urllib_request
+
+try:
+    from urlparse import urlparse
+except Exception:
+    from urllib.parse import urlparse
+
+try:
+    from extractors.base import log as _log
+except Exception:
+    import time
+    def _log(msg):
+        try:
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            with open("/tmp/arabicplayer.log", "a") as f:
+                f.write("[{}] {}\n".format(ts, msg))
+        except Exception:
+            pass
+
+
+CACHE_BASE_HDD = "/media/hdd/AdvancedArabicPlayer/cache"
+CACHE_BASE_TMP = "/tmp/AdvancedArabicPlayer/cache"
+CACHE_IMAGES_DIRNAME = "images"
+CACHE_MAX_AGE = 60 * 60 * 24 * 365 * 100   # effectively no expiry
+
+# ─── Cache size cap (audit fix: the cache used to grow forever) ─────────────
+# Oldest-mtime files beyond this count are removed by evictCacheIfLarge().
+# mtime is refreshed by touch() on every cache HIT, so the policy is LRU:
+# images the user actually sees stay; stale browse-history art goes first.
+CACHE_MAX_FILES = 4000
+_EVICT_INTERVAL = 6 * 3600                  # at most one eviction pass per 6h
+_LAST_EVICT = [0.0]                         # [ts] — mutable without global
+
+
+def ensureDir(path):
+    try:
+        if path and not os.path.exists(path):
+            os.makedirs(path)
+    except Exception:
+        pass
+
+
+def getCacheBase():
+    base = CACHE_BASE_HDD
+    if not os.path.exists("/media/hdd"):
+        base = CACHE_BASE_TMP
+    ensureDir(base)
+    return base
+
+
+def getImagesDir():
+    p = os.path.join(getCacheBase(), CACHE_IMAGES_DIRNAME)
+    ensureDir(p)
+    return p
+
+
+def guessExtFromUrl(url):
+    # Always return .jpg because:
+    # 1. resizeCover() converts everything to JPEG via PIL when available
+    # 2. Enigma2's setPixmapFromFile() cannot decode WebP natively
+    # 3. A .jpg extension ensures Enigma2 tries JPEG decoding
+    # 4. downloadUrl() now tries a .jpg URL fallback for WebP sources
+    return ".jpg"
+
+
+def buildCachePath(url, target_size=None):
+    key = url if not target_size else "%s|%dx%d" % (url, target_size[0], target_size[1])
+    try:
+        digest = hashlib.md5(key.encode("utf-8")).hexdigest()
+    except Exception:
+        digest = hashlib.md5(str(key).encode("utf-8")).hexdigest()
+    return os.path.join(getImagesDir(), digest + guessExtFromUrl(url))
+
+
+def touch(path):
+    try:
+        now = time.time()
+        os.utime(path, (now, now))
+    except Exception:
+        pass
+
+
+def isFresh(path):
+    try:
+        if not os.path.exists(path):
+            return False
+        age = time.time() - os.path.getmtime(path)
+        return age < CACHE_MAX_AGE
+    except Exception:
+        return False
+
+
+def writeFileAtomic(path, data):
+    import threading as _threading
+    tmp = "{}.{}.{}.tmp".format(path, os.getpid(), _threading.get_ident())
+    try:
+        f = open(tmp, "wb")
+        f.write(data)
+        f.close()
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+        os.rename(tmp, path)
+        return True
+    except Exception as e:
+        _log("plugin_imagecache: writeFileAtomic FAILED for {}: {}".format(path, e))
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        return False
+
+
+# ─── Cache eviction (audit fix) ──────────────────────────────────────────────
+
+def _mtime_safe(path):
+    # Unreadable/vanished files sort as oldest → evicted first.
+    try:
+        return os.path.getmtime(path)
+    except Exception:
+        return 0.0
+
+
+def evictCacheIfLarge():
+    """Cap the image cache at CACHE_MAX_FILES, oldest-mtime first.
+    Safe to run any time: writeFileAtomic()'s tmp files end in .tmp
+    (never matched by the *.jpg glob), and removing a file that a
+    Pixmap is currently displaying is harmless on Linux (unlink keeps
+    open fds valid; at worst the image re-downloads next request).
+    Returns the number of files removed."""
+    try:
+        import glob
+        files = glob.glob(os.path.join(getImagesDir(), "*.jpg"))
+        if len(files) <= CACHE_MAX_FILES:
+            return 0
+        files.sort(key=_mtime_safe)
+        excess = len(files) - CACHE_MAX_FILES
+        removed = 0
+        for p in files[:excess]:
+            try:
+                os.remove(p)
+                removed += 1
+            except Exception:
+                pass
+        if removed:
+            _log("plugin_imagecache: evicted {} cached image(s) ({} > {} cap)".format(
+                removed, len(files), CACHE_MAX_FILES))
+        return removed
+    except Exception as e:
+        try:
+            _log("plugin_imagecache: eviction failed: {}".format(e))
+        except Exception:
+            pass
+        return 0
+
+
+def _maybe_evict_async():
+    """Time-throttled eviction trigger — call from requestImageAsync*().
+    The mtime check is cheap enough for the UI thread; the directory
+    scan itself runs on a daemon thread, at most once per 6 hours."""
+    try:
+        if time.time() - _LAST_EVICT[0] < _EVICT_INTERVAL:
+            return
+        _LAST_EVICT[0] = time.time()
+        threading.Thread(target=evictCacheIfLarge, daemon=True).start()
+    except Exception:
+        pass
+
+
+def downloadUrl(url, timeout=8):
+    # Added Referer header (some CDNs require it) and a WebP-to-JPG URL
+    # fallback (Enigma2 can't display WebP natively, and PIL may not have
+    # libwebp support on embedded receivers) - matches the same fix
+    # already used by plugin_util.py's _fetch_poster_bytes.
+    try:
+        req = urllib_request.Request(url)
+        req.add_header("User-Agent", "Mozilla/5.0")
+        try:
+            parsed = urlparse(url)
+            referer = "{}://{}/".format(parsed.scheme, parsed.netloc)
+            req.add_header("Referer", referer)
+        except Exception:
+            pass
+        response = urllib_request.urlopen(req, timeout=timeout)
+        data = response.read()
+        if data:
+            return data
+        _log("plugin_imagecache: downloadUrl got empty body for {}".format(url))
+    except Exception as e:
+        _log("plugin_imagecache: downloadUrl FAILED for {}: {}".format(url, e))
+
+    # If the URL is WebP, try requesting the .jpg version - many
+    # WordPress/CDN sites serve both formats at the same path.
+    if url and ".webp" in url.lower():
+        try:
+            jpg_url = re.sub(r"\.webp(\?.*)?$", r".jpg\1", url, flags=re.I)
+            if jpg_url != url:
+                req2 = urllib_request.Request(jpg_url)
+                req2.add_header("User-Agent", "Mozilla/5.0")
+                try:
+                    parsed = urlparse(jpg_url)
+                    referer = "{}://{}/".format(parsed.scheme, parsed.netloc)
+                    req2.add_header("Referer", referer)
+                except Exception:
+                    pass
+                response = urllib_request.urlopen(req2, timeout=timeout)
+                data = response.read()
+                if data:
+                    return data
+                _log("plugin_imagecache: webp->jpg fallback got empty body for {}".format(jpg_url))
+        except Exception as e:
+            _log("plugin_imagecache: webp->jpg fallback FAILED for {}: {}".format(url, e))
+
+    return None
+
+
+def resizeCover(data, target_size, darken=1.0):
+    """Resize+crop image bytes to exactly fill target_size (cover fit,
+    aspect-preserving, center-cropped) so the cached file already matches
+    the display widget's box pixel-for-pixel. Enigma2's Pixmap widgets
+    don't reliably aspect-scale a mismatched-size image into a fixed box
+    on their own - without this, posters can end up stretched or
+    effectively "zoomed in" depending on the receiver's image/skin
+    engine.
+
+    darken: 0.0-1.0 multiplier applied to pixel brightness after resize.
+    1.0 = no change. Used to bake a dimming effect directly into the
+    cached file, since this platform's Enigma2 skin engine does not
+    reliably honor widget-level transparency/alpha for overlay dimming.
+
+    Returns None if the data is corrupt/truncated so the caller doesn't cache it.
+    Falls back to the original bytes only if PIL isn't installed at all.
+    """
+    if not target_size:
+        return data
+
+    try:
+        from PIL import Image
+        import io
+    except ImportError:
+        return data
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        img = img.convert("RGB")
+        img.load()
+
+        try:
+            from PIL import ImageOps
+            fitted = ImageOps.fit(img, target_size, Image.LANCZOS)
+        except Exception:
+            fitted = img.resize(target_size, Image.LANCZOS)
+
+        if darken and darken < 1.0:
+            try:
+                from PIL import ImageEnhance
+                fitted = ImageEnhance.Brightness(fitted).enhance(darken)
+            except Exception:
+                pass
+
+        out = io.BytesIO()
+        fitted.save(out, format="JPEG", quality=88)
+        return out.getvalue()
+
+    except Exception:
+        return None
+
+
+# ─── Non-blocking image cache ────────────────────────────────────────────────
+# GUI code checks the local cache instantly and requests downloads in a
+# background thread. No network call is made from the Enigma2 UI thread.
+
+_ASYNC_LOCK = threading.Lock()
+_ASYNC_IN_PROGRESS = {}
+_ASYNC_STATS_TOTAL = 0
+_ASYNC_STATS_DONE = 0
+_ASYNC_QUEUE = []
+_ASYNC_WORKERS = 0
+_ASYNC_MAX_WORKERS = 5
+_ASYNC_CANCEL_TOKEN = 0
+
+
+def getCachedImage(url, target_size=None):
+    """Return the local cached path only if it already exists/fresh."""
+    if not url:
+        return ""
+    try:
+        if not isinstance(url, str):
+            try:
+                url = url.decode("utf-8", "ignore")
+            except Exception:
+                url = str(url)
+    except Exception:
+        pass
+    try:
+        cache_path = buildCachePath(url, target_size)
+        if isFresh(cache_path):
+            touch(cache_path)
+            return cache_path
+    except Exception:
+        pass
+    return ""
+
+
+def _mark_async_done(cache_path):
+    global _ASYNC_STATS_DONE
+    try:
+        with _ASYNC_LOCK:
+            existed = bool(_ASYNC_IN_PROGRESS.pop(cache_path, None))
+            if existed:
+                _ASYNC_STATS_DONE += 1
+    except Exception:
+        pass
+
+
+def _async_worker_loop():
+    global _ASYNC_WORKERS
+    try:
+        worker_token = int(_ASYNC_CANCEL_TOKEN)
+    except Exception:
+        worker_token = 0
+    try:
+        while True:
+            item = None
+            try:
+                with _ASYNC_LOCK:
+                    if _ASYNC_QUEUE:
+                        item = _ASYNC_QUEUE.pop(0)
+                    else:
+                        _ASYNC_WORKERS = max(0, int(_ASYNC_WORKERS) - 1)
+                        return
+            except Exception:
+                item = None
+            if not item:
+                return
+            try:
+                if int(_ASYNC_CANCEL_TOKEN) != int(worker_token):
+                    _mark_async_done(item[1])
+                    continue
+            except Exception:
+                pass
+            url, cache_path, target_size = item
+            try:
+                data = downloadUrl(url, timeout=8)
+                try:
+                    if int(_ASYNC_CANCEL_TOKEN) != int(worker_token):
+                        _mark_async_done(cache_path)
+                        continue
+                except Exception:
+                    pass
+                if data:
+                    if target_size:
+                        processed_data = resizeCover(data, target_size)
+                    else:
+                        processed_data = data
+
+                    # Only cache if resizeCover didn't signal corruption (None)
+                    if processed_data is not None:
+                        ok = writeFileAtomic(cache_path, processed_data)
+                        if not ok:
+                            _log("plugin_imagecache: cache write failed, image will be re-downloaded next poll: {}".format(url))
+                    else:
+                        _log("plugin_imagecache: skipping cache write (corrupt image data) for {}".format(url))
+                else:
+                    _log("plugin_imagecache: no data downloaded for {}, skipping cache".format(url))
+            except Exception as e:
+                _log("plugin_imagecache: worker error for {}: {}".format(url, e))
+            _mark_async_done(cache_path)
+    except Exception as e:
+        _log("plugin_imagecache: worker loop crashed: {}".format(e))
+        try:
+            with _ASYNC_LOCK:
+                _ASYNC_WORKERS = max(0, int(_ASYNC_WORKERS) - 1)
+        except Exception:
+            pass
+
+
+def _ensure_async_workers():
+    global _ASYNC_WORKERS
+    need = False
+    try:
+        with _ASYNC_LOCK:
+            need = bool(_ASYNC_QUEUE) and int(_ASYNC_WORKERS) < int(_ASYNC_MAX_WORKERS)
+            if need:
+                _ASYNC_WORKERS += 1
+    except Exception:
+        need = False
+    if not need:
+        return
+    try:
+        t = threading.Thread(target=_async_worker_loop)
+        t.daemon = True
+        t.start()
+    except Exception:
+        try:
+            with _ASYNC_LOCK:
+                _ASYNC_WORKERS = max(0, int(_ASYNC_WORKERS) - 1)
+        except Exception:
+            pass
+
+
+def cancelAsyncImages():
+    """Stop pending artwork downloads for the screen that is closing.
+
+    Running urllib calls cannot be interrupted safely, but this clears the
+    queue immediately and makes workers ignore their current result if it
+    belongs to a stale token.
+    """
+    global _ASYNC_STATS_TOTAL, _ASYNC_STATS_DONE, _ASYNC_CANCEL_TOKEN
+    try:
+        with _ASYNC_LOCK:
+            _ASYNC_CANCEL_TOKEN += 1
+            _ASYNC_QUEUE[:] = []
+            _ASYNC_IN_PROGRESS.clear()
+            _ASYNC_STATS_TOTAL = 0
+            _ASYNC_STATS_DONE = 0
+    except Exception:
+        pass
+
+
+def requestImageAsync(url, target_size=None):
+    """Queue a background download if needed; return cached path if ready."""
+    global _ASYNC_STATS_TOTAL
+    if not url:
+        return ""
+    ready = getCachedImage(url, target_size)
+    if ready:
+        return ready
+    try:
+        if not isinstance(url, str):
+            try:
+                url = url.decode("utf-8", "ignore")
+            except Exception:
+                url = str(url)
+        cache_path = buildCachePath(url, target_size)
+    except Exception:
+        return ""
+
+    queued = False
+    try:
+        with _ASYNC_LOCK:
+            if not _ASYNC_IN_PROGRESS.get(cache_path):
+                _ASYNC_IN_PROGRESS[cache_path] = 1
+                _ASYNC_QUEUE.append((url, cache_path, target_size))
+                queued = True
+                _ASYNC_STATS_TOTAL += 1
+    except Exception:
+        queued = False
+    if queued:
+        _maybe_evict_async()
+        _ensure_async_workers()
+    return ""
+
+
+def requestImageAsyncPriority(url, target_size=None):
+    """Queue a background download at the front for currently visible artwork.
+
+    Keeps full-page warmup running in the background, but gives the
+    selected/visible poster priority so navigation doesn't wait behind
+    everything else already queued.
+    """
+    global _ASYNC_STATS_TOTAL
+    if not url:
+        return ""
+    ready = getCachedImage(url, target_size)
+    if ready:
+        return ready
+    try:
+        if not isinstance(url, str):
+            try:
+                url = url.decode("utf-8", "ignore")
+            except Exception:
+                url = str(url)
+        cache_path = buildCachePath(url, target_size)
+    except Exception:
+        return ""
+    queued = False
+    try:
+        with _ASYNC_LOCK:
+            if not _ASYNC_IN_PROGRESS.get(cache_path):
+                _ASYNC_IN_PROGRESS[cache_path] = 1
+                _ASYNC_QUEUE.insert(0, (url, cache_path, target_size))
+                queued = True
+                _ASYNC_STATS_TOTAL += 1
+    except Exception:
+        queued = False
+    if queued:
+        _maybe_evict_async()
+        _ensure_async_workers()
+    return ""
+
+
+def hasPendingAsyncImages():
+    try:
+        with _ASYNC_LOCK:
+            return bool(_ASYNC_IN_PROGRESS)
+    except Exception:
+        return False
+
+def getAsyncImageStats():
+    try:
+        with _ASYNC_LOCK:
+            pending = len(_ASYNC_IN_PROGRESS)
+            total = int(_ASYNC_STATS_TOTAL)
+            done = int(_ASYNC_STATS_DONE)
+    except Exception:
+        pending = total = done = 0
+    return {"done": done, "total": total, "pending": pending}
