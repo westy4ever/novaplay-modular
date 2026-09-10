@@ -952,15 +952,14 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         self.__onExit()
 
-    # ── Studio key routing (v4 fix) ─────────────────────────────────────
-    # ROOT CAUSE of skipped cards: on this image ONE physical LEFT/RIGHT
-    # press is dispatched TWICE — as DirectionActions ("left"/"right")
-    # AND as InfobarSeekActions ("seekBack"/"seekFwd"). Both handlers
-    # used to call _studioMove() → the selection advanced TWO cards per
-    # press (Delay → Font, Size skipped). __studioDedup() swallows the
-    # duplicate dispatch (same direction twice within 150 ms).
-    # Workflow (as printed on the studioHelp bar):
-    #   ◀ ▶ → select card   ▲ ▼ → adjust value   OK → menu   EXIT → close
+    # ── Key routing: studio → autonext → normal playback (v4.1) ────────
+    # One physical LEFT/RIGHT press is dispatched TWICE on this image
+    # — as DirectionActions ("left"/"right") AND InfobarSeekActions
+    # ("seekBack"/"seekFwd"). Proven by the log: two +150s position
+    # jumps = 2 presses × (+10 +60). __studioDedup() swallows the
+    # duplicate (same direction twice within 150 ms).
+    #   Studio:  ◀ ▶ select card    ▲ ▼ adjust value
+    #   Player:  ◀ ▶ ±10s          ▲ ▼ ±60s
     def __studioDedup(self, direction):
         """True = duplicate dispatch of the same keypress within 150 ms."""
         try:
@@ -975,9 +974,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         return False
 
     def __studioAdjustVKey(self, direction):
-        """▲/▼: adjust the selected value one step. Cards that open
-        sub-screens or act destructively (font / presets / pickline /
-        reset / remove) are OK-only — ▲/▼ are inert there on purpose."""
+        """▲/▼ in studio: adjust the selected value one step. Cards that
+        open sub-screens or act destructively are OK-only."""
         if not getattr(self, "_studioOverlayActive", False):
             return
         if not (0 <= self._studioIdx < len(self._studioItems)):
@@ -992,24 +990,32 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             if not self.__studioDedup(-1):
                 self._studioMove(-1)
             return
-        self.__seek(-10)
+        if not self.__studioDedup(-1):
+            self.__seek(-10)
 
     def __navRightKey(self):
         if self._studioOverlayActive:
             if not self.__studioDedup(+1):
                 self._studioMove(+1)
             return
-        self.__seek(+10)
+        if not self.__studioDedup(+1):
+            self.__seek(+10)
 
     def __navUpKey(self):
         if self._studioOverlayActive:
             if not self.__studioDedup(-2):
                 self.__studioAdjustVKey(+1)
+            return
+        if not self.__studioDedup(-2):
+            self.__seek(-60)
 
     def __navDownKey(self):
         if self._studioOverlayActive:
             if not self.__studioDedup(+2):
                 self.__studioAdjustVKey(-1)
+            return
+        if not self.__studioDedup(+2):
+            self.__seek(+60)
 
     def __navSeekFwdKey(self):
         if getattr(self, "_studioOverlayActive", False):
@@ -1018,7 +1024,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         if getattr(self, "_autonext_active", False):
             return
-        self.__seek(+60)
+        if not self.__studioDedup(+1):
+            self.__seek(+10)
 
     def __navSeekBackKey(self):
         if getattr(self, "_studioOverlayActive", False):
@@ -1027,7 +1034,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         if getattr(self, "_autonext_active", False):
             return
-        self.__seek(-60)
+        if not self.__studioDedup(-1):
+            self.__seek(-10)
 
     # ─── pause / seek / restart / exit ───────────────────────────────────
     def __togglePause(self):
@@ -1091,7 +1099,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
                 if self._paused:
                     self._paused_elapsed = target
-            self._total_secs = 0
+            # v4.1: do NOT zero _total_secs here — the resume-seek at
+            # startup ran through __seek and wiped the duration before
+            # the OSD could learn it, leaving number-key jumps dead.
+            # (__onConfirmed already resets it properly on restart.)
+            my_log("seek: delta={}s → target={}s".format(int(delta_secs), target))
             _th = target // 3600; _tm = (target % 3600) // 60; _ts = target % 60
             _arr = u"➡" if delta_secs > 0 else u"⬅"
             self["status"].setText(u"{} {:02d}:{:02d}:{:02d}".format(_arr, _th, _tm, _ts))
@@ -1102,8 +1114,17 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __seekPct(self, pct):
         """Number keys: jump to a % of total duration (needs total; asks
-        GStreamer for it when the OSD hasn't learned it yet)."""
+        GStreamer for it when the OSD hasn't learned it yet).
+        v4.1: self-contained dedup (keys 1/3/4/6/7/9 can dispatch BOTH
+        as "N" and "seekdef:N") + telemetry log for diagnostics."""
         try:
+            now = time.time()
+            if pct == getattr(self, "_seekPctLastPct", None) and \
+                    (now - getattr(self, "_seekPctLastT", 0.0)) < 0.30:
+                return
+            self._seekPctLastPct = pct
+            self._seekPctLastT = now
+
             total = self._total_secs
             if not total:
                 try:
@@ -1116,11 +1137,13 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                             self._total_secs = total
                 except Exception:
                     pass
+            cur = current_play_secs()
+            my_log("seekPct: key={}%, total={}s, current={}s".format(pct, total, cur))
             if not total:
                 self["status"].setText("مدة غير معروفة بعد…")
                 self.__showOSD(True)
                 return
-            self.__seek(int(total * pct / 100) - current_play_secs())
+            self.__seek(int(total * pct / 100) - cur)
         except Exception as e:
             my_log("seekPct error: {}".format(e))
 
