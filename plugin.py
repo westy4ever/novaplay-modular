@@ -8,12 +8,27 @@ PHASE-1 MODULAR SPLIT: this file registers the plugin and opens the
 splash screen only. All screens live in plugin_screen_*.py, the
 playback engine in novaplay_proxy / plugin_downloads, the subtitle
 system in novaplay_subtitles / novaplay_substudio, shared constants in
-plugin_common. Import order matters: plugin_common's sys.path shim runs
-first via this import chain.
+plugin_common. Import order matters: the sys.path bootstrap below runs
+FIRST, before any of our own flat imports — on Python 3 the shim that
+lives inside plugin_common.py can never run, because the import of
+plugin_common itself fails without this bootstrap.
 
 Single dispatcher note: callInMainThread comes ONLY from
 novaplay_thread everywhere — the old in-plugin CMIT queue is gone.
 """
+
+# ─── Enigma2 / Python 3 import bootstrap ──────────────────────────────
+# OpenATV 6.2+/7.x uses Python 3, where flat imports like
+# `import plugin_common` / `from extractors import ...` no longer look
+# inside this plugin's own folder. Adding our folder to sys.path fixes
+# all of them at once. KEEP THIS BLOCK ABOVE ALL OTHER IMPORTS.
+import os
+import sys
+
+_PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
+if _PLUGIN_DIR and _PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, _PLUGIN_DIR)
+# ──────────────────────────────────────────────────────────────────────
 
 from Plugins.Plugin import PluginDescriptor
 
