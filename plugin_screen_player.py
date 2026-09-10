@@ -232,16 +232,13 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         <widget name="osd_titlebar" position="160,860" size="1600,52" backgroundColor="#0D1520" zPosition="11" />
         <!-- Poster floats ABOVE the OSD panel, over the video's left edge:
              132x198 (2:3), clear of the seekbar entirely, hides with the OSD -->
-        <widget name="osdPosterBox" position="160,648" size="140,206" backgroundColor="#161B22" cornerRadius="12" zPosition="12" transparent="0" />
-        <widget name="osdPoster" position="164,652" size="132,198" zPosition="12" alphatest="blend" scale="1" />
+        <widget name="osdPosterBox" position="160,606" size="168,248" backgroundColor="#161B22" cornerRadius="12" zPosition="12" transparent="0" />
+        <widget name="osdPoster" position="164,610" size="160,240" zPosition="12" alphatest="blend" scale="1" />
         <widget name="osd_title"    position="180,868" size="1180,38" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="left" />
-        <!-- Fix 1: Video info badge -->
-        <widget name="osd_videinfo" position="900,868" size="400,38" font="Regular;26" foregroundColor="#39D1D4D9" transparent="1" zPosition="12" halign="left" />
-        <!-- Fix 2: Subtitle indicator -->
-        <widget name="osd_subinfo" position="1340,870" size="36,34" font="Regular;28" foregroundColor="#39FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
-        <!-- Fix 3: Current time -->
-        <widget name="osd_clock" position="1700,868" size="120,38" font="Regular;28" foregroundColor="#8B49E4B9" transparent="1" zPosition="12" halign="right" />
-        <widget name="osd_durtext"  position="1380,868" size="360,38" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
+        <widget name="osd_videinfo" position="860,868" size="420,38" font="Regular;26" foregroundColor="#39D1D4D9" transparent="1" zPosition="12" halign="left" />
+        <widget name="osd_subinfo" position="1290,870" size="36,34" font="Regular;28" foregroundColor="#39FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
+        <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#8B49E4B9" transparent="1" zPosition="12" halign="right" />
+        <widget name="osd_durtext"  position="1330,868" size="290,38" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
         <widget name="seekbar" position="180,912" size="1480,12" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="6" />
         <widget name="prog_bar"  position="1660,906" size="100,26" font="Regular;20" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_elapsed"  position="180,938" size="320,44" font="Regular;36" foregroundColor="#FFD740" transparent="1" zPosition="12" />
@@ -565,12 +562,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._poster_painted = True
         path = ""
         try:
-            path = plugin_imagecache.getCachedImage(url, target_size=(132, 198))
+            path = plugin_imagecache.getCachedImage(url, target_size=(160, 240))
         except Exception:
             path = ""
         if not path:
             try:
-                plugin_imagecache.requestImageAsyncPriority(url, target_size=(132, 198))
+                plugin_imagecache.requestImageAsyncPriority(url, target_size=(160, 240))
             except Exception:
                 pass
             try:
@@ -645,13 +642,18 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                     self._osd_video_info = ""
             self["osd_videinfo"].setText(self._osd_video_info)
             
-            # Fix 2: Subtitle indicator
+            # Fix 2: Subtitle indicator — bright gold CC when active,
+            # dim grey cc when none (case alone was easy to miss)
             try:
                 from novaplay_subtitles import get_subtitle_state
-                if get_subtitle_state().get("path"):
-                    self["osd_subinfo"].setText("CC")
-                else:
-                    self["osd_subinfo"].setText("cc")
+                _cc_on = bool(get_subtitle_state().get("path"))
+                self["osd_subinfo"].setText("CC" if _cc_on else "cc")
+                if parseColor is not None:
+                    try:
+                        self["osd_subinfo"].instance.setForegroundColor(
+                            parseColor("#39FFD740" if _cc_on else "#396E7681"))
+                    except Exception:
+                        pass
             except Exception:
                 pass
             
