@@ -950,29 +950,69 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         self.__onExit()
 
+    # ── Studio key routing (v4 fix) ─────────────────────────────────────
+    # ROOT CAUSE of skipped cards: on this image ONE physical LEFT/RIGHT
+    # press is dispatched TWICE — as DirectionActions ("left"/"right")
+    # AND as InfobarSeekActions ("seekBack"/"seekFwd"). Both handlers
+    # used to call _studioMove() → the selection advanced TWO cards per
+    # press (Delay → Font, Size skipped). __studioDedup() swallows the
+    # duplicate dispatch (same direction twice within 150 ms).
+    # Workflow (as printed on the studioHelp bar):
+    #   ◀ ▶ → select card   ▲ ▼ → adjust value   OK → menu   EXIT → close
+    def __studioDedup(self, direction):
+        """True = duplicate dispatch of the same keypress within 150 ms."""
+        try:
+            now = time.time()
+        except Exception:
+            return False
+        if direction == getattr(self, "_studioNavDir", 0) and \
+                (now - getattr(self, "_studioNavT", 0.0)) < 0.15:
+            return True
+        self._studioNavDir = direction
+        self._studioNavT = now
+        return False
+
+    def __studioAdjustVKey(self, direction):
+        """▲/▼: adjust the selected value one step. Cards that open
+        sub-screens or act destructively (font / presets / pickline /
+        reset / remove) are OK-only — ▲/▼ are inert there on purpose."""
+        if not getattr(self, "_studioOverlayActive", False):
+            return
+        if not (0 <= self._studioIdx < len(self._studioItems)):
+            return
+        key = self._studioItems[self._studioIdx][2]
+        if key in ("font", "presets", "pickline", "reset", "remove"):
+            return
+        self._studioAdjust(direction)
+
     def __navLeftKey(self):
         if self._studioOverlayActive:
-            self._studioMove(-1)
+            if not self.__studioDedup(-1):
+                self._studioMove(-1)
             return
         self.__seek(-10)
 
     def __navRightKey(self):
         if self._studioOverlayActive:
-            self._studioMove(+1)
+            if not self.__studioDedup(+1):
+                self._studioMove(+1)
             return
         self.__seek(+10)
 
     def __navUpKey(self):
         if self._studioOverlayActive:
-            self._studioAdjust(+1)
+            if not self.__studioDedup(-2):
+                self.__studioAdjustVKey(+1)
 
     def __navDownKey(self):
         if self._studioOverlayActive:
-            self._studioAdjust(-1)
+            if not self.__studioDedup(+2):
+                self.__studioAdjustVKey(-1)
 
     def __navSeekFwdKey(self):
         if getattr(self, "_studioOverlayActive", False):
-            self._studioMove(+1)
+            if not self.__studioDedup(+1):
+                self._studioMove(+1)
             return
         if getattr(self, "_autonext_active", False):
             return
@@ -980,11 +1020,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __navSeekBackKey(self):
         if getattr(self, "_studioOverlayActive", False):
-            self._studioMove(-1)
+            if not self.__studioDedup(-1):
+                self._studioMove(-1)
             return
         if getattr(self, "_autonext_active", False):
             return
-        self.__seek(-60)            
+        self.__seek(-60)
 
     # ─── pause / seek / restart / exit ───────────────────────────────────
     def __togglePause(self):
@@ -1707,15 +1748,53 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if not total:
             return
         idx = max(0, min(self._studioIdx, total - 1))
-        start = self._studioWin
-        if idx < start:
-            start = idx
-        if idx >= start + 5:
-            start = idx - 4
-        if total > 5 and start > total - 5:
-            start = total - 5
-        self._studioWin = max(0, start)
+        # True carousel: the selected item ALWAYS sits in the center
+        # card (studioCard2 — the blue one). Items beyond the list
+        # edges render as hidden cards, so at Delay / at Remove the
+        # selection is still centered.
+        self._studioWin = idx - 2
         for slot, card in enumerate(self._STUDIO_CARDS):
+            item_i = self._studioWin + slot
+            txt = ""
+            if 0 <= item_i < total:
+                label, value, _k, _s = self._studioItems[item_i]
+                txt = "%s\n%s" % (label, value) if value else label
+            try:
+                self[card].setText(txt)
+                if txt:
+                    self[card].show()
+                else:
+                    self[card].hide()
+            except Exception:
+                pass
+        try:
+            self["studioStatus"].setText("بث مباشر للتعديلات")
+        except Exception:
+            pass
+        try:
+            from novaplay_substudio import STUDIO
+            body = STUDIO.get_preview()
+            text = body[0] if body else ""
+            if len(body) > 1 and body[1]:
+                text = text + "\n" + body[1][:70]
+            self["studioPreview"].setText(text or "لا توجد ترجمة نشطة")
+            try:
+                self["studioPreview"].instance.setFont(
+                    gFont("Regular", max(22, min(int(STUDIO.style["size"]), 34))))
+            except Exception:
+                pass
+        except Exception:
+            pass
+        cur_key = self._studioItems[idx][2] if self._studioItems else ""
+        show_safe = cur_key in ("offset_y", "align")
+        for k in ("safeTop", "safeBottom", "safeLeft", "safeRight"):
+            try:
+                if show_safe:
+                    self[k].show()
+                else:
+                    self[k].hide()
+            except Exception:
+                pass
             item_i = self._studioWin + slot
             txt = ""
             if 0 <= item_i < total:
