@@ -390,6 +390,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._item_url  = item_url or ""
         self._poster_url = poster_url or ""
         self._poster_painted = False
+        self._poster_final = False
+        self._poster_requested = False
         # Fix 1: cache video info
         self._osd_video_info = ""
         self._next_episode = next_episode
@@ -438,6 +440,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._studioTimer.callback.append(self.__studioTick)
         self._rec_blink_timer = eTimer()
         self._rec_blink_timer.callback.append(self.__tickRecBlink)
+        # v4.2: stall watchdog — auto-recovers frozen playback
+        # (automates the manual "forward then back" trick)
+        self._stall_last_pts = -1
+        self._stall_count = 0
+        self._stall_recovering = False
+        self._stall_recover_target = 0
+        self._stall_timer = eTimer()
+        self._stall_timer.callback.append(self.__stallWatchdog)
+        self._stall_kick_timer = eTimer()
+        self._stall_kick_timer.callback.append(self.__stallKickBack)
 
         for k in self._STUDIO_KEYS + self._AUTONEXT_WIDGETS:
             try: self[k].hide()
@@ -551,55 +563,87 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             except: pass
 
     def _paintOsdPoster(self):
-        """Fill the OSD's poster slot once. imagecache (sized) → util-cache
-        bridge (detail's ePicLoad path) → raw imagecache → placeholder →
-        hide. Never blocks."""
-        if getattr(self, "_poster_painted", False):
+        """Fill the OSD's poster slot: placeholder FIRST, real poster
+        swapped in by the poll in __updateOSD as soon as it lands.
+        v4.1: the old one-shot flag (_poster_painted set before any
+        image was found) locked in placeholder-or-nothing forever — the
+        async download completed but was never picked up (the auto-next
+        card has a poll for this; the OSD poster didn't)."""
+        if getattr(self, "_poster_final", False):
             return
         url = getattr(self, "_poster_url", "") or ""
         if not url:
+            # No URL → placeholder once (was: nothing at all)
+            self._poster_final = True
+            if not getattr(self, "_poster_painted", False):
+                self.__setOsdPosterPixmap(placeholder_for_item({"type": "movie"}) or "")
+                self._poster_painted = True
             return
-        self._poster_painted = True
+        # 1. util-cache bridge — detail screen usually already has this
         path = ""
         try:
-            path = plugin_imagecache.getCachedImage(url, target_size=(160, 240))
+            from plugin_util import _get_cached_poster
+            path = _get_cached_poster(url) or ""
         except Exception:
             path = ""
+        # 2. sized imagecache variant (queue download once — for now
+        #    and to warm the cache for future plays)
         if not path:
+            try:
+                path = plugin_imagecache.getCachedImage(url, target_size=(160, 240)) or ""
+            except Exception:
+                path = ""
+        if not path and not getattr(self, "_poster_requested", False):
             try:
                 plugin_imagecache.requestImageAsyncPriority(url, target_size=(160, 240))
+                self._poster_requested = True
             except Exception:
                 pass
-            try:
-                path = plugin_imagecache.getCachedImage(url)
-            except Exception:
-                path = ""
+        # 3. raw imagecache
         if not path:
             try:
-                from plugin_util import _get_cached_poster
-                path = _get_cached_poster(url) or ""
+                path = plugin_imagecache.getCachedImage(url) or ""
             except Exception:
                 path = ""
-        if not path:
-            path = placeholder_for_item({"type": "movie"}) or ""
         if path:
+            self._poster_final = True
+            self._poster_painted = True
+            self.__setOsdPosterPixmap(path)
+            my_log("OSD poster painted: {}".format(url[:80]))
+            return
+        # nothing yet → placeholder NOW; the poll will swap the real one
+        if not getattr(self, "_poster_painted", False):
+            self.__setOsdPosterPixmap(placeholder_for_item({"type": "movie"}) or "")
+            self._poster_painted = True
+            my_log("OSD poster placeholder shown (waiting for download)")
+
+    def __setOsdPosterPixmap(self, path):
+        if not path:
+            return
+        try:
+            self["osdPoster"].instance.setScale(1)
+            self["osdPoster"].instance.setPixmapFromFile(path)
+            self["osdPoster"].show()
+            self["osdPosterBox"].show()
+        except Exception:
             try:
-                self["osdPoster"].instance.setScale(1)
-                self["osdPoster"].instance.setPixmapFromFile(path)
-                self["osdPoster"].show()
-                self["osdPosterBox"].show()
+                self["osdPoster"].hide()
+                self["osdPosterBox"].hide()
             except Exception:
-                try:
-                    self["osdPoster"].hide()
-                    self["osdPosterBox"].hide()
-                except Exception:
-                    pass
+                pass
 
     def __updateOSD(self):
         if not self._osd_visible:
             try: self._osd_update_timer.stop()
             except: pass
             return
+        # v4.1: poster poll — swap placeholder for the real poster as
+        # soon as the async download lands (mirrors the auto-next card)
+        try:
+            if not getattr(self, "_poster_final", False):
+                self._paintOsdPoster()
+        except Exception:
+            pass
         try:
             if self._paused:
                 elapsed = self._paused_elapsed
@@ -707,7 +751,109 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 STUDIO.update(int(current_play_secs() * 1000))
         except Exception:
             pass
+        
+    # ─── v4.2: playback stall watchdog ──────────────────────────────────
+    # GStreamer's HLS demuxer occasionally hangs waiting for a segment
+    # (CDN throttle / dropped connection). No error event fires, so the
+    # player just freezes. A seek FLUSHES the pipeline and forces fresh
+    # segment requests — which is why "press forward, then back" resumes
+    # playback manually. The watchdog automates exactly that, ~15s after
+    # the real service position stops advancing. Unlike the manual trick
+    # it returns to the TRUE frozen position (the wall-clock estimate
+    # drifts ahead during a freeze and would skip the frozen seconds).
+    def __stallWatchdog(self):
+        try:
+            if not getattr(self, "_play_confirmed", False):
+                return
+            if self._paused or getattr(self, "_autonext_active", False):
+                self._stall_last_pts = -1
+                self._stall_count = 0
+                return
+            svc = self.session.nav.getCurrentService()
+            if not svc:
+                return
+            seek = svc.seek()
+            if not seek:
+                return
+            r = seek.getPlayPosition()
+            if not r or r[0] != 0 or r[1] <= 0:
+                return
+            pts = r[1]
+            last = self._stall_last_pts
+            self._stall_last_pts = pts
+            if last <= 0:
+                return
+            advanced = pts - last              # ~5s per tick when healthy
+            if advanced < 0 or advanced > 30 * 90000:
+                self._stall_count = 0          # user seeked — not a stall
+                return
+            if advanced >= 90000:
+                self._stall_count = 0          # ≥1s in 5s → alive
+                return
+            self._stall_count += 1
+            my_log("Stall watchdog: position frozen (count {}/3)".format(self._stall_count))
+            if self._stall_count >= 3 and not self._stall_recovering:
+                self.__stallRecover(pts)
+        except Exception as e:
+            my_log("stall watchdog error: {}".format(e))
 
+    def __stallKick(self, target_secs):
+        """Direct service seek + tracker sync. Bypasses __seek's wall-
+        clock estimate, which has drifted ahead of reality during the
+        freeze."""
+        try:
+            svc = self.session.nav.getCurrentService()
+            if not svc:
+                return False
+            sk = svc.seek()
+            if not sk:
+                return False
+            t = max(0, int(target_secs))
+            _tot = self._total_secs
+            if _tot > 0:
+                t = min(t, _tot - 3)
+            sk.seekTo(t * 90000)
+            with novaplay_tracker._GLOBAL_POS_LOCK:
+                novaplay_tracker._GLOBAL_LAST_SEEK_TARGET = t
+                novaplay_tracker._GLOBAL_PLAY_START_POS = max(0, t - 2)
+                novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
+            if self._paused:
+                self._paused_elapsed = t
+            return True
+        except Exception as e:
+            my_log("stall kick error: {}".format(e))
+            return False
+
+    def __stallRecover(self, frozen_pts):
+        frozen = frozen_pts // 90000
+        self._stall_recovering = True
+        self._stall_count = 0
+        self._stall_recover_target = frozen
+        my_log("Stall watchdog: frozen ~15s — kicking pipeline (+7s, then back to {}s)".format(frozen))
+        try:
+            self["status"].setText("⏳ استعادة التشغيل…")
+            self.__showOSD(True)
+        except Exception:
+            pass
+        if self.__stallKick(frozen + 7):
+            self._stall_kick_timer.start(1500, True)
+        else:
+            self._stall_recovering = False
+
+    def __stallKickBack(self):
+        try:
+            t = getattr(self, "_stall_recover_target", 0)
+            if t > 0 and self.__stallKick(t):
+                my_log("Stall watchdog: playback restored at {}s".format(t))
+                try:
+                    self["status"].setText("▶ تمت الاستعادة")
+                    self.__showOSD(True)
+                except Exception:
+                    pass
+        finally:
+            self._stall_recovering = False
+            self._stall_last_pts = -1
+            self._stall_count = 0
     # ─── play-next / confirmation ───────────────────────────────────────
     def __playNext(self):
         if getattr(self, "_is_advancing", False): return
@@ -769,6 +915,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             pass
         try:
             self._studioTimer.start(100, False)
+        except Exception:
+            pass
+        try:
+            self._stall_last_pts = -1
+            self._stall_count = 0
+            self._stall_timer.start(5000, False)
         except Exception:
             pass
         if self._resume_pos > 30:
@@ -1237,7 +1389,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         for t in ("_seek_timer","_seek_verify_timer","_retry_timer","_hide_timer",
                   "_osd_update_timer","_force_confirmation_timer","_restart_timer",
                   "_sleep_timer","_autonext_timer",
-                  "_studioTimer","_rec_blink_timer"):
+                  "_studioTimer","_rec_blink_timer",
+                  "_stall_timer","_stall_kick_timer"):
             try:
                 timer = getattr(self, t, None)
                 if timer: timer.stop()
