@@ -34,6 +34,8 @@ from .net import (
     set_curl_failed_needs_proxy, get_curl_failed_needs_proxy,
     clear_cookies, get_cookie_header_for_url,
     validate_manifest,
+    # FIX: missing re-exports — needed by faselhd_hdx.py:
+    _BROWSER_PROXY_URL, _fetch_via_browser_proxy,
 )
 
 # ─── htmlmedia.py surface ──────────────────────────────────────────────────
@@ -41,6 +43,8 @@ from .htmlmedia import (
     find_m3u8, find_m3u8_all,
     find_mp4, find_mp4_all,
     _best_media_url, _correct_stream_url,
+    # FIX: missing re-export — needed by egydead.py:
+    _extract_quality_from_streamruby_url,
     _is_placeholder_media_url, _label_quality_variant, _label_quality_variants,
     get_last_quality_variants, get_synthesized_variants,
     _quality_tls, extract_iframes, _QUALITY_SUFFIX_LABELS,
@@ -52,6 +56,9 @@ from .hosts import (
     extract_stream, extract_stream_all,
     HOST_RESOLVERS, find_packed_links, _unpack_all,
     decode_packer, Unbaser,
+    # FIX: missing re-exports — needed by egydead.py / vidsrc.py:
+    _parse_hls_master_variants,
+    extract_stream_urls_from_text,
 )
 
 
