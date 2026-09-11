@@ -26,6 +26,9 @@ set with ALL session patches baked in:
     MENU on menu/showMenu/mainMenu; Subtitle Studio v3
   * Fix 1-4: OSD video info badge, subtitle indicator, clock, colored elapsed
   * Fix C: Pick line to sync in Subtitle Studio
+  * v4.4: quality variants + mid-playback quality switching
+  * v4.5: skip intro + watched badge at EOF + single-source-of-truth delay
+    + failed-quality-switch revert dialog
 """
 
 import os
@@ -318,7 +321,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
     _ASPECT_MODES = [("Full", 0), ("14:9", 120), ("4:3", 240)]
 
     def __init__(self, session, title, candidates, previous_service=None, resume_pos=0, item_url="",
-                 next_episode=None, on_next=None, poster_url=""):
+                 next_episode=None, on_next=None, poster_url="", quality_variants=None):
         Screen.__init__(self, session)
         self["overlay_bg"]   = Label("")
         self["status"]       = Label("جاري التشغيل...")
@@ -346,8 +349,17 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         # Fix 3: Current time
         self["osd_clock"] = Label("")
         self["recBlink"]     = Label("● REC")
+        # [PATCH 6] autoNextProgress must be a real ProgressBar — it was
+        # created as a Label, so the setRange/setValue calls in
+        # _showAutoNextCard / __autonextTick silently failed (both wrapped
+        # in try/except) and the countdown bar never filled
         for k in self._AUTONEXT_WIDGETS:
-            self[k] = Pixmap() if "Poster" in k else Label("")
+            if k == "autoNextProgress":
+                self[k] = ProgressBar()
+            elif "Poster" in k:
+                self[k] = Pixmap()
+            else:
+                self[k] = Label("")
         self["subBg1"] = Label("")
         self["subBg2"] = Label("")
         self["subLine1"] = Label("")
@@ -389,6 +401,26 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._resume_pos = int(resume_pos or 0)
         self._item_url  = item_url or ""
         self._poster_url = poster_url or ""
+        # v4.4: quality variants for mid-playback switching
+        self._quality_variants = self._normalizeQualityVariants(quality_variants)
+        self._quality_current_url = (candidates[0][1] if candidates else "")
+        # v4.5.1: derive the label from the actual stream URL (quality
+        # suffix / number) — the title's [480p] tag is often absent,
+        # which made every switch log read "AUTO → ..."
+        _qlbl = ""
+        try:
+            from extractors.base import _label_quality_variant
+            _qlbl = _label_quality_variant(self._quality_current_url) or ""
+        except Exception:
+            _qlbl = ""
+        self._quality_current_label = _qlbl or (_qtag.strip("[]") if _qtag else "AUTO")
+        self._quality_dead_urls = set()            # v4.5.1: failed-switch targets
+        self._quality_switch_target_url = ""
+        # v4.5: failed-switch revert stash + in-flight flag
+        self._quality_prev_url = ""
+        self._quality_prev_label = ""
+        self._quality_prev_candidates = []
+        self._quality_switch_in_flight = False
         self._poster_painted = False
         self._poster_final = False
         self._poster_requested = False
@@ -440,16 +472,25 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._studioTimer.callback.append(self.__studioTick)
         self._rec_blink_timer = eTimer()
         self._rec_blink_timer.callback.append(self.__tickRecBlink)
-        # v4.2: stall watchdog — auto-recovers frozen playback
-        # (automates the manual "forward then back" trick)
+        # v4.3: stall watchdog + candidate failover (automates the manual
+        # "forward then back" trick; escalates to the next playback
+        # candidate when the stream is truly dead)
         self._stall_last_pts = -1
         self._stall_count = 0
+        self._stall_fail_count = 0
         self._stall_recovering = False
         self._stall_recover_target = 0
         self._stall_timer = eTimer()
         self._stall_timer.callback.append(self.__stallWatchdog)
         self._stall_kick_timer = eTimer()
         self._stall_kick_timer.callback.append(self.__stallKickBack)
+        # v4.3: auto-subtitle worker generation guard (bumped on
+        # restart/close — stale workers abort before applying)
+        self._autosub_gen = 0
+        # [PATCH 1] duplicate v4.2 stall-watchdog init block removed here
+        # (it re-created _stall_timer/_stall_kick_timer and orphaned the
+        #  v4.3 pair above; the v4.3 block initializes everything incl.
+        #  _stall_fail_count)
 
         for k in self._STUDIO_KEYS + self._AUTONEXT_WIDGETS:
             try: self[k].hide()
@@ -467,7 +508,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         except Exception:
             pass
 
-        self["actions"] = ActionMap(["OkCancelActions", "MediaPlayerActions", "NumberActions", "InfobarSeekActions", "DirectionActions", "ColorActions", "InfobarSubtitleActions", "InfobarSubtitleSelectionActions", "MenuActions", "InfoBarMenuActions", "ButtonSetupActions", "InfoActions"], {
+        self["actions"] = ActionMap(["OkCancelActions", "MediaPlayerActions", "NumberActions", "InfobarSeekActions", "DirectionActions", "ColorActions", "InfobarSubtitleActions", "InfobarSubtitleSelectionActions", "InfobarAudioSelectionActions", "MenuActions", "InfoBarMenuActions", "ButtonSetupActions", "InfoActions"], {
             "cancel":           self.__onCancelKey,
             "stop":             self.__onExit,
             "ok":               self.__onOkKey,
@@ -502,13 +543,14 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             "seekdef:4": lambda: self.__seekPct(40),
             "seekdef:6": lambda: self.__seekPct(60),
             "seekdef:7": lambda: self.__seekPct(70),
-            "seekdef:9": lambda: self.__seekPct(90),            
+            "seekdef:9": lambda: self.__seekPct(90),
             "green":            self.__onRestart,
             "red":              self.__subtitleDelayBack,
             "blue":             self._onSubtitles,
             "yellow":           self.__cycleAspect,
             "subtitles":        self._onSubtitles,
             "subtitleSelection": self._onSubtitles,
+            "audioSelection":   self.__audioSelect,   # v4.3: AUDIO key, if the remote has one
             "menu":             self._playerMenu,
             "showMenu":         self._playerMenu,
             "mainMenu":         self._playerMenu,
@@ -650,7 +692,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             else:
                 elapsed = current_play_secs()
             he = elapsed // 3600; me = (elapsed % 3600) // 60; se = elapsed % 60
-            
+
             # Fix 4: Colored elapsed time (AJ Panel style — cyan for active
             # progress, gold when paused)
             color = "#39FFD740" if self._paused else "#39E5D1A6"
@@ -660,7 +702,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             except Exception:
                 pass
             self["osd_elapsed"].setText("{:02d}:{:02d}:{:02d}".format(he, me, se))
-            
+
             # Fix 1: Video info badge (resolution/FPS/aspect)
             if self._total_secs > 0 and not self._osd_video_info:
                 try:
@@ -685,7 +727,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 except Exception:
                     self._osd_video_info = ""
             self["osd_videinfo"].setText(self._osd_video_info)
-            
+
             # Fix 2: Subtitle indicator — bright gold CC when active,
             # dim grey cc when none (case alone was easy to miss)
             try:
@@ -700,11 +742,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                         pass
             except Exception:
                 pass
-            
+
             # Fix 3: Current time
             now = time.strftime("%H:%M")
             self["osd_clock"].setText(now)
-            
+
             total = self._total_secs
             if not total:
                 try:
@@ -751,16 +793,236 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 STUDIO.update(int(current_play_secs() * 1000))
         except Exception:
             pass
-        
-    # ─── v4.2: playback stall watchdog ──────────────────────────────────
+
+    # [PATCH 2a] removed the duplicate v4.3 audio-track selection section
+    # here (__audioSelect + __cycleAudio) — it was superseded by the
+    # merged, gated __audioSelect later in the file (see [PATCH 2b]).
+
+    # ─── v4.5: skip intro ────────────────────────────────────────────────
+    def __skipIntro(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        try:
+            secs = int(_get_config("skip_intro_secs", "90") or 90)
+        except Exception:
+            secs = 90
+        secs = max(10, min(600, secs))          # sanity clamp
+        my_log("skip intro: +{}s".format(secs))
+        self.__seek(+secs)                        # shows ➡ timestamp on OSD
+
+    # ─── v4.3: auto-subtitle plumbing ───────────────────────────────────
+    def _autoSubNotify(self, msg):
+        """Public hook for the auto-sub worker (it lives outside this
+        class, so no name-mangled methods)."""
+        try:
+            self["status"].setText(msg)
+            self.__showOSD(True)
+            self._hide_timer.start(3000, True)
+        except Exception:
+            pass
+
+    def __startAutoSubtitle(self):
+        """Fire the auto-subtitle worker in the background — only when
+        the user has no saved subtitle for this item."""
+        try:
+            if str(_get_config("autosub", "true")).lower() not in ("true", "1", "yes", "on"):
+                return
+            if not self._item_url or not self.title:
+                return
+            from novaplay_autosub import auto_subtitle_async
+            self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
+            auto_subtitle_async(self, self._autosub_gen)
+        except Exception as e:
+            my_log("autosub spawn error: {}".format(e))
+
+    # ─── v4.4: quality switcher ─────────────────────────────────────────
+    @staticmethod
+    def _normalizeQualityVariants(variants):
+        """Accept several shapes → [(label, url), ...]:
+        ("480p", "http..."), ("http...", "480p"), dicts with url/quality
+        keys, plain URL strings. Dedupes by URL, keeps order."""
+        out = []
+        if not variants:
+            return out
+        try:
+            items = list(variants)
+        except Exception:
+            return out
+        for it in items:
+            label = url = ""
+            if isinstance(it, dict):
+                url = str(it.get("url") or it.get("stream") or it.get("link") or "")
+                label = str(it.get("quality") or it.get("label") or it.get("name") or "")
+            elif isinstance(it, (tuple, list)) and len(it) >= 2:
+                a, b = str(it[0]), str(it[1])
+                if a.lower().startswith("http"):
+                    url, label = a, b
+                else:
+                    label, url = a, b
+            elif isinstance(it, str) and it.startswith("http"):
+                url = it
+            if url.startswith("http"):
+                if not label:
+                    m = re.search(r"(\d{3,4})\s*p", url, re.I)
+                    label = (m.group(1) + "p") if m else "AUTO"
+                out.append((label, url))
+        seen = set()
+        uniq = []
+        for label, url in out:
+            if url not in seen:
+                seen.add(url)
+                uniq.append((label, url))
+        return uniq
+
+    def _qualityUsable(self):
+        """Stored variants, or the get_last_quality_variants() fallback
+        (detail's extraction ran moments before _play). Current URL
+        excluded — no point offering what's already playing."""
+        variants = list(getattr(self, "_quality_variants", []) or [])
+        if not variants:
+            try:
+                from extractors.base import get_last_quality_variants
+                raw = get_last_quality_variants() or []
+                variants = self._normalizeQualityVariants(raw)
+                if variants:
+                    my_log("quality: get_last_quality_variants fallback → {} entries".format(len(variants)))
+            except Exception:
+                pass
+        cur = getattr(self, "_quality_current_url", "")
+        dead = getattr(self, "_quality_dead_urls", set())
+        return [(l, u) for (l, u) in variants if u != cur and u not in dead]
+
+    def __qualityMenu(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        variants = self._qualityUsable()
+        if not variants:
+            self["status"].setText("🎛 لا توجد جودات أخرى")
+            self.__showOSD(True)
+            self._hide_timer.start(2500, True)
+            return
+        items = []
+        for label, url in variants:
+            mark = u"●" if url == self._quality_current_url else u"○"
+            items.append(("{} {}".format(mark, label), (label, url)))
+        try:
+            items.append(("{} الحالية".format(u"●"), None))
+        except Exception:
+            pass
+        self.session.openWithCallback(self.__onQualityPicked, ChoiceBox,
+                                      "الجودة — Quality", items)
+
+    def __onQualityPicked(self, choice):
+        if not choice:
+            return
+        picked = choice[1] if len(choice) > 1 else None
+        if not picked:
+            return                      # "current" or empty selection
+        label, url = picked
+        self.__qualitySwitch(label, url)
+
+    def __qualitySwitch(self, label, url):
+        """Switch quality at the current position. Same machinery as the
+        stall candidate failover, but user-initiated and for content:
+        candidates are rebuilt for the new URL, the stream replays, and
+        the proven resume-seek path returns to the current position.
+        Subtitles survive (__onConfirmed re-applies the saved one).
+        v4.4.1: carries the current stream's header fragment (Referer/
+        UA/Cookie) over to the new variant — the detail screen builds
+        "url#Key=Value&..." sref-headers and many CDNs enforce the
+        Referer on segment requests too."""
+        if not url or url == getattr(self, "_quality_current_url", ""):
+            return
+        try:
+            pos = self._paused_elapsed if self._paused else current_play_secs()
+        except Exception:
+            pos = 0
+        my_log("quality switch: {} → {} (resume at {}s)".format(
+            self._quality_current_label or "?", label, int(pos)))
+        hdr = ""
+        for _pt, _u, _l, _p in (self.candidates or []):
+            if "#" in _u:
+                hdr = "#" + _u.split("#", 1)[1]
+                break
+        for t in ("_seek_timer", "_seek_verify_timer", "_retry_timer",
+                  "_force_confirmation_timer", "_stall_timer", "_stall_kick_timer"):
+            try:
+                getattr(self, t).stop()
+            except Exception:
+                pass
+        self._osd_video_info = ""        # new stream = new resolution badge
+        self._paused = False
+        self._play_confirmed = False
+        self._candidate_idx = -1
+        self._exhausted = False
+        self._resume_pos = int(pos)
+        # v4.5: stash the current (working) stream so a failed switch can
+        # revert to it instead of dying — and flag this playNext chain as
+        # quality-switch-initiated for __playNext's failure branch.
+        self._quality_prev_url = getattr(self, "_quality_current_url", "")
+        self._quality_prev_label = getattr(self, "_quality_current_label", "")
+        self._quality_prev_candidates = list(self.candidates or [])
+        self._quality_switch_in_flight = True
+        self._quality_current_url = url
+        self._quality_current_label = label
+        self._quality_switch_target_url = url      # v4.5.1: for dead-marking
+        self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
+        _cands = _build_remote_play_candidates(url + hdr)
+        # v4.5.1: cap the chain — a dead variant burns one timeout per
+        # candidate (~30s over 11). Five keeps the likely ones, fails in
+        # ~10-12s, then the revert dialog appears. Revert restores the
+        # FULL previous candidate list regardless.
+        self.candidates = _cands[:5] if len(_cands) > 5 else _cands
+        try:
+            self["status"].setText(u"🎛 تبديل الجودة: {}".format(label))
+            self.__showOSD(True)
+        except Exception:
+            pass
+        self.__playNext()
+
+    def _onQualityRetry(self, ans):
+        """Quality switch failed (all candidates for the new URL died —
+        typically an expired CDN token). YES = revert to the previously
+        working quality at the same position; NO = exit to the detail
+        screen for a fresh extraction. Position is saved either way, so
+        resume still works."""
+        self._quality_switch_in_flight = False
+        prev_cands = getattr(self, "_quality_prev_candidates", [])
+        if ans and prev_cands:
+            my_log("quality retry: reverting to {} (resume at {}s)".format(
+                getattr(self, "_quality_prev_label", "?"), self._resume_pos))
+            self.candidates = prev_cands
+            self._quality_current_url = getattr(self, "_quality_prev_url", "")
+            self._quality_current_label = getattr(self, "_quality_prev_label", "")
+            self._play_confirmed = False
+            self._candidate_idx = -1
+            self._exhausted = False
+            self._stall_last_pts = -1
+            self._stall_count = 0
+            self._stall_fail_count = 0
+            try:
+                self["status"].setText(u"🎛 الرجوع للجودة السابقة…")
+                self.__showOSD(True)
+            except Exception:
+                pass
+            self.__playNext()
+        else:
+            self.__onExit(clear_position=False)
+
+    # ─── v4.3: playback stall watchdog + candidate failover ────────────
     # GStreamer's HLS demuxer occasionally hangs waiting for a segment
     # (CDN throttle / dropped connection). No error event fires, so the
     # player just freezes. A seek FLUSHES the pipeline and forces fresh
     # segment requests — which is why "press forward, then back" resumes
-    # playback manually. The watchdog automates exactly that, ~15s after
-    # the real service position stops advancing. Unlike the manual trick
-    # it returns to the TRUE frozen position (the wall-clock estimate
-    # drifts ahead during a freeze and would skip the frozen seconds).
+    # playback manually. The watchdog automates that, and when the
+    # stream is truly dead it escalates to the next playback candidate:
+    #   freeze #1 → kick +7s, jump back to the TRUE frozen position
+    #   freeze #2 → kick again
+    #   freeze #3 → stream dead → switch candidate (auto-resume there)
+    _STALL_TICK_MS = 5000     # sample rate of the service position
+    _STALL_TICKS = 3          # ticks with <1s progress = frozen (~15s)
+    _STALL_MAX_KICKS = 2      # failed kicks before candidate failover
+
     def __stallWatchdog(self):
         try:
             if not getattr(self, "_play_confirmed", False):
@@ -768,6 +1030,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             if self._paused or getattr(self, "_autonext_active", False):
                 self._stall_last_pts = -1
                 self._stall_count = 0
+                return
+            if getattr(self, "_stall_recovering", False):
                 return
             svc = self.session.nav.getCurrentService()
             if not svc:
@@ -783,24 +1047,28 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._stall_last_pts = pts
             if last <= 0:
                 return
-            advanced = pts - last              # ~5s per tick when healthy
+            advanced = pts - last              # ≈ tick length when healthy
             if advanced < 0 or advanced > 30 * 90000:
-                self._stall_count = 0          # user seeked — not a stall
+                self._stall_count = 0          # position jumped = seek, not stall
                 return
             if advanced >= 90000:
-                self._stall_count = 0          # ≥1s in 5s → alive
+                self._stall_count = 0
+                self._stall_fail_count = 0     # alive → clear strike count
                 return
             self._stall_count += 1
-            my_log("Stall watchdog: position frozen (count {}/3)".format(self._stall_count))
-            if self._stall_count >= 3 and not self._stall_recovering:
-                self.__stallRecover(pts)
+            my_log("Stall watchdog: frozen (count {}/{})".format(
+                self._stall_count, self._STALL_TICKS))
+            if self._stall_count >= self._STALL_TICKS:
+                if self._stall_fail_count >= self._STALL_MAX_KICKS:
+                    self.__stallSwitchCandidate(pts)
+                else:
+                    self.__stallRecover(pts)
         except Exception as e:
             my_log("stall watchdog error: {}".format(e))
 
     def __stallKick(self, target_secs):
-        """Direct service seek + tracker sync. Bypasses __seek's wall-
-        clock estimate, which has drifted ahead of reality during the
-        freeze."""
+        """Direct service seek + tracker sync. Bypasses __seek's
+        wall-clock estimate, which drifts ahead during a freeze."""
         try:
             svc = self.session.nav.getCurrentService()
             if not svc:
@@ -825,22 +1093,25 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return False
 
     def __stallRecover(self, frozen_pts):
-        frozen = frozen_pts // 90000
+        self._stall_fail_count += 1        # strike; cleared when playback lives
         self._stall_recovering = True
         self._stall_count = 0
-        self._stall_recover_target = frozen
-        my_log("Stall watchdog: frozen ~15s — kicking pipeline (+7s, then back to {}s)".format(frozen))
+        self._stall_recover_target = frozen_pts // 90000
+        my_log("Stall watchdog: frozen ~{}s — kicking pipeline (attempt {})".format(
+            self._stall_recover_target, self._stall_fail_count))
         try:
             self["status"].setText("⏳ استعادة التشغيل…")
             self.__showOSD(True)
         except Exception:
             pass
-        if self.__stallKick(frozen + 7):
+        if self.__stallKick(self._stall_recover_target + 7):
             self._stall_kick_timer.start(1500, True)
         else:
             self._stall_recovering = False
 
     def __stallKickBack(self):
+        if not getattr(self, "_stall_recovering", False):
+            return                          # stale timer (candidate switched)
         try:
             t = getattr(self, "_stall_recover_target", 0)
             if t > 0 and self.__stallKick(t):
@@ -854,6 +1125,34 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._stall_recovering = False
             self._stall_last_pts = -1
             self._stall_count = 0
+
+    def __stallSwitchCandidate(self, frozen_pts):
+        """Kicks didn't stick → the stream is dead. Move to the next
+        playback candidate; _resume_pos makes __onConfirmed auto-seek
+        back to the frozen position."""
+        frozen = int(frozen_pts // 90000)
+        my_log("Stall watchdog: dead stream — switching candidate (resume at {}s)".format(frozen))
+        try:
+            self._stall_timer.stop()
+        except Exception:
+            pass
+        try:
+            self._stall_kick_timer.stop()
+        except Exception:
+            pass
+        self._stall_recovering = False
+        self._stall_count = 0
+        self._stall_fail_count = 0
+        self._stall_last_pts = -1
+        self._resume_pos = frozen
+        self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1  # abort in-flight auto-sub
+        try:
+            self["status"].setText("🔄 تبديل السيرفر…")
+            self.__showOSD(True)
+        except Exception:
+            pass
+        self.__playNext()
+
     # ─── play-next / confirmation ───────────────────────────────────────
     def __playNext(self):
         if getattr(self, "_is_advancing", False): return
@@ -865,7 +1164,23 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 self["status"].setText("تعذر تشغيل الرابط على كل المحاولات")
                 def _fail_callback(*args):
                     self.__onExit(clear_position=False)
-                self.session.openWithCallback(_fail_callback, MessageBox, "تعذر تشغيل الرابط على كل المحاولات", MessageBox.TYPE_ERROR, timeout=5)
+                # v4.5: a quality-switch chain that died = expired CDN
+                # token. Offer reverting to the still-working previous
+                # quality instead of a dead exit.
+                if getattr(self, "_quality_switch_in_flight", False):
+                    self._quality_switch_in_flight = False
+                    # v4.5.1: remember the dead variant — excluded from the
+                    # menu for the rest of this session
+                    _tgt = getattr(self, "_quality_switch_target_url", "")
+                    if _tgt and _tgt not in self._quality_dead_urls:
+                        self._quality_dead_urls.add(_tgt)
+                        my_log("quality: variant marked dead: {}…".format(_tgt[:70]))
+                    self.session.openWithCallback(
+                        self._onQualityRetry, MessageBox,
+                        u"الجودة الجديدة غير متاحة (انتهت صلاحية الرابط)\nالرجوع للجودة السابقة؟",
+                        MessageBox.TYPE_YESNO, timeout=10, default=True)
+                else:
+                    self.session.openWithCallback(_fail_callback, MessageBox, "تعذر تشغيل الرابط على كل المحاولات", MessageBox.TYPE_ERROR, timeout=5)
             self._is_advancing = False
             return
 
@@ -908,6 +1223,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._force_confirmation_timer.stop()
         except: pass
         my_log("Play confirmed: {}".format(self._candidate_label))
+        # v4.5: playback confirmed — any pending quality switch succeeded
+        self._quality_switch_in_flight = False
         start_pos_tracker(self.session, self._item_url, start_pos=self._resume_pos)
         try:
             maybe_resume_subtitle(self.session, self.title, self._item_url)
@@ -917,10 +1234,19 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._studioTimer.start(100, False)
         except Exception:
             pass
+        # v4.3: stall watchdog — fresh state for this candidate
         try:
             self._stall_last_pts = -1
             self._stall_count = 0
-            self._stall_timer.start(5000, False)
+            self._stall_fail_count = 0
+            self._stall_recovering = False
+            self._stall_timer.start(self._STALL_TICK_MS, False)
+        except Exception:
+            pass
+        # v4.3: auto-subtitle — only when no saved subtitle applied
+        try:
+            if not get_subtitle_state().get("path"):
+                self.__startAutoSubtitle()
         except Exception:
             pass
         if self._resume_pos > 30:
@@ -942,6 +1268,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __onEOF(self):
         if self._play_confirmed:
+            # v4.5: watched badge — mark at natural end. Covers both the
+            # auto-next card path and the direct exit (both are "the user
+            # reached EOF"). Idempotent, so the double evEOF after a
+            # near-end seek (Fix Z) is harmless.
+            try:
+                from plugin_watched import mark_watched
+                if self._item_url:
+                    mark_watched(self._item_url)
+            except Exception:
+                pass
             if (self._next_episode and self._on_next
                     and self._next_prompt_enabled
                     and not getattr(self, "_eof_prompted", False)):
@@ -1331,6 +1667,14 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self["status"].setText(u"إعادة التشغيل + استئناف من {}:{:02d}...".format(
             self._resume_pos // 60, self._resume_pos % 60) if self._resume_pos > 30 else u"إعادة التشغيل...")
         self.__showOSD(True)
+        # [PATCH 5] stop any pending restart timer first — a double-tap of
+        # the green key within 500 ms used to arm two timers and
+        # double-advance the candidate chain
+        try:
+            if getattr(self, "_restart_timer", None):
+                self._restart_timer.stop()
+        except Exception:
+            pass
         self._restart_timer = eTimer()
         self._restart_timer.callback.append(self.__playNext)
         self._restart_timer.start(500, True)
@@ -1382,6 +1726,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __stop(self):
         self.__hideOSD()
+        # v4.3: abort any in-flight auto-subtitle worker
+        self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
         # Fix Y: _next_open_timer is NOT stopped here — its callback only
         # opens the next episode's Detail screen and never touches a
         # player widget; stopping it killed the auto-next chain during
@@ -1529,15 +1875,20 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         self._aspect_idx = (getattr(self, "_aspect_idx", 0) + 1) % len(self._ASPECT_MODES)
         label, bar = self._ASPECT_MODES[self._aspect_idx]
+        # [PATCH 11] the modular __init__ hides the aspect bars at startup
+        # (the monolith never did); resize/move do NOT un-hide a widget,
+        # so the bars stayed invisible. Show when active, hide at Full.
         try:
-            self["aspect_bar_l"].instance.resize(eSize(bar if bar else 1, 1080))
             if bar:
+                self["aspect_bar_l"].instance.resize(eSize(bar, 1080))
                 self["aspect_bar_l"].instance.move(ePoint(0, 0))
                 self["aspect_bar_r"].instance.resize(eSize(bar, 1080))
                 self["aspect_bar_r"].instance.move(ePoint(1920 - bar, 0))
+                self["aspect_bar_l"].show()
+                self["aspect_bar_r"].show()
             else:
-                self["aspect_bar_r"].instance.resize(eSize(1, 1080))
-                self["aspect_bar_r"].instance.move(ePoint(1919, 0))
+                self["aspect_bar_l"].hide()
+                self["aspect_bar_r"].hide()
         except Exception as e:
             my_log("aspect error: {}".format(e))
         self["status"].setText("Aspect: %s" % label)
@@ -1545,12 +1896,20 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     # ─── audio ───────────────────────────────────────────────────────────
     def __audioSelect(self):
-        try:
-            if AudioSelection is not None:
+        # [PATCH 2b] v4.3 gating restored (an older duplicate definition
+        # had silently overridden it): never open audio selection under
+        # the studio overlay or the auto-next card.
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        # Prefer the image's full AudioSelection screen (named tracks);
+        # fall back to our own track list if the screen rejects a
+        # non-infobar parent.
+        if AudioSelection is not None:
+            try:
                 self.session.open(AudioSelection, self)
                 return
-        except Exception:
-            pass
+            except Exception as e:
+                my_log("AudioSelection failed ({}), using list".format(e))
         try:
             service = self.session.nav.getCurrentService()
             if not service:
@@ -1707,7 +2066,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 finally:
                     callInMainThread(self._updateRecBlink)
 
-            threading.Thread(target=_bg, daemon=True).start()
+            # [PATCH 8] the daemon= kwarg is py3.3+ only — on py2 images it
+            # raised TypeError (silently caught → "Recording unavailable")
+            _t = threading.Thread(target=_bg)
+            _t.daemon = True          # attribute form: py2.6+ and py3
+            _t.start()
         except Exception as e:
             my_log("record error: {}".format(e))
             self["status"].setText("Recording unavailable")
@@ -1782,7 +2145,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def _onSubtitles(self):
         studio_on = str(_get_config("substudio_mode", "false")).lower() == "true"
+        autosub_on = str(_get_config("autosub", "true")).lower() in ("true", "1", "yes", "on")
+        try:
+            _skip_s = max(10, min(600, int(_get_config("skip_intro_secs", "90") or 90)))
+        except Exception:
+            _skip_s = 90
         items = [
+            ("Skip intro +%ds — تخطي المقدمة" % _skip_s, "skipintro"),
+            ("Auto subtitles — ترجمة تلقائية (%s)" % ("ON" if autosub_on else "OFF"), "autosub_toggle"),
+            ("Audio tracks — الصوت", "audio"),
+            ("Quality — الجودة", "quality"),
             ("Subtitle Studio — تنسيق الترجمة (%s)" % ("ON" if studio_on else "OFF"), "studio_toggle"),
         ]
         if studio_on:
@@ -1802,6 +2174,19 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if not result:
             return
         choice = result[1]
+        if choice == "autosub_toggle":
+            _was = str(_get_config("autosub", "true")).lower() in ("true", "1", "yes", "on")
+            _set_config("autosub", "false" if _was else "true")
+            return
+        if choice == "audio":
+            self.__audioSelect()
+            return
+        if choice == "skipintro":
+            self.__skipIntro()
+            return
+        if choice == "quality":
+            self.__qualityMenu()
+            return
         if choice == "studio_toggle":
             from novaplay_substudio import STUDIO
             was_on = str(_get_config("substudio_mode", "false")).lower() == "true"
@@ -1834,9 +2219,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                                           self._item_url, choice,
                                           _cfg(choice + "_api_key", ""))
         elif choice == "sync+":
-            my_log(adjust_sync(self.session, 250))
+            # [PATCH 9] use SYNC_STEP_MS so the menu label ("Sync ±N ms")
+            # and the action always agree (was hardcoded 250)
+            my_log(adjust_sync(self.session, SYNC_STEP_MS))
         elif choice == "sync-":
-            my_log(adjust_sync(self.session, -250))
+            my_log(adjust_sync(self.session, -SYNC_STEP_MS))
         elif choice == "sync0":
             my_log(reset_sync(self.session))
         elif choice == "off":
@@ -1853,8 +2240,18 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         s = STUDIO.style
         align_lbl = ["Top — أعلى", "Bottom — أسفل", "Center — وسط"][s["align"]]
         font_lbl = os.path.basename(s.get("font_path") or "") or s.get("font_name") or "Default"
+        # v4.5: the Delay card shows the EFFECTIVE total shift. Both
+        # paths update state["offset_ms"] — the studio ▲▼ path
+        # (STUDIO.set_offset) and the subtitle-menu Sync path
+        # (adjust_sync's file-shifting). STUDIO.get_offset() alone
+        # stayed 0 when the shift came from the menu, which made the
+        # card look inert.
+        try:
+            _delay_val = int(get_subtitle_state().get("offset_ms") or 0)
+        except Exception:
+            _delay_val = int(STUDIO.get_offset() or 0)
         return [
-            ("Delay — التأخير", "%+d ms" % STUDIO.get_offset(), "delay", 250),
+            ("Delay — التأخير", "%+d ms" % _delay_val, "delay", 250),
             ("Size — الحجم", str(s["size"]), "size", 2),
             ("Font — الخط", font_lbl, "font", 1),
             ("Color — اللون", ["White","Yellow","Gold","Cyan"][s["color_idx"]], "color", 1),
@@ -1915,11 +2312,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 self[k].hide()
             except Exception:
                 pass
-        try:
-            from novaplay_substudio import STUDIO
-            STUDIO.flush_style()
-        except Exception:
-            pass
+        # [PATCH 3] duplicate STUDIO.flush_style() call removed here
 
     def _studioRefresh(self):
         total = len(self._studioItems)
@@ -1973,47 +2366,6 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                     self[k].hide()
             except Exception:
                 pass
-            item_i = self._studioWin + slot
-            txt = ""
-            if 0 <= item_i < total:
-                label, value, _k, _s = self._studioItems[item_i]
-                txt = "%s\n%s" % (label, value) if value else label
-            try:
-                self[card].setText(txt)
-                if txt:
-                    self[card].show()
-                else:
-                    self[card].hide()
-            except Exception:
-                pass
-        try:
-            self["studioStatus"].setText("بث مباشر للتعديلات")
-        except Exception:
-            pass
-        try:
-            from novaplay_substudio import STUDIO
-            body = STUDIO.get_preview()
-            text = body[0] if body else ""
-            if len(body) > 1 and body[1]:
-                text = text + "\n" + body[1][:70]
-            self["studioPreview"].setText(text or "لا توجد ترجمة نشطة")
-            try:
-                self["studioPreview"].instance.setFont(
-                    gFont("Regular", max(22, min(int(STUDIO.style["size"]), 34))))
-            except Exception:
-                pass
-        except Exception:
-            pass
-        cur_key = self._studioItems[idx][2] if self._studioItems else ""
-        show_safe = cur_key in ("offset_y", "align")
-        for k in ("safeTop", "safeBottom", "safeLeft", "safeRight"):
-            try:
-                if show_safe:
-                    self[k].show()
-                else:
-                    self[k].hide()
-            except Exception:
-                pass
 
     def _studioMove(self, step):
         total = len(self._studioItems)
@@ -2022,6 +2374,54 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._studioIdx = max(0, min(self._studioIdx + step, total - 1))
         self._studioRefresh()
 
+    # ─── v4.5: Delay (sync) helpers ─────────────────────────────────────
+    # Single source of truth for the subtitle delay: state["offset_ms"]
+    # holds the EFFECTIVE total shift — the studio in-memory offset while
+    # the studio renders, or the file-shift total when the service layer
+    # renders. The old Delay card called adjust_sync (file-shift) while
+    # displaying STUDIO.get_offset() — the shift worked but the card
+    # stayed at +0 ms (the reported "inert" symptom).
+    def _studioDelayTotal(self):
+        """Current effective subtitle delay in ms."""
+        try:
+            return int(get_subtitle_state().get("offset_ms") or 0)
+        except Exception:
+            try:
+                from novaplay_substudio import STUDIO
+                return int(STUDIO.get_offset() or 0)
+            except Exception:
+                return 0
+
+    def _studioSetDelay(self, new_off):
+        """Set the subtitle delay absolutely (ms). Studio-attached →
+        instant in-memory offset on the ORIGINAL file (no rewrite, no
+        re-attach, no flicker — same mechanism as Pick-line-to-sync);
+        otherwise fall back to the service-layer delta path."""
+        from novaplay_substudio import STUDIO
+        new_off = int(new_off)
+        if not STUDIO.is_attached():
+            # Non-SRT / service-rendered: delta through adjust_sync
+            # (whose companion fix zeroes any live studio offset).
+            adjust_sync(self.session, new_off - self._studioDelayTotal())
+            return
+        st = get_subtitle_state()
+        base_path = st.get("_orig_path") or st.get("path") or ""
+        # Re-attach the ORIGINAL (unshifted) file first, so a previous
+        # adjust_sync file-shift can never double with the studio offset.
+        if base_path and os.path.exists(base_path) and base_path != STUDIO.get_path():
+            STUDIO.attach(base_path)
+        STUDIO.set_offset(new_off)
+        STUDIO._last_rendered = None          # force immediate re-render
+        if base_path:
+            st.update({"path": base_path, "_orig_path": base_path,
+                       "offset_ms": new_off})
+            if st.get("item_url"):
+                try:
+                    remember_subtitle(st["item_url"], base_path, new_off)
+                except Exception:
+                    pass
+        my_log("studio delay: {:+d} ms".format(new_off))
+
     def _studioAdjust(self, step):
         if not (0 <= self._studioIdx < len(self._studioItems)):
             return
@@ -2029,7 +2429,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         label, value, key, stp = self._studioItems[self._studioIdx]
         s = STUDIO.style
         if key == "delay":
-            adjust_sync(self.session, stp * step)
+            # v4.5: studio-native delay via _studioSetDelay — instant
+            # in-memory offset, card value moves immediately. The old
+            # adjust_sync call file-shifted correctly, but the card
+            # (reading STUDIO.get_offset()) stayed at +0 ms.
+            self._studioSetDelay(self._studioDelayTotal() + int(stp * step))
         elif key == "size":
             s["size"] = max(22, min(80, s["size"] + stp * step))
             STUDIO._layout_static()
@@ -2151,7 +2555,10 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self.session.openWithCallback(self._onStudioChoice, ChoiceBox,
                                           title=label, list=choices)
             return
-        self._studioAdjust(+1 if key in ("reset", "remove") else 1)
+        # [PATCH 4] the old ternary's two branches were both +1; the step
+        # is irrelevant for the remaining keys (autowrap / cuepos toggle;
+        # reset / remove ignore it)
+        self._studioAdjust(1)
 
     def _onStudioChoice(self, choice):
         if not choice:
@@ -2163,7 +2570,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         s = STUDIO.style
         try:
             if key == "delay":
-                adjust_sync(self.session, int(value) - STUDIO.get_offset())
+                # v4.5: absolute pick — same studio-native path as ▲▼
+                self._studioSetDelay(int(value))
             elif key == "size":
                 s["size"] = int(value)
                 STUDIO._layout_static()
@@ -2245,8 +2653,10 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 self2["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"], {
                     "ok": self2._ok,
                     # always close WITH an argument — a bare close() fires
-                    # the callback with none → processDelay TypeError
-                    "cancel": lambda: self2.close(""),
+                    # the callback with none → processDelay TypeError.
+                    # [PATCH 7] EXIT now uses a keep-sentinel (abandon the
+                    # browse, font unchanged); only YELLOW resets to default
+                    "cancel": lambda: self2.close("__keep__"),
                     "yellow": lambda: self2.close(""),
                     "up": lambda: self2["list"].up(),
                     "down": lambda: self2["list"].down(),
@@ -2278,13 +2688,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         """Callback from the font browser (_FontPick).
 
         Called via session.openWithCallback. On PICK: path = selected
-        .ttf/.otf/.ttc. On EXIT/cancel: Enigma2's deferred processDelay
-        may deliver NO argument at all (bare close) — hence path=None.
-        Empty/None → revert to the default font.
+        .ttf/.otf/.ttc. On EXIT: path = "__keep__" (abandon — font
+        unchanged). On YELLOW: path = "" → revert to the default font.
+        Enigma2's deferred processDelay may also deliver NO argument at
+        all (bare close) — hence path=None, treated as keep as well.
         """
         from novaplay_substudio import STUDIO
         try:
-            if path:
+            if path == "__keep__" or path is None:
+                pass                                  # abandon — no change
+            elif path:
                 STUDIO.register_font(path)
             else:
                 STUDIO.use_default_font()
@@ -2297,7 +2710,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 # ─── Global play function ──────────────────────────────────────────────────
 
 def _play(session, url, title, resume_pos=0, item_url="",
-          next_episode=None, on_next=None, poster_url=""):
+          next_episode=None, on_next=None, poster_url="",
+          quality_variants=None):
     try:
         svc_url = str(url).strip()
         is_remote = svc_url.startswith("http://") or svc_url.startswith("https://")
@@ -2307,7 +2721,8 @@ def _play(session, url, title, resume_pos=0, item_url="",
                          _build_remote_play_candidates(svc_url), previous_service,
                          resume_pos=resume_pos, item_url=item_url,
                          next_episode=next_episode, on_next=on_next,
-                         poster_url=poster_url)
+                         poster_url=poster_url,
+                         quality_variants=quality_variants)
             return
         sref = eServiceReference(4097, 0, svc_url)
         if sys.version_info[0] == 3:
@@ -2323,9 +2738,13 @@ def _play(session, url, title, resume_pos=0, item_url="",
                 session.openWithCallback(callback, MoviePlayer, sref)
         except Exception as e:
             my_log("[PLAY_INFOBAR_FALLBACK] " + str(e))
+            # [PATCH 10] carry resume/item_url into the fallback player —
+            # without them this path had no resume, no position saving,
+            # no watched badge and no auto-subtitles
             session.open(AdvancedArabicPlayerSimplePlayer, title,
                          _build_remote_play_candidates(svc_url), previous_service,
+                         resume_pos=resume_pos, item_url=item_url,
                          next_episode=next_episode, on_next=on_next,
                          poster_url=poster_url)
     except Exception as e:
-        my_log("[PLAY_ERROR] " + str(e))
+        my_log("[PLAY_ERROR] " + str(e))                                                        

@@ -50,7 +50,7 @@ import re
 from plugin_util import _wrap_ui_text
 from Components.GUIComponent import GUIComponent
 from Components.MultiContent import MultiContentEntryText
-from enigma import eListboxPythonMultiContent, eListbox, gFont, RT_HALIGN_CENTER, RT_VALIGN_CENTER
+from enigma import eListboxPythonMultiContent, eListbox, gFont, RT_HALIGN_CENTER, RT_VALIGN_CENTER, RT_HALIGN_RIGHT
 
 # Import state to check for saved resume positions
 from plugin_state import _get_saved_position
@@ -332,14 +332,70 @@ class HomeMenuGrid(_BaseCardGrid):
         return row
 
 
+# --- Plain vertical text list (categories / text-only listings) ---------
+# The home screen's "list" mode used to render through home_grid (4x2
+# tiles) — a grid wearing a list's name. This is a real single-column
+# scroller on the same _BaseCardGrid engine (paging, cursor,
+# onSelectionChanged come free). Skin entry name: "text_list".
+# [PATCH 14]
+LIST_ROWS = 10                        # visible rows (design @1080p)
+LIST_CELL_W = sc(1840)
+LIST_CELL_H = sc(83)
+LIST_CELL_MARGIN = sc(6)
+LIST_TAG_W = sc(200)                 # right-aligned tag/count column
+
+class TextListGrid(_BaseCardGrid):
+    def __init__(self):
+        _BaseCardGrid.__init__(self, 1, LIST_ROWS,
+                               LIST_CELL_W, LIST_CELL_H,
+                               font_size=max(16, sc(28)))
+
+    def _buildRow(self, row_idx):
+        start = self._getPageStart()
+        row = [None]
+        item_idx = start + row_idx              # single column: row == index
+        if item_idx >= self._getPageEnd():
+            return row
+        item = self._items[item_idx]
+        is_sel = (row_idx == self.currentRow)
+        cx, cy = LIST_CELL_MARGIN, LIST_CELL_MARGIN
+        inner_w = LIST_CELL_W - 2 * LIST_CELL_MARGIN
+        inner_h = LIST_CELL_H - 2 * LIST_CELL_MARGIN
+        bw = HOME_BORDER_W
+        # frame + surface (same card look as the site tiles)
+        bc = _G_CLR["cyan"] if is_sel else _G_CLR["border"]
+        row.append(MultiContentEntryText(pos=(cx, cy), size=(inner_w, inner_h), font=0, text="", color=0, backcolor=bc, flags=0))
+        row.append(MultiContentEntryText(pos=(cx + bw, cy + bw), size=(inner_w - 2 * bw, inner_h - 2 * bw), font=0, text="", color=0, backcolor=_G_CLR["surface2"], flags=0))
+        # title (left) — cyan when selected
+        title = item.get("title", "")
+        row.append(MultiContentEntryText(pos=(cx + bw + sc(20), cy + bw),
+                                          size=(inner_w - 2 * bw - LIST_TAG_W - sc(40), inner_h - 2 * bw),
+                                          font=0, text=title,
+                                          color=_G_CLR["cyan"] if is_sel else _G_CLR["text"],
+                                          backcolor=_G_CLR["surface2"], flags=RT_VALIGN_CENTER))
+        # optional right-aligned tag (tagline / count / type)
+        tag = item.get("tagline") or item.get("count") or ""
+        if tag:
+            row.append(MultiContentEntryText(pos=(cx + inner_w - bw - LIST_TAG_W, cy + bw),
+                                              size=(LIST_TAG_W - sc(10), inner_h - 2 * bw),
+                                              font=1, text=tag, color=_G_CLR["text2"],
+                                              backcolor=_G_CLR["surface2"],
+                                              flags=RT_HALIGN_RIGHT | RT_VALIGN_CENTER))
+        return row
+
+
 # --- Poster grid (design: 8x2, posters 210x330 @1080p; cols auto-fit) ---
 POSTER_W = sc(210)
 POSTER_H = sc(330)
-POSTER_CAPTION_LINE_H = max(14, sc(26))
-POSTER_CAPTION_LINES = 2
+# [PATCH 15+16] bigger caption font (20 @1080p, was 16) + 3-line wrap.
+# Budget check: 3x24 lines + 2x4 margins = 80px — identical to the old
+# 2x26 + 2x14, so POSTER_CELL_H stays 410 and grid geometry, pixmap/
+# badge XML and the 2-row 820px fit are all unchanged.
+POSTER_CAPTION_LINE_H = max(14, sc(24))
+POSTER_CAPTION_LINES = 3
 POSTER_CAPTION_H = POSTER_CAPTION_LINE_H * POSTER_CAPTION_LINES
 POSTER_CELL_MARGIN_H = max(4, sc(10))
-POSTER_CELL_MARGIN_V = max(6, sc(14))
+POSTER_CELL_MARGIN_V = max(4, sc(4))
 POSTER_CELL_W = POSTER_W + 2 * POSTER_CELL_MARGIN_H
 POSTER_CELL_H = POSTER_H + POSTER_CAPTION_H + 2 * POSTER_CELL_MARGIN_V
 
@@ -348,11 +404,14 @@ POSTER_CELL_H = POSTER_H + POSTER_CAPTION_H + 2 * POSTER_CELL_MARGIN_V
 # 8 at 4K with larger cells.
 POSTER_GRID_COLS = max(4, (SCREEN_W - sc(80)) // POSTER_CELL_W)
 POSTER_GRID_ROWS = 2
-POSTER_WRAP_CHARS = max(12, int(20 * _SCALE))
+POSTER_WRAP_CHARS = max(12, int(16 * _SCALE))
 
 class PosterCardGrid(_BaseCardGrid):
     def __init__(self):
         _BaseCardGrid.__init__(self, POSTER_GRID_COLS, POSTER_GRID_ROWS, POSTER_CELL_W, POSTER_CELL_H, font_size=max(14, sc(22)))
+        # [PATCH 15+16] captions use font 1 (was font_size-6 = 16 @1080p);
+        # raise it without touching font 0 or the other grids
+        self.l.setFont(1, gFont("Regular", max(14, sc(20))))
 
     def _buildRow(self, row_idx):
         start = self._getPageStart()

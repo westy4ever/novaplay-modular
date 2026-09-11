@@ -32,6 +32,11 @@ Fixes vs. the original revision:
   * find_best_local_subtitle also scans the downloads dir, so sidecar
     subtitles saved by plugin_downloads auto-match on later plays.
 
+  * v4.5: adjust_sync/reset_sync zero any live STUDIO in-memory offset
+    before re-attaching the shifted file — the file now carries the
+    FULL shift; a live studio offset would double-apply
+    (STUDIO.attach() preserves a live offset across re-attach).
+
 NovaSubtitleBrowser._refresh and NovaSubtitleSettings are the plugin's
 ORIGINAL classes (verbatim); only the browser's _ok/_cancel handlers are
 new code (the original handlers were never shared).
@@ -1244,6 +1249,15 @@ def adjust_sync(session, delta_ms):
             return "Sync shift failed"
     _CURRENT_SUB.update({"path": shifted, "_orig_path": base_path,
                          "offset_ms": new_offset})
+    # v4.5: zero any live studio offset — the shifted file now carries
+    # the FULL shift; a studio in-memory offset would double-apply
+    # (STUDIO.attach() preserves a live offset across re-attach).
+    try:
+        from novaplay_substudio import STUDIO
+        if STUDIO.get_offset():
+            STUDIO.set_offset(0)
+    except Exception:
+        pass
     disable_subtitle(session)
     ok = apply_subtitle(session, shifted)
     if not ok:
@@ -1260,6 +1274,14 @@ def reset_sync(session):
     if not base_path or not os.path.exists(base_path):
         return "No subtitle active"
     _CURRENT_SUB.update({"path": base_path, "_orig_path": base_path, "offset_ms": 0})
+    # v4.5: zero the studio offset too — same double-apply guard as
+    # adjust_sync (the base file must render unshifted).
+    try:
+        from novaplay_substudio import STUDIO
+        if STUDIO.get_offset():
+            STUDIO.set_offset(0)
+    except Exception:
+        pass
     disable_subtitle(session)
     ok = apply_subtitle(session, base_path)
     if not ok:

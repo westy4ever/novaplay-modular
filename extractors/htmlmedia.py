@@ -10,10 +10,19 @@ from urllib.parse import urljoin, urlparse
 
 from .net import log
 
-# ─── Thread-local quality variant storage ──────────────────────────────────
-# Resolvers (hosts.py) import this SAME object and set .variants — a
-# thread-local imported by reference shares its attribute mutations.
-_quality_tls = threading_local = __import__("threading").local()
+# ─── Quality variant storage (v4.4 fix) ──────────────────────────────────
+# Was threading.local() — but the flow is cross-thread: the background
+# resolver thread SETS .variants (find_m3u8 / find_mp4 / _best_media_url
+# and resolvers in hosts.py), while the MAIN thread READS it (detail's
+# _onStreamFound + the player's quality switcher). threading.local
+# attributes are per-thread by design, so the main thread always saw an
+# empty list. A plain shared holder gives the intended "last writer
+# wins" semantics; list reassignment is atomic in CPython, no lock
+# needed.
+class _SharedQualityStore(object):
+    pass
+
+_quality_tls = threading_local = _SharedQualityStore()
 
 _QUALITY_SUFFIX_LABELS = {
     "_o": "Original", "_x": "Original", "_h": "720p", "_n": "480p", "_l": "360p",

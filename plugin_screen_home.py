@@ -32,6 +32,7 @@ from extractors.base import get_curl_failed_needs_proxy
 from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     build_pixmap_widgets_xml, build_poster_pixmap_widgets_xml,
     build_poster_badge_widgets_xml,
+    TextListGrid,
     build_carousel_xml, build_continue_row_xml,
     HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
     HOME_CELL_MARGIN, HOME_BORDER_W, HOME_ICON_PAD_TOP, HOME_ICON_W, HOME_ICON_H,
@@ -71,6 +72,7 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="home_grid" position="20,330" size="1880,632" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
         <widget name="poster_grid" position="40,90" size="1840,820" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {poster_grid_pics}
         {poster_badge_xml}
         {carousel_xml}
@@ -141,6 +143,9 @@ class AdvancedArabicPlayerHome(Screen):
 
         self["home_grid"] = HomeMenuGrid()
         self["home_grid"].onSelectionChanged = self._onGridSelectionChanged
+        self["text_list"] = TextListGrid()
+        self["text_list"].onSelectionChanged = self._onGridSelectionChanged
+        self["text_list"].hide()
         for _r in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
                 self["pic_%d_%d" % (_r, _c)] = Pixmap()
@@ -284,6 +289,7 @@ class AdvancedArabicPlayerHome(Screen):
                 self["poster_%d_%d" % (i, _c)].hide()
                 self["pbadge_%d_%d" % (i, _c)].hide()
         self["home_grid"].show()
+        self["text_list"].hide()
         for i in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
                 self["pic_%d_%d" % (i, _c)].show()
@@ -295,6 +301,7 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _showPosterMode(self):
         self["home_grid"].hide()
+        self["text_list"].hide()
         for i in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
                 self["pic_%d_%d" % (i, _c)].hide()
@@ -404,8 +411,21 @@ class AdvancedArabicPlayerHome(Screen):
             self["cratingBadge%d" % widget_id].show()
         else:
             self["cratingBadge%d" % widget_id].hide()
+        # v4.5: watched badge — reuse the resumeMark widget (watched and
+        # resume are mutually exclusive: EOF clears the position at the
+        # moment the watched flag is set). Watched wins if both exist
+        # (finished, then re-watched partially).
+        _watched = False
+        try:
+            from plugin_watched import is_watched
+            _watched = is_watched(item.get("url", ""))
+        except Exception:
+            pass
         saved_pos = _get_saved_position(item.get("url", ""))
-        if saved_pos > 30:
+        if _watched:
+            self["cresumeMark%d" % widget_id].setText(u"✓ شاهدته")
+            self["cresumeMark%d" % widget_id].show()
+        elif saved_pos > 30:
             mm, ss = divmod(saved_pos, 60)
             hh, mm = divmod(mm, 60)
             tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
@@ -446,9 +466,13 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _updateGridFooter(self):
         # Works for both grids: poster mode (PosterCardGrid) and the
-        # category list (HomeMenuGrid) — geometry differs per grid.
+        # category list (TextListGrid) — geometry differs per grid.
         if self._display_mode == "poster":
             grid, cols, rows = self["poster_grid"], POSTER_GRID_COLS, POSTER_GRID_ROWS
+        elif self._display_mode == "list":
+            # [PATCH 14b] the category list now lives in text_list —
+            # geometry read from the widget itself
+            grid, cols, rows = self["text_list"], self["text_list"].cols, self["text_list"].rows
         else:
             grid, cols, rows = self["home_grid"], HOME_GRID_COLS, HOME_GRID_ROWS
         page, total_pages = grid.getPageInfo()
@@ -498,8 +522,25 @@ class AdvancedArabicPlayerHome(Screen):
                 # Resume badge: gold bar with the resume time at the poster's
                 # bottom edge, ABOVE the poster pixmap (mode-gated so a late
                 # poll callback can never paint it outside grid-poster mode).
+                # v4.5: ✓ شاهدته (watched) takes precedence — same widget,
+                # mutually exclusive with resume in practice.
+                # [PATCH 12] this block was dedented OUT of the column loop
+                # in the modular edit — it ran once per ROW, painting only
+                # the LAST column's badge (and raising AttributeError when
+                # that column was empty on a partial page). One level deeper
+                # = runs per cell, as in the monolith.
                 saved_pos = _get_saved_position(item.get("url", "")) if item.get("url") else 0
-                if saved_pos > 30 and self._display_mode == "poster" and self._layout_style == "grid":
+                _watched = False
+                if item.get("url"):
+                    try:
+                        from plugin_watched import is_watched
+                        _watched = is_watched(item.get("url"))
+                    except Exception:
+                        pass
+                if _watched and self._display_mode == "poster" and self._layout_style == "grid":
+                    badge.setText(u"✓ شاهدته")
+                    badge.show()
+                elif saved_pos > 30 and self._display_mode == "poster" and self._layout_style == "grid":
                     mm, ss = divmod(saved_pos, 60)
                     hh, mm = divmod(mm, 60)
                     tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
@@ -671,6 +712,7 @@ class AdvancedArabicPlayerHome(Screen):
             self._cont_items = _continue_items(CONT_SLOTS)
         except Exception:
             self._cont_items = []
+        my_log("CONTROW: items={} mode={}".format(len(self._cont_items), self._display_mode))
         if self._cont_index >= len(self._cont_items):
             self._cont_index = max(0, len(self._cont_items) - 1)
         for i in range(CONT_SLOTS):
@@ -751,7 +793,7 @@ class AdvancedArabicPlayerHome(Screen):
                 self._showSiteCategories()
             return
         if self._display_mode == "list":
-            item = self["home_grid"].getCurrent()
+            item = self["text_list"].getCurrent()
             if not item: return
             if item.get("_action") == "search_site":
                 self._onSearch(item.get("_site", self._site))
@@ -785,7 +827,7 @@ class AdvancedArabicPlayerHome(Screen):
             pg.moveUp()
             return
         if self._display_mode == "list":
-            self["home_grid"].moveUp()
+            self["text_list"].moveUp()
         elif self._display_mode == "poster" and self._layout_style == "grid":
             self["poster_grid"].moveUp()
 
@@ -799,7 +841,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["home_grid"].moveDown()
             return
         if self._display_mode == "list":
-            self["home_grid"].moveDown()
+            self["text_list"].moveDown()
         elif self._display_mode == "poster" and self._layout_style == "grid":
             self["poster_grid"].moveDown()
 
@@ -809,8 +851,10 @@ class AdvancedArabicPlayerHome(Screen):
                 self._cont_index = (self._cont_index - 1) % len(self._cont_items)
                 self._moveContinueSel()
             return
-        if self._display_mode in ("home", "list"):
+        if self._display_mode == "home":
             self["home_grid"].moveLeft()
+        elif self._display_mode == "list":
+            pass    # [PATCH 14] single column — no lateral move
         elif self._display_mode == "poster":
             if self._layout_style == "grid": self["poster_grid"].moveLeft()
             else: self._moveCarousel(-1)
@@ -821,8 +865,10 @@ class AdvancedArabicPlayerHome(Screen):
                 self._cont_index = (self._cont_index + 1) % len(self._cont_items)
                 self._moveContinueSel()
             return
-        if self._display_mode in ("home", "list"):
+        if self._display_mode == "home":
             self["home_grid"].moveRight()
+        elif self._display_mode == "list":
+            pass    # [PATCH 14] single column — no lateral move
         elif self._display_mode == "poster":
             if self._layout_style == "grid": self["poster_grid"].moveRight()
             else: self._moveCarousel(1)
@@ -833,6 +879,12 @@ class AdvancedArabicPlayerHome(Screen):
         if not show_adult:
             items = [i for i in items if not any(w in (i.get("title", "") + i.get("category_name", "")).lower() for w in adult_words)]
         content_items = [i for i in items if i.get("type") in ("movie", "series", "episode")]
+        # Bug E follow-up: the categories list (source == "categories")
+        # must ALWAYS render as a text list even if its entries happen to
+        # carry content-like type fields — otherwise Back-to-categories
+        # would flip into poster mode and lose the list UI.
+        if self._source == "categories":
+            content_items = []
         if content_items:
             self._items = content_items
             self._display_mode = "poster"
@@ -899,8 +951,9 @@ class AdvancedArabicPlayerHome(Screen):
             for i in range(HOME_GRID_ROWS):
                 for _c in range(HOME_GRID_COLS):
                     self["pic_%d_%d" % (i, _c)].hide()
-            self["home_grid"].show()
-            self["home_grid"].setList(items)
+            self["home_grid"].hide()
+            self["text_list"].show()
+            self["text_list"].setList(items)
             self["status"].setText("{} عنصر".format(len(items)))
             # Category-list keybar: reset labels left over from
             # _showPosterMode. Red = back to home, yellow = search.

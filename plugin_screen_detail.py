@@ -930,6 +930,23 @@ class AdvancedArabicPlayerDetail(Screen):
             pure_url = main_url.split("|")[0].strip()
             url = pure_url + "#" + header_str if header_str else pure_url
 
+            # v4.4 (Edit A): snapshot this server's quality variants —
+            # get_last_quality_variants() holds the result of the resolver
+            # run that produced stream_url (auto bg-extract for the first
+            # server, or the on-demand extract when the user picks one).
+            # NOTE: this only works together with the _SharedQualityStore
+            # fix in extractors/htmlmedia.py — with the old
+            # threading.local() storage the main thread always saw [].
+            try:
+                from extractors.base import get_last_quality_variants
+                _qv = get_last_quality_variants() or []
+            except Exception:
+                _qv = []
+            if _qv:
+                my_log("quality: passing {} variant(s) to player".format(len(_qv)))
+            else:
+                _qv = None
+
             _item_url = self._item.get("url", "")
             _saved_pos = _get_saved_position(_item_url)
             if _saved_pos > 30:
@@ -945,18 +962,20 @@ class AdvancedArabicPlayerDetail(Screen):
 
                 def _on_resume(_ans, _u=url, _t=title, _iu=_item_url, _sp=_saved_pos,
                                _ne=self._next_episode, _cb=self._playNextEpisode,
-                               _po=self._osd_poster):
+                               _po=self._osd_poster, _qv=_qv):
                     if not _ans:
                         _save_position(_iu, 0)
                     _play(self.session, _u, _t, resume_pos=_sp if _ans else 0, item_url=_iu,
-                          next_episode=_ne, on_next=_cb, poster_url=_po)
+                          next_episode=_ne, on_next=_cb, poster_url=_po,
+                          quality_variants=_qv)      # v4.4 (Edit B)
                 self["status"].setText("جاري فتح المشغل...")
                 self.session.openWithCallback(_on_resume, MessageBox, resume_text, MessageBox.TYPE_YESNO, timeout=8, default=True)
             else:
                 self["status"].setText("Opening player...")
                 _play(self.session, url, title, resume_pos=0, item_url=_item_url,
                       next_episode=self._next_episode, on_next=self._playNextEpisode,
-                      poster_url=self._osd_poster)
+                      poster_url=self._osd_poster,
+                      quality_variants=_qv)          # v4.4 (Edit C)
             from extractors.base import get_proxy_used
             if get_proxy_used():
                 self["status"].setText("✓ Proxy  " + self["status"].getText())
@@ -967,7 +986,6 @@ class AdvancedArabicPlayerDetail(Screen):
         except Exception as e:
             my_log("Error opening player: {}".format(e))
             self["status"].setText("خطأ في المشغل: {}".format(str(e)[:60]))
-
     def _openDownloads(self):
         if self._active_download_task and self._active_download_task.status == "downloading":
             pct = self._active_download_task.progress_pct()
