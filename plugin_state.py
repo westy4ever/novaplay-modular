@@ -4,7 +4,15 @@ Advanced Arabic Player - State / persistence
 ==============================================
 Config, favorites, history and saved-playback-position storage.
 
-Changes in this revision (Continue-Watching support):
+Changes in this revision (PATCH 50 — settings persistence fix):
+  * _KEY_NAMES trimmed to the three real API keys. browser_proxy and
+    torrserver_url were members, which made _save_state() STRIP them
+    from the state file on every write — a proxy or TorrServer URL set
+    through the Settings screen survived only until restart (the
+    "Browser proxy set to: DISABLED" fingerprint in every boot log).
+    They are connection settings, not credentials owned by api_keys.conf.
+
+Changes in the previous revision (Continue-Watching support):
   * NEW _continue_items(limit): the Continue-Watching row query for
     the home screen. Returns history entries that have a resumable
     position (> 60s), sorted by _pos_ts (watch recency) with
@@ -42,12 +50,7 @@ Changes in the previous revision (kept for reference):
 
 NOTE: This does NOT include the live in-memory position tracker
 (_GLOBAL_POS_TIMER / _global_pos_tick / _start_pos_tracker / _stop_pos_tracker)
-or the local proxy hit counters. Those are mutated via bare `global`
-statements from many methods inside plugin.py's Screen classes, so they
-stay defined in plugin.py itself rather than here - splitting them out
-would mean rewriting every read/write site to go through a module
-attribute (plugin_state.X = ...) instead of `global X`, which is a
-correctness-risk refactor, not a mechanical file move.
+or the local proxy hit counters. Those live in novaplay_tracker.py.
 """
 
 import os
@@ -74,8 +77,13 @@ _POS_DISK_LAST = {"url": "", "sec": 0}
 
 # ─── api_keys.conf support ──────────────────────────────────────────────
 _KEYS_FILE = os.path.join(os.path.dirname(__file__), "api_keys.conf")
-_KEY_NAMES = ("tmdb_api_key", "subsource_api_key", "opensubtitles_api_key",
-              "browser_proxy", "torrserver_url")
+# [PATCH 50] browser_proxy and torrserver_url REMOVED from this tuple:
+# as members, _save_state() stripped them from the state file on every
+# write, so a proxy or TorrServer URL set in the Settings screen was
+# lost on restart. They are connection settings, not credentials owned
+# by api_keys.conf. The three remaining keys ARE credentials and stay
+# file-owned.
+_KEY_NAMES = ("tmdb_api_key", "subsource_api_key", "opensubtitles_api_key")
 
 
 def _state_path():
@@ -383,7 +391,7 @@ def _continue_items(limit=7):
     rows = []
     for item in (_load_state().get("history") or []):
         pos = int(item.get("last_position_sec") or 0)
-        if pos <= 30 or not item.get("url"):
+        if pos <= 60 or not item.get("url"):
             continue
         if not (item.get("poster") or item.get("title")):
             continue
