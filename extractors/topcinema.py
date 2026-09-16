@@ -168,6 +168,14 @@ class TopCinemaExtractor(BaseExtractor):
             if not img_match:
                 continue
             poster = img_match.group(1)
+
+            # [PATCH 46] IMDb rating — <li class="imdbRating"><i ...></i> 7</li>
+            rating = ""
+            rating_m = re.search(r'class=["\']imdbRating["\'][^>]*>.*?<i[^>]*>.*?</i>\s*([\d.]+)', inner, re.I | re.S)
+            if not rating_m:
+                rating_m = re.search(r'class=["\']imdbRating["\'][^>]*>\s*([\d.]+)', inner, re.I)
+            if rating_m:
+                rating = rating_m.group(1)
     
             if not poster or poster.startswith('data:') or 'placeholder' in poster.lower():
                 continue
@@ -191,6 +199,7 @@ class TopCinemaExtractor(BaseExtractor):
                 "url": link,
                 "poster": poster,
                 "type": item_type,
+                "rating": rating,
                 "_action": "details"
             })
         return items
@@ -339,11 +348,21 @@ class TopCinemaExtractor(BaseExtractor):
             clean_name = self._clean_title(name or "").strip()
             if not clean_name:
                 continue
+            # [PATCH 39] the watch page embeds "[label] <gap> ServerName"
+            # in the list items, and the old "توب سينما " prefix made every
+            # name Arabic-leading → RTL right-align + BiDi reordering →
+            # the bracket ended up visually displaced (the "large gap").
+            # Strip brackets, collapse whitespace, use the bare English
+            # server name — left-aligned, no BiDi, no gap.
+            clean_name = re.sub(r'\[[^\]]*\]', ' ', clean_name)
+            clean_name = re.sub(r'\s{2,}', ' ', clean_name).strip(' -–|')
+            if not clean_name:
+                clean_name = "Server {}".format(idx)
             s_url = "topcinema_server|{}|{}|{}|{}".format(
                 ajax_endpoint, pid, idx, watch_url
             )
             servers.append({
-                "name": "توب سينما " + clean_name,
+                "name": clean_name,
                 "url": s_url,
             })
     

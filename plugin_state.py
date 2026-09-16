@@ -383,7 +383,7 @@ def _continue_items(limit=7):
     rows = []
     for item in (_load_state().get("history") or []):
         pos = int(item.get("last_position_sec") or 0)
-        if pos <= 60 or not item.get("url"):
+        if pos <= 30 or not item.get("url"):
             continue
         if not (item.get("poster") or item.get("title")):
             continue

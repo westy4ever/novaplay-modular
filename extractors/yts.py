@@ -13,6 +13,32 @@ in addition to the original 2Embed/VidSrc embed fallbacks.
 
 Mirrors extractors/torrentio.py's magnet builder exactly so both sources
 share identical playback behavior.
+
+[PATCH 34]
+  * _extract_quality: word-boundary CAM/TS detection — plain 'TS'
+    matched HITS/ARTS/BITS and mislabeled releases as CAM (same fix as
+    torrentio's PATCH 30a)
+  * episode embed URLs: ?s= query separator (was &s= — malformed URL,
+    first fetch failed and only self-healed via the fallback chain)
+  * _torr_servers: seeders (👤 N) and size (N GB/MB) parsed from the
+    title → StreamList columns (sync with torrentio's PATCH 30d)
+
+[PATCH 40] quality tag preserves the ACTUAL source word from the
+  name — "1080p HDTS" instead of generic "1080p CAM". Longest-first
+  alternation (HDTS beats TS), word boundaries (HITS/ARTS don't match).
+
+[PATCH 44/47] Streaming sections (the site's sidebar menu): Netflix,
+  Prime Video, Disney+, Max, Hulu, Apple TV+ — flat paired Movies/
+  Series entries per provider. (The original two-level chooser never
+  fired: category items route to get_category_items, not get_page,
+  and its browse URLs collided with the yts_movie_ detail prefix.)
+
+[PATCH 45/47] multi-word category actions (now_playing, top_rated,
+  on_the_air, airing_today) got split by the "_" URL parser and built
+  truncated TMDB paths (/movie/now → 404). Rejoined at dispatch.
+
+[PATCH 47] Collection IDs verified against TMDB (Mission Impossible,
+  Shrek, Despicable Me, Avatar were wrong and 404'd).
 """
 import re
 import urllib.parse
@@ -44,7 +70,7 @@ class YTSExtractor(BaseExtractor):
             "en.yts.lu", "yts.lu", "en.yify.sc", "yify.sc", "yts.mx", "en.yts.mx"
         ]
 
-    # ═══ TMDB helpers (unchanged) ══════════════════════════════════════
+    # ═══ TMDB helpers ══════════════════════════════════════════════════
 
     def _get_tmdb_key(self):
         try:
@@ -103,12 +129,13 @@ class YTSExtractor(BaseExtractor):
             q = '720p'
         elif '480P' in t:
             q = '480p'
-        if 'CAM' in t or 'TELESYNC' in t or 'TS' in t or 'HDTS' in t:
-            q += " CAM"
-        elif 'WEBRIP' in t or 'WEB-DL' in t or 'WEB' in t:
-            q += " WEB-DL"
-        elif 'BLURAY' in t or 'BRRIP' in t or 'BDRIP' in t:
-            q += " BLURAY"
+        # [PATCH 40] preserve the ACTUAL source tag from the name —
+        # "1080p HDTS" instead of a generic "1080p CAM". Longest-first
+        # alternation: HDTS beats TS, WEB-DL beats WEB. Word boundaries
+        # keep HITS/ARTS/BITS from matching.
+        m = re.search(r'\b(HD-?CAM|TELESYNC|HDTS|WEB-DL|WEBRIP|BLURAY|BRRIP|BDRIP|HDRIP|CAM|WEB|TS|DVD)\b', t)
+        if m:
+            q += " " + m.group(0)
         return q
 
     def _imdb_id(self, tmdb_id, mtype="movie"):
@@ -144,10 +171,16 @@ class YTSExtractor(BaseExtractor):
             seen.add(h.lower())
             title = str(s.get("title") or s.get("name") or "Torrent")
             magnet = self._build_magnet(h, title, s.get("fileIdx"))
+            # [PATCH 34c] sync with torrentio's PATCH 30d — seeders/size
+            # from the title (👤 N / N GB) → StreamList columns
+            seeds_m = re.search(r'👤\s*(\d+)', title)
+            size_m = re.search(r'(\d+(?:[.,]\d+)?\s*(?:GB|MB))', title, re.I)
             servers.append({
                 "name": title,
                 "url": magnet,
                 "quality": self._extract_quality(title),
+                "seeders": seeds_m.group(1) if seeds_m else "",
+                "size": size_m.group(1) if size_m else "",
             })
             if len(servers) >= max_n:
                 break
@@ -173,13 +206,15 @@ class YTSExtractor(BaseExtractor):
             ("🎭 A24", 41077), ("🍃 Studio Ghibli", 287), ("🐲 Legendary", 923),
             ("🔥 Lionsgate", 35), ("😱 Blumhouse", 3172),
         ]
+        # [PATCH 47] Collection IDs verified against TMDB — Mission
+        # Impossible, Shrek, Despicable Me and Avatar were wrong (404).
         movie_collections = [
             ("🦸 The Avengers", 86311), ("⚡ Harry Potter", 1241), ("🌌 Star Wars", 10),
             ("🕴️ James Bond 007", 645), ("🏎️ Fast & Furious", 9485), ("💍 Lord of the Rings", 120),
             ("🧝 The Hobbit", 121938), ("🦖 Jurassic Park", 328), ("🏹 Hunger Games", 131635),
-            ("🏴‍☠️ Pirates Caribbean", 259416), ("🕵️ Mission Impossible", 1505), ("🔫 John Wick", 404609),
+            ("🏴‍☠️ Pirates Caribbean", 259416), ("🕵️ Mission Impossible", 87359), ("🔫 John Wick", 404609),
             ("🦇 Dark Knight", 263), ("🕶️ The Matrix", 2344), ("🧸 Toy Story", 101931),
-            ("🟢 Shrek", 21564), ("🍌 Despicable Me", 116717), ("🌊 Avatar", 85696),
+            ("🟢 Shrek", 2150), ("🍌 Despicable Me", 86066), ("🌊 Avatar", 87096),
             ("🧬 X-Men", 748), ("👽 Alien", 8091),
         ]
         years = [
@@ -236,6 +271,21 @@ class YTSExtractor(BaseExtractor):
         for title, gid in tv_genres:
             cats.append({"title": title, "url": "yts_series_genre_{}".format(gid), "type": "category"})
 
+        # ─── Streaming section ─────────────────────────────────
+        # [PATCH 47] flat paired entries per provider. The two-level
+        # chooser never fired: category-type items route to
+        # get_category_items (not get_page), and the chooser's browse
+        # URLs collided with the yts_movie_/yts_series_ detail prefixes.
+        # Paired entries go through the provider dispatch directly.
+        streaming = [
+            ("🔴 Netflix", 8), ("🔵 Prime Video", 9), ("🏰 Disney+", 337),
+            ("🟪 Max", 1899), ("💚 Hulu", 15), ("🍎 Apple TV+", 350),
+        ]
+        cats.append({"title": "Streaming", "url": "", "type": "separator"})
+        for title, pid in streaming:
+            cats.append({"title": "🎬 " + title + " — Movies", "url": "yts_movie_provider_{}".format(pid), "type": "category"})
+            cats.append({"title": "📺 " + title + " — Series", "url": "yts_series_provider_{}".format(pid), "type": "category"})
+
         cats.append({"title": "Best Of TV", "url": "", "type": "separator"})
         for title, yr in years:
             cats.append({"title": title, "url": "yts_series_year_{}".format(yr), "type": "category"})
@@ -257,6 +307,14 @@ class YTSExtractor(BaseExtractor):
 
         media_type = parts[1]
         action = parts[2]
+        # [PATCH 45/47] multi-word actions got split by the "_" parser —
+        # "now_playing"→"now", "top_rated"→"top", "on_the_air"→"on",
+        # "airing_today"→"airing" — all built truncated TMDB paths → 404.
+        # Rejoin when the full tail matches a known multi-word action.
+        if action in ("now", "top", "on", "airing"):
+            _full = "_".join(parts[2:])
+            if _full in ("now_playing", "top_rated", "on_the_air", "airing_today"):
+                action = _full
 
         tmdb_media_type = "tv" if media_type == "series" else "movie"
         item_type = "series" if media_type == "series" else "movie"
@@ -272,6 +330,13 @@ class YTSExtractor(BaseExtractor):
         elif action == "trending":
             time_window = parts[3] if len(parts) > 3 else "week"
             path = "/trending/{}/{}".format(tmdb_media_type, time_window)
+        # [PATCH 44] streaming-provider browse (Netflix/Prime/Disney+...)
+        elif action == "provider":
+            provider_id = parts[3] if len(parts) > 3 else "8"
+            path = "/discover/{}".format(tmdb_media_type)
+            params["with_watch_providers"] = provider_id
+            params["watch_region"] = "US"
+            params["sort_by"] = "popularity.desc"
         elif action == "country":
             country_code = parts[3] if len(parts) > 3 else "US"
             path = "/discover/{}".format(tmdb_media_type)
@@ -300,7 +365,8 @@ class YTSExtractor(BaseExtractor):
                     "poster": "https://image.tmdb.org/t/p/w342" + movie.get("poster_path", "") if movie.get("poster_path") else "",
                     "url": "yts_movie_{}".format(movie.get("id")),
                     "type": "movie",
-                    "year": movie.get("release_date", "")[:4] if movie.get("release_date") else ""
+                    "year": movie.get("release_date", "")[:4] if movie.get("release_date") else "",
+                    "rating": "{:.1f}".format(movie.get("vote_average")) if movie.get("vote_average") else "",
                 })
             return items
         elif action == "popular":
@@ -329,7 +395,8 @@ class YTSExtractor(BaseExtractor):
                 "poster": "https://image.tmdb.org/t/p/w342" + r.get("poster_path", "") if r.get("poster_path") else "",
                 "url": "yts_{}_{}".format(item_type, r.get("id")),
                 "type": item_type,
-                "year": year
+                "year": year,
+                "rating": "{:.1f}".format(r.get("vote_average")) if r.get("vote_average") else "",
             })
 
         total_pages = data.get("total_pages", 1)
@@ -359,7 +426,8 @@ class YTSExtractor(BaseExtractor):
                     "poster": "https://image.tmdb.org/t/p/w342" + r.get("poster_path", "") if r.get("poster_path") else "",
                     "url": "yts_{}_{}".format(item_type, r.get("id")),
                     "type": item_type,
-                    "year": year
+                    "year": year,
+                    "rating": "{:.1f}".format(r.get("vote_average")) if r.get("vote_average") else "",
                 })
         return items
 
@@ -452,8 +520,9 @@ class YTSExtractor(BaseExtractor):
 
             # Embed fallbacks
             servers += [
-                {"name": "Server 1 (2Embed.cc)", "url": "https://www.2embed.cc/embedtv/{}&s={}&e={}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
-                {"name": "Server 2 (2Embed.skin)", "url": "https://www.2embed.skin/embedtv/{}&s={}&e={}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
+                # [PATCH 34b] ?s= not &s= — a query string starts with ?
+                {"name": "Server 1 (2Embed.cc)", "url": "https://www.2embed.cc/embedtv/{}?s={}&e={}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
+                {"name": "Server 2 (2Embed.skin)", "url": "https://www.2embed.skin/embedtv/{}?s={}&e={}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
                 {"name": "Server 3 (VidSrc.mov)", "url": "https://vidsrc.mov/embed/tv/{}/{}/{}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
                 {"name": "Server 4 (VidSrc.to)", "url": "https://vidsrc.to/embed/tv/{}/{}/{}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
                 {"name": "Full Season (2Embed.cc)", "url": "https://www.2embed.cc/embedtvfull/{}".format(tmdb_id), "quality": "HD"},

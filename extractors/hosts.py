@@ -2502,4 +2502,8 @@ def extract_stream(url):
         return stream, q, main_url, variants
 
     log("extract_stream FAILED for: {}".format(main_url))
+    # [PATCH 35] the failure path fell off the end and returned None,
+    # breaking the documented 4-tuple contract — any caller doing a
+    # 4-way unpack crashed with TypeError
+    return None, "", url, []
     return None, "", main_url, []

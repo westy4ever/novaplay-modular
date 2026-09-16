@@ -53,26 +53,19 @@ def _cfg(key, default):
 
 
 def _http_get(url):
-    """v1.1: two-tier fetch.
-
-    Tier 1 — the plugin's own fetch() (extractors.base): identical code
-    path to the subtitle screen's requests, which SUCCEED where a bare
-    urllib client gets 401 (log-proven: autosub 401 at 23:15:10, plugin
-    fetch OK on the same endpoint one minute later — net.py's fetch
-    carries whatever header/session shape the API expects).
-
-    Tier 2 — minimal-header urllib (User-Agent only; the browser-style
-    Referer/Accept headers were the suspected 401 trigger). Kept for
-    raw/binary payloads where the text path can't be used.
+    """v1.2 [PATCH 22]: X-API-Key auth. Curl-proven: the API returns 200
+    ONLY with the key as an X-API-Key header (no-auth / Bearer / query
+    param all 401). The keyed urllib request is now PRIMARY for subsource
+    API calls — the plugin fetch carries no custom headers and 401'd in
+    the log (disproving the v1.1 theory). The plugin fetch stays as a
+    fallback for non-API/CDN links where its session may still help.
     """
-    try:
-        from extractors.base import fetch
-        html, _final = fetch(url)
-        if html:
-            return html.encode("utf-8", "surrogateescape")
-    except Exception as e:
-        _dbg("autosub plugin-fetch error: {} ({})".format(e, url[:70]))
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    headers = {"User-Agent": _UA}
+    if url.startswith(_API):
+        _key = _cfg("subsource_api_key", "")
+        if _key:
+            headers["X-API-Key"] = _key
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             raw = resp.read()
@@ -82,6 +75,13 @@ def _http_get(url):
             return raw
     except Exception as e:
         _dbg("autosub http error: {} ({})".format(e, url[:90]))
+    try:
+        from extractors.base import fetch
+        html, _final = fetch(url)
+        if html:
+            return html.encode("utf-8", "surrogateescape")
+    except Exception as e:
+        _dbg("autosub plugin-fetch error: {} ({})".format(e, url[:70]))
     return None
 
 
@@ -248,36 +248,42 @@ def auto_subtitle_async(screen, gen):
 
 
 def _worker(screen, gen):
+    # [PATCH 23] call the subtitle module's PROVEN SubSource code —
+    # search, list parsing, download (/api/v1/subtitles/<id>/download),
+    # zip extraction and file writing all live there. The old
+    # self-contained guesses 404'd on download and parsed empty names.
     try:
         title = _clean_title(getattr(screen, "title", ""))
         item_url = getattr(screen, "_item_url", "")
         if not title:
             return
-        langs = [x.strip() for x in _cfg("autosub_langs", "arabic,english").split(",") if x.strip()]
-        year = _year_of(title)
-        _dbg("autosub: searching '{}' (year={})".format(title, year or "-"))
-        movie_id = _search_movie(title, year)
-        if not movie_id:
-            _dbg("autosub: no movie match")
+        api_key = _cfg("subsource_api_key", "").strip()
+        if not api_key:
             return
-        raw = chosen_lang = None
-        for lang in langs:
-            subs = _list_subs(movie_id, lang)
-            if not subs:
+        _dbg("autosub: searching '{}'".format(title))
+        try:
+            from novaplay_subtitles import subsource_search, subsource_download
+        except Exception as e:
+            _dbg("autosub import error: {}".format(e))
+            return
+        ok, err, results = subsource_search(title, item_url, api_key)
+        if not ok or not results:
+            _dbg("autosub: no match ({})".format((err or "no results")[:60]))
+            return
+        # results arrive sorted arabic-first, best-score-first — walk the
+        # top candidates until one actually downloads
+        for r in results[:6]:
+            sid = str(r.get("id") or "").strip()
+            if not sid:
                 continue
-            sub_id, sub_name = _pick_best(subs, title)
-            _dbg("autosub: trying [{}] {} (id={})".format(lang, sub_name[:60], sub_id))
-            raw = _download_sub(sub_id)
-            if raw:
-                chosen_lang = lang
-                break
-        if not raw:
-            _dbg("autosub: nothing downloadable")
-            return
-        path = _save(raw)
-        if not path:
-            return
-        _apply(screen, gen, path, item_url, chosen_lang or "")
+            name = str(r.get("label") or r.get("title") or "")
+            _dbg("autosub: trying {} (id={})".format(name[:60], sid))
+            ok2, _err2, path = subsource_download(sid, title, api_key)
+            if ok2 and path:
+                _apply(screen, gen, path, item_url,
+                       str(r.get("language") or ""))
+                return
+        _dbg("autosub: nothing downloadable")
     except Exception as e:
         _dbg("autosub worker error: {}".format(e))
 

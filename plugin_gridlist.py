@@ -43,6 +43,20 @@ Changes in the previous revision (kept for reference):
     f-string crashes at import on Python-2 images, while the rest of
     the codebase is deliberately py2-compatible.
   * Caption wrap width and carousel font sizes scale with the screen.
+
+[PATCH 46-R2] web-card overlay badges on poster cards: red year box
+  (top-left) + star rating box (top-right, yellow star on black).
+  Rating source is universal — TMDB's _merge_tmdb_data fills "rating"
+  for every site; YTS items carry it directly from TMDB listings.
+  Carousel rating badge restyled gold to match.
+
+[PATCH 48] in-poster watch-progress bar on grid cards (replaces the
+  old RESUME text chip): dark track across the poster's bottom edge
+  + gold fill proportional to watch state. Finished items show no
+  bar — their poster itself is dimmed (home screen's _updatePosterPixmaps
+  bakes a darkened variant). Position data arrives on the item dict
+  (item["_watch_pos"] / item["_is_watched"], stamped by the home
+  screen's paint loop).
 """
 
 import os
@@ -50,7 +64,9 @@ import re
 from plugin_util import _wrap_ui_text
 from Components.GUIComponent import GUIComponent
 from Components.MultiContent import MultiContentEntryText
-from enigma import eListboxPythonMultiContent, eListbox, gFont, RT_HALIGN_CENTER, RT_VALIGN_CENTER, RT_HALIGN_RIGHT
+from enigma import (eListboxPythonMultiContent, eListbox, gFont,
+                    RT_HALIGN_CENTER, RT_HALIGN_LEFT, RT_HALIGN_RIGHT,
+                    RT_VALIGN_CENTER)
 
 # Import state to check for saved resume positions
 from plugin_state import _get_saved_position
@@ -344,6 +360,19 @@ LIST_CELL_H = sc(83)
 LIST_CELL_MARGIN = sc(6)
 LIST_TAG_W = sc(200)                 # right-aligned tag/count column
 
+
+def _has_arabic(text):
+    """[PATCH 28] True if the string contains Arabic-script characters.
+    Arabic rows right-align (RTL reading); Latin rows stay LTR."""
+    try:
+        for ch in str(text or ""):
+            if u"\u0600" <= ch <= u"\u06FF" or u"\u0750" <= ch <= u"\u077F":
+                return True
+    except Exception:
+        pass
+    return False
+
+
 class TextListGrid(_BaseCardGrid):
     def __init__(self):
         _BaseCardGrid.__init__(self, 1, LIST_ROWS,
@@ -362,25 +391,49 @@ class TextListGrid(_BaseCardGrid):
         inner_w = LIST_CELL_W - 2 * LIST_CELL_MARGIN
         inner_h = LIST_CELL_H - 2 * LIST_CELL_MARGIN
         bw = HOME_BORDER_W
+        # [PATCH 34] separator rows (YTS's "🎬 Movies" headers etc.) render
+        # as dim centered dividers — visually distinct from selectable cards
+        if item.get("type") == "separator":
+            row.append(MultiContentEntryText(
+                pos=(cx, cy), size=(inner_w, inner_h), font=1,
+                text=item.get("title", ""), color=_G_CLR["text2"],
+                flags=RT_HALIGN_CENTER | RT_VALIGN_CENTER))
+            return row
         # frame + surface (same card look as the site tiles)
         bc = _G_CLR["cyan"] if is_sel else _G_CLR["border"]
         row.append(MultiContentEntryText(pos=(cx, cy), size=(inner_w, inner_h), font=0, text="", color=0, backcolor=bc, flags=0))
         row.append(MultiContentEntryText(pos=(cx + bw, cy + bw), size=(inner_w - 2 * bw, inner_h - 2 * bw), font=0, text="", color=0, backcolor=_G_CLR["surface2"], flags=0))
-        # title (left) — cyan when selected
+        # [PATCH 28] RTL rows: Arabic titles pin to the RIGHT edge with
+        # the tag on the LEFT (Arabic reads right-to-left); Latin rows
+        # keep the LTR layout. Detected per row — mixed lists handle
+        # themselves.
         title = item.get("title", "")
-        row.append(MultiContentEntryText(pos=(cx + bw + sc(20), cy + bw),
-                                          size=(inner_w - 2 * bw - LIST_TAG_W - sc(40), inner_h - 2 * bw),
-                                          font=0, text=title,
-                                          color=_G_CLR["cyan"] if is_sel else _G_CLR["text"],
-                                          backcolor=_G_CLR["surface2"], flags=RT_VALIGN_CENTER))
-        # optional right-aligned tag (tagline / count / type)
         tag = item.get("tagline") or item.get("count") or ""
-        if tag:
-            row.append(MultiContentEntryText(pos=(cx + inner_w - bw - LIST_TAG_W, cy + bw),
-                                              size=(LIST_TAG_W - sc(10), inner_h - 2 * bw),
-                                              font=1, text=tag, color=_G_CLR["text2"],
+        if _has_arabic(title):
+            row.append(MultiContentEntryText(pos=(cx + bw + sc(20), cy + bw),
+                                              size=(inner_w - 2 * bw - LIST_TAG_W - sc(40), inner_h - 2 * bw),
+                                              font=0, text=title,
+                                              color=_G_CLR["cyan"] if is_sel else _G_CLR["text"],
                                               backcolor=_G_CLR["surface2"],
                                               flags=RT_HALIGN_RIGHT | RT_VALIGN_CENTER))
+            if tag:
+                row.append(MultiContentEntryText(pos=(cx + bw + sc(10), cy + bw),
+                                                  size=(LIST_TAG_W - sc(10), inner_h - 2 * bw),
+                                                  font=1, text=tag, color=_G_CLR["text2"],
+                                                  backcolor=_G_CLR["surface2"],
+                                                  flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER))
+        else:
+            row.append(MultiContentEntryText(pos=(cx + bw + sc(20), cy + bw),
+                                              size=(inner_w - 2 * bw - LIST_TAG_W - sc(40), inner_h - 2 * bw),
+                                              font=0, text=title,
+                                              color=_G_CLR["cyan"] if is_sel else _G_CLR["text"],
+                                              backcolor=_G_CLR["surface2"], flags=RT_VALIGN_CENTER))
+            if tag:
+                row.append(MultiContentEntryText(pos=(cx + inner_w - bw - LIST_TAG_W, cy + bw),
+                                                  size=(LIST_TAG_W - sc(10), inner_h - 2 * bw),
+                                                  font=1, text=tag, color=_G_CLR["text2"],
+                                                  backcolor=_G_CLR["surface2"],
+                                                  flags=RT_HALIGN_RIGHT | RT_VALIGN_CENTER))
         return row
 
 
@@ -434,18 +487,14 @@ class PosterCardGrid(_BaseCardGrid):
             # 2. Solid Pure Opaque Black Background for Poster
             row.append(MultiContentEntryText(pos=(cx, cy), size=(POSTER_W, POSTER_H), font=0, text="", color=0, backcolor="#000000", flags=0))
 
-            # 3. Resume Badge (If item has saved position > 30s)
-            saved_pos = _get_saved_position(item.get("url", ""))
-            if saved_pos > 30:
-                _bw, _bh = sc(75), max(14, sc(26))
-                row.append(MultiContentEntryText(pos=(cx + POSTER_W - sc(80), cy + sc(5)), size=(_bw, _bh), font=1, text="RESUME", color=_G_CLR["gold"], backcolor="#000000", flags=RT_HALIGN_CENTER | RT_VALIGN_CENTER))
 
             title = item.get("title", "")
-            year = item.get("year") or ""
+            # [PATCH 49] year lives in the red badge box now — captions
+            # are title-only
             if item.get("_is_next_page"):
                 caption = "الصفحة التالية"
             else:
-                caption = u"{} {}".format(title, year).strip() if year else title
+                caption = title
 
             cap_y = cy + POSTER_H + 2
 
@@ -475,15 +524,33 @@ POSTER_BADGE_H = max(16, sc(26))
 
 
 def build_poster_badge_widgets_xml(x0, y0, name_prefix="pbadge"):
+    """[PATCH 49] per-cell overlay labels, all at zPosition=4 — ABOVE the
+    poster pixmaps (z=3). The listbox layer cannot paint card overlays
+    (pixmaps cover it — the reason the in-layer badges/bars never showed):
+      pbadge_{r,c}   — bottom gold bar (resume time / ✓)
+      pyear_{r,c}    — top-left red year box
+      prat_{r,c}     — top-right black rating box
+      pbar_{r,c}     — watch-progress bar (track+fill, scaled at runtime)
+    """
     parts = []
     _f = max(11, sc(17))
     _cr = max(3, sc(6))
     for r in range(POSTER_GRID_ROWS):
         for c in range(POSTER_GRID_COLS):
             px = x0 + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
-            py = y0 + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V + POSTER_H - POSTER_BADGE_H
+            py = y0 + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
             parts.append('\n\t\t<widget name="%s_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="%d" />'
-                         % (name_prefix, r, c, px, py, POSTER_W, POSTER_BADGE_H, _f, _cr))
+                         % (name_prefix, r, c, px, py + POSTER_H - POSTER_BADGE_H, POSTER_W, POSTER_BADGE_H, _f, _cr))
+            # year badge (top-left): red box, white text
+            parts.append('\n\t\t<widget name="pyear_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#C0392B" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#F0F6FC" halign="center" valign="center" cornerRadius="%d" />'
+                         % (r, c, px + sc(6), py + sc(6), sc(92), sc(30), _f, _cr))
+            # rating badge (top-right): black box, gold text (no ★ glyph —
+            # the skin font drops it; "7.8" alone reads clean)
+            parts.append('\n\t\t<widget name="prat_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#000000" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#FFD740" halign="center" valign="center" cornerRadius="%d" />'
+                         % (r, c, px + POSTER_W - sc(106), py + sc(6), sc(100), sc(30), _f, _cr))
+            # progress bar (bottom edge, above the gold badge bar)
+            parts.append('\n\t\t<widget name="pbar_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#0D1117" transparent="0" zPosition="4" cornerRadius="2" />'
+                         % (r, c, px, py + POSTER_H - POSTER_BADGE_H - sc(12), POSTER_W, sc(8)))
     return "".join(parts)
 
 
@@ -506,7 +573,9 @@ def build_carousel_xml():
         parts.append('<widget name="cposter{i}" position="0,0" size="1,1" backgroundColor="#161B22" cornerRadius="{cr}" zPosition="4" transparent="0" halign="center" valign="center" font="Regular;{f}" foregroundColor="#00E5FF" />'.format(i=i, cr=_cr, f=_cf))
         parts.append('<widget name="cposterImg{i}" position="0,0" size="1,1" zPosition="5" alphatest="blend" scale="1" />'.format(i=i))
         parts.append('<widget name="cfavMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#FFD740" transparent="1" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_cf))
-        parts.append('<widget name="cratingBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#39D98A" backgroundColor="#000000" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
+        # [PATCH 46-R2] rating badge restyled gold — yellow star on
+        # black box, matching the grid card design
+        parts.append('<widget name="cratingBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
         parts.append('<widget name="cresumeMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
     return "\n".join(parts)
 
@@ -544,4 +613,8 @@ def build_continue_row_xml():
     for i in range(CONT_SLOTS):
         parts.append('<widget name="cont%d" position="%d,%d" size="%d,%d" zPosition="4" alphatest="blend" scale="1" />'
                       % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y, CONT_W, CONT_H))
+        # [PATCH 13] per-item resume-time badge — gold bar at the poster's
+        # bottom edge (grid pbadge style), above the pixmap (z=6)
+        parts.append('<widget name="contbadge%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="6" font="Regular;15" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="4" />'
+                     % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y + CONT_H - 22, CONT_W, 22))
     return "\n".join(parts)

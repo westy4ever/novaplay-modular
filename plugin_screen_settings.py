@@ -93,10 +93,14 @@ class AdvancedArabicPlayerSettings(Screen):
         layout = _get_config("layout_style", "carousel")
         adult = _get_config("show_adult", "false")
         self["key_green_label"].setText("تعطيل محتوى الكبار" if adult == "true" else "تفعيل محتوى الكبار")
+        maxq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
+        if maxq not in ("AUTO", "480P", "720P", "1080P"):
+            maxq = "AUTO"
         body = (
             "NovaPlay Media Center v{version}\n\n"
             "واجهة العرض: {layout_style}\n"
-            "محتوى الكبار: {adult_status}\n\n"
+            "محتوى الكبار: {adult_status}\n"
+            "جودة البث القصوى: {maxq}\n\n"
             "TMDb:\n• الحالة: {tmdb_status}\n• المفتاح: {tmdb_key}\n\n"
             "TorrServer:\n• الحالة: {ts_status}\n• العنوان: {ts_url}\n\n"
             "Browser Proxy:\n• الحالة: {proxy_status}\n• العنوان: {proxy_addr}\n\n"
@@ -109,6 +113,7 @@ class AdvancedArabicPlayerSettings(Screen):
             version=_PLUGIN_VERSION,
             layout_style=layout.upper(),
             adult_status="مفعل (ظهر)" if adult == "true" else "مخفي (آمن للعائلة)",
+            maxq=maxq,
             tmdb_status="مفعل" if api_key else "غير مفعل",
             tmdb_key=("********" + api_key[-4:]) if api_key else "غير مضبوط",
             ts_status="مفعل" if ts_url else "غير مفعل",
@@ -157,10 +162,14 @@ class AdvancedArabicPlayerSettings(Screen):
         """Tools & diagnostics: diagnostics, dependency install,
         subtitle settings (API keys / folder / auto-attach / cache),
         Enigma2 restart."""
+        _mq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
+        if _mq not in ("AUTO", "480P", "720P", "1080P"):
+            _mq = "AUTO"
         choices = [
             ("🛠️ System Diagnostics", "diagnostics"),
             ("📦 Install Missing Dependencies", "install_deps"),
             ("🎬 Subtitle Settings — ترجمة", "subtitles"),
+            ("🎚️ Max Stream Quality — الجودة القصوى ({})".format(_mq), "maxq"),
             ("🔄 Restart Enigma2", "restart"),
         ]
         self.session.openWithCallback(
@@ -181,5 +190,34 @@ class AdvancedArabicPlayerSettings(Screen):
         elif action == "subtitles":
             from novaplay_subtitles import NovaSubtitleSettings
             self.session.open(NovaSubtitleSettings)
+        elif action == "maxq":
+            self._openMaxQuality()
         elif action == "restart":
             open_restart_prompt(self.session)
+
+    def _openMaxQuality(self):
+        """[PATCH 27] stream quality cap. When set, playback automatically
+        picks the best HLS rendition at or below the cap (_applyQualityCap
+        in the detail screen); Auto = whatever the site serves."""
+        current = str(_get_config("max_quality", "auto") or "auto").strip().lower()
+        options = [
+            ("Auto — تلقائي (أعلى جودة متاحة)", "auto"),
+            ("480p — توفير أكبر للبيانات", "480p"),
+            ("720p — توازن (موصى به)", "720p"),
+            ("1080p — أعلى جودة", "1080p"),
+        ]
+        items = []
+        for label, value in options:
+            mark = "● " if value == current else "   "
+            items.append(("{}{}".format(mark, label), value))
+
+        def _picked(choice):
+            if not choice:
+                return
+            value = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
+            _set_config("max_quality", str(value))
+            self._refresh()
+
+        self.session.openWithCallback(_picked, ChoiceBox,
+                                      title="Max Stream Quality — الجودة القصوى",
+                                      list=items)

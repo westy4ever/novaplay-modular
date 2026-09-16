@@ -80,7 +80,7 @@ def badge_for(url):
         return u"✓"
     try:
         from plugin_state import _get_saved_position
-        if _get_saved_position(url) > 60:
+        if _get_saved_position(url) > 30:
             return u"◐"
     except Exception:
         pass

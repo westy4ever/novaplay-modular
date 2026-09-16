@@ -29,6 +29,13 @@ set with ALL session patches baked in:
   * v4.4: quality variants + mid-playback quality switching
   * v4.5: skip intro + watched badge at EOF + single-source-of-truth delay
     + failed-quality-switch revert dialog
+  * [PATCH 29] real system-aspect probes via eAVSwitch with three-way
+    restore-on-exit (fake-mode entry, normal exit, crash close)
+  * [PATCH 32] per-site "candidate that worked" memory — the winning
+    candidate label is stored per host and moved to the front of the
+    chain on the next playback, saving the 12s+ timeout hop
+  * [PATCH 33] verifySeek trusts the demuxer's PTS over the commanded
+    target when they disagree (fixes the 720p _h resume inflation)
 """
 
 import os
@@ -91,6 +98,34 @@ except Exception:
 
 
 # ─── Remote-play candidate builder ──────────────────────────────────────────
+# [PATCH 26] module-level anchor for deferred next-episode opens.
+# The old screen-owned timer formed an orphaned reference cycle once
+# the player closed ({player ↔ timer ↔ callback}) — collectible before
+# the 200ms timeout fired, so the open silently never happened.
+# Anchoring the timer in a module-global list keeps it alive
+# regardless of the screen's lifetime.
+_DEFERRED_OPENS = []
+
+
+def _defer_open_next(cb, nxt):
+    """Fire cb(nxt) ~200ms after the player has fully closed."""
+    t = eTimer()
+
+    def _run():
+        try:
+            _DEFERRED_OPENS.remove(t)
+        except Exception:
+            pass
+        my_log("autoNext: opening next episode")
+        try:
+            cb(nxt)
+        except Exception as e:
+            my_log("auto-next open error: {}".format(e))
+
+    t.callback.append(_run)
+    t.start(200, True)
+    _DEFERRED_OPENS.append(t)
+
 
 def _build_remote_play_candidates(url):
     url = str(url).strip()
@@ -319,6 +354,17 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
     _STUDIO_CARDS = ("studioCard0","studioCard1","studioCard2","studioCard3","studioCard4")
     _AUTONEXT_SECONDS = 10
     _ASPECT_MODES = [("Full", 0), ("14:9", 120), ("4:3", 240)]
+    # [PATCH 29] REAL system-aspect probe steps (eAVSwitch values).
+    # Probe phase: cycle through these and observe the screen — then we
+    # lock the final cycle to the winners.
+    _AV_PROBE_MODES = [
+        ("System 4:3 — probe v0", 0),
+        ("System 16:9 — probe v1", 1),
+        ("System 16:10 — probe v2", 2),
+        ("System probe v3", 3),
+        ("System probe v4", 4),
+        ("System probe v5", 5),
+    ]
 
     def __init__(self, session, title, candidates, previous_service=None, resume_pos=0, item_url="",
                  next_episode=None, on_next=None, poster_url="", quality_variants=None):
@@ -400,6 +446,13 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._restored_previous = False
         self._resume_pos = int(resume_pos or 0)
         self._item_url  = item_url or ""
+        # [PATCH 32] try the remembered-working candidate type first —
+        # saves the 12s+ timeout hop on streams whose direct candidate
+        # never confirms
+        try:
+            self.candidates = self._reorderCandidatesByPref(self.candidates)
+        except Exception:
+            pass
         self._poster_url = poster_url or ""
         # v4.4: quality variants for mid-playback switching
         self._quality_variants = self._normalizeQualityVariants(quality_variants)
@@ -435,6 +488,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._sleep_timer = None
         self._sleep_minutes = 0
         self._aspect_idx = 0
+        # [PATCH 29] real-aspect support: remember the system aspect on
+        # entry (from enigma config — eAVSwitch has no getter on this
+        # image) so every exit path can restore it exactly
+        self._saved_av_aspect = None
+        self._av_aspect_dirty = False
+        try:
+            from Components.config import config
+            self._saved_av_aspect = int(config.av.aspect.value)
+        except Exception:
+            pass
         self._record_task = None
         self._rec_blink_on = True
         self._autonext_active = False
@@ -547,7 +610,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             "green":            self.__onRestart,
             "red":              self.__subtitleDelayBack,
             "blue":             self._onSubtitles,
-            "yellow":           self.__cycleAspect,
+            "yellow":           self.__qualityMenu,
             "subtitles":        self._onSubtitles,
             "subtitleSelection": self._onSubtitles,
             "audioSelection":   self.__audioSelect,   # v4.3: AUDIO key, if the remote has one
@@ -781,7 +844,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                     self["seekbar"].setValue(0)
                 except Exception:
                     pass
-            self["osd_keys"].setText("OK=إيقاف  0-9=قفز  ‹›±10ث  أحمر:ترجمة-  أصفر:نسبة  أخضر:إعادة  أزرق:ترجمة  Stop=خروج")
+            self["osd_keys"].setText("OK=إيقاف  0-9=قفز  ‹›±10ث  أحمر:ترجمة-  أصفر:جودة  أخضر:إعادة  أزرق:ترجمة  Stop=خروج")
         except Exception as e:
             my_log("updateOSD error: {}".format(e))
 
@@ -892,6 +955,31 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         dead = getattr(self, "_quality_dead_urls", set())
         return [(l, u) for (l, u) in variants if u != cur and u not in dead]
 
+    def _reorderCandidatesByPref(self, cands):
+        """[PATCH 32] move the remembered-working candidate type to the
+        front of the chain. A reorder, not a filter — if the remembered
+        one now fails, the chain still tries everything (self-healing),
+        and the memory updates on the next confirm."""
+        try:
+            if not cands:
+                return cands
+            key = _candidate_pref_key(getattr(self, "_item_url", ""))
+            if not key:
+                return cands
+            pref = str(_get_config(key, "") or "").strip()
+            if not pref:
+                return cands
+            for i, c in enumerate(cands):
+                if c and len(c) > 2 and str(c[2]) == pref:
+                    if i > 0:
+                        win = cands.pop(i)
+                        cands.insert(0, win)
+                        my_log("candidates: '{}' remembered as working — moved to front".format(pref))
+                    break
+            return cands
+        except Exception:
+            return cands
+
     def __qualityMenu(self):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
             return
@@ -973,6 +1061,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         # ~10-12s, then the revert dialog appears. Revert restores the
         # FULL previous candidate list regardless.
         self.candidates = _cands[:5] if len(_cands) > 5 else _cands
+        self.candidates = self._reorderCandidatesByPref(self.candidates)   # [PATCH 32]
         try:
             self["status"].setText(u"🎛 تبديل الجودة: {}".format(label))
             self.__showOSD(True)
@@ -1223,6 +1312,15 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._force_confirmation_timer.stop()
         except: pass
         my_log("Play confirmed: {}".format(self._candidate_label))
+        # [PATCH 32] remember the winning candidate type for this site
+        # (write only on change — no extra flash writes per playback)
+        try:
+            _pk = _candidate_pref_key(self._item_url)
+            if _pk and self._candidate_label and \
+                    str(_get_config(_pk, "") or "") != self._candidate_label:
+                _set_config(_pk, self._candidate_label)
+        except Exception:
+            pass
         # v4.5: playback confirmed — any pending quality switch succeeded
         self._quality_switch_in_flight = False
         start_pos_tracker(self.session, self._item_url, start_pos=self._resume_pos)
@@ -1297,7 +1395,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __onTimeout(self):
         if self._play_confirmed: return
-        if self._candidate_uses_proxy and novaplay_proxy._PROXY_LAST_HIT >= self._candidate_start_ts and novaplay_proxy._PROXY_LAST_BYTES > 0:
+        if self._candidate_uses_proxy and novaplay_proxy._PROXY_LAST_HIT >= self._candidate_start_ts and novaplay_proxy._PROXY_LAST_BYTES > 50000:
             my_log("Play proxy confirmed by traffic: {} bytes".format(novaplay_proxy._PROXY_LAST_BYTES))
             self.__onConfirmed()
             return
@@ -1306,7 +1404,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __forceConfirm(self):
         if self._play_confirmed: return
-        if self._candidate_uses_proxy and novaplay_proxy._PROXY_LAST_HIT >= self._candidate_start_ts and novaplay_proxy._PROXY_LAST_BYTES > 0:
+        if self._candidate_uses_proxy and novaplay_proxy._PROXY_LAST_HIT >= self._candidate_start_ts and novaplay_proxy._PROXY_LAST_BYTES > 50000:
             my_log("Play proxy confirmed early by traffic: {} bytes".format(novaplay_proxy._PROXY_LAST_BYTES))
             self.__onConfirmed()
 
@@ -1405,14 +1503,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
     def __nextAnswer(self, ans, nxt):
         if ans and self._on_next:
             self._skip_restore = True
+            cb = self._on_next
             self.__onExit(clear_position=True)
-            try:
-                t = eTimer()
-                t.callback.append(lambda: self._on_next(nxt))
-                t.start(200, True)
-                self._next_open_timer = t
-            except Exception:
-                self._on_next(nxt)
+            # [PATCH 26] module-anchored deferred open — the screen-owned
+            # timer was garbage-collectible with the dead player before
+            # it fired (the silent auto-next failure)
+            _defer_open_next(cb, nxt)
         else:
             self.__onExit(clear_position=True)
 
@@ -1692,6 +1788,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         # force-flush used to run AFTER the clear, resurrecting the EOF
         # position the clear just zeroed.
         stop_pos_tracker()
+        # [PATCH 29] never leave the box's system aspect changed
+        try:
+            self._restoreSystemAspect()
+        except Exception:
+            pass
         try:
             if self._item_url:
                 if clear_position:
@@ -1726,6 +1827,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     def __stop(self):
         self.__hideOSD()
+        # [PATCH 29] crash safety — restore the system aspect on any close
+        try:
+            self._restoreSystemAspect()
+        except Exception:
+            pass
         # v4.3: abort any in-flight auto-subtitle worker
         self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
         # Fix Y: _next_open_timer is NOT stopped here — its callback only
@@ -1792,16 +1898,24 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                         self._paused_elapsed = actual_pos
                     my_log("verifySeek OK via PTS: actual={}s target={}s".format(actual_pos, self._resume_pos))
                 else:
-                    if seek and self._seek_retry_count <= 3:
+                    if seek and self._seek_retry_count < 3:   # [PATCH 33] was <= 3 → printed "4/3"
                         self._seek_retry_count += 1
                         seek.seekTo(self._resume_pos * 90000)
                         my_log("verifySeek double-tap {}/3: actual={}s target={}s".format(self._seek_retry_count, actual_pos, self._resume_pos))
                         self._seek_verify_timer.start(3000, True)
                     else:
+                        # [PATCH 33] the demuxer DISAGREES with the target —
+                        # PTS is ground truth. Base the tracker on the ACTUAL
+                        # position so saved positions stop inflating. The old
+                        # code believed the un-achieved target (the 720p _h
+                        # stream bug: saved 143s while actually at ~30s,
+                        # compounding on every resume).
                         with novaplay_tracker._GLOBAL_POS_LOCK:
-                            novaplay_tracker._GLOBAL_PLAY_START_POS = max(0, self._resume_pos - 2)
+                            novaplay_tracker._GLOBAL_PLAY_START_POS = max(0, int(actual_pos))
                             novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
-                        my_log("verifySeek giving up, setting display to target {}s".format(self._resume_pos))
+                            novaplay_tracker._GLOBAL_LAST_SEEK_TARGET = int(actual_pos)
+                        my_log("verifySeek giving up — TRUSTING DEMUXER at {}s (target {}s not reached)".format(
+                            actual_pos, self._resume_pos))
             else:
                 if self._seek_retry_count <= 2:
                     if seek:
@@ -1827,7 +1941,6 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         items = [
             ("Subtitle — الترجمة", "subs"),
             ("Audio track — الصوت", "audio"),
-            ("Aspect ratio — نسبة العرض: %s" % self._aspectLabel(), "aspect"),
             ("Stream info — معلومات", "info"),
             ("Next-episode prompt — التالي تلقائياً: %s" % ("ON" if self._next_prompt_enabled else "OFF"), "nxtep"),
             ("Sleep timer — مؤقت النوم: %s" % self._sleepLabel(), "sleep"),
@@ -1844,8 +1957,6 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._onSubtitles()
         elif action == "audio":
             self.__audioSelect()
-        elif action == "aspect":
-            self.__cycleAspect()
         elif action == "info":
             self.__streamInfo()
         elif action == "nxtep":
@@ -1863,7 +1974,11 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
     # ─── aspect (pillarbox) ──────────────────────────────────────────────
     def _aspectLabel(self):
         try:
-            return self._ASPECT_MODES[getattr(self, "_aspect_idx", 0)][0]
+            idx = getattr(self, "_aspect_idx", 0)
+            n_fake = len(self._ASPECT_MODES)
+            if idx < n_fake:
+                return self._ASPECT_MODES[idx][0]
+            return self._AV_PROBE_MODES[idx - n_fake][0]
         except Exception:
             return "Full"
 
@@ -1873,26 +1988,77 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         if getattr(self, "_autonext_active", False):
             return
-        self._aspect_idx = (getattr(self, "_aspect_idx", 0) + 1) % len(self._ASPECT_MODES)
-        label, bar = self._ASPECT_MODES[self._aspect_idx]
-        # [PATCH 11] the modular __init__ hides the aspect bars at startup
-        # (the monolith never did); resize/move do NOT un-hide a widget,
-        # so the bars stayed invisible. Show when active, hide at Full.
-        try:
-            if bar:
-                self["aspect_bar_l"].instance.resize(eSize(bar, 1080))
-                self["aspect_bar_l"].instance.move(ePoint(0, 0))
-                self["aspect_bar_r"].instance.resize(eSize(bar, 1080))
-                self["aspect_bar_r"].instance.move(ePoint(1920 - bar, 0))
-                self["aspect_bar_l"].show()
-                self["aspect_bar_r"].show()
-            else:
+        # [PATCH 29] extended cycle: fake bars (Full/14:9/4:3), then REAL
+        # system-aspect probes (eAVSwitch) — the hardware does the framing
+        total = len(self._ASPECT_MODES) + len(self._AV_PROBE_MODES)
+        self._aspect_idx = (getattr(self, "_aspect_idx", 0) + 1) % total
+        self._applyAspectMode()
+
+    def _applyAspectMode(self):
+        idx = getattr(self, "_aspect_idx", 0)
+        n_fake = len(self._ASPECT_MODES)
+        if idx < n_fake:
+            # fake-bar modes: system aspect must be back to normal first
+            self._restoreSystemAspect()
+            label, bar = self._ASPECT_MODES[idx]
+            try:
+                if bar:
+                    self["aspect_bar_l"].instance.resize(eSize(bar, 1080))
+                    self["aspect_bar_l"].instance.move(ePoint(0, 0))
+                    self["aspect_bar_r"].instance.resize(eSize(bar, 1080))
+                    self["aspect_bar_r"].instance.move(ePoint(1920 - bar, 0))
+                    self["aspect_bar_l"].show()
+                    self["aspect_bar_r"].show()
+                else:
+                    self["aspect_bar_l"].hide()
+                    self["aspect_bar_r"].hide()
+            except Exception as e:
+                my_log("aspect error: {}".format(e))
+            self["status"].setText("Aspect: %s" % label)
+        else:
+            # real system-aspect probe: clear the fake bars, let the
+            # video hardware do the framing
+            try:
                 self["aspect_bar_l"].hide()
                 self["aspect_bar_r"].hide()
-        except Exception as e:
-            my_log("aspect error: {}".format(e))
-        self["status"].setText("Aspect: %s" % label)
+            except Exception:
+                pass
+            plabel, av_value = self._AV_PROBE_MODES[idx - n_fake]
+            ok = self._setSystemAspect(av_value)
+            self["status"].setText("Aspect PROBE: %s → %s" % (
+                plabel, "applied" if ok else "eAVSwitch FAILED"))
         self.__showOSD(True)
+
+    def _setSystemAspect(self, value):
+        """[PATCH 29] real video-plane aspect switching via eAVSwitch."""
+        if eAVSwitch is None:
+            return False
+        try:
+            eAVSwitch.getInstance().setAspectRatio(int(value))
+            self._av_aspect_dirty = True
+            my_log("aspect: eAVSwitch.setAspectRatio({})".format(value))
+            return True
+        except Exception as e:
+            my_log("aspect: eAVSwitch error: {}".format(e))
+            return False
+
+    def _restoreSystemAspect(self):
+        """[PATCH 29] put the system aspect back exactly as the player
+        found it — runs on every fake-mode entry, every exit, and on
+        close (crash safety). A stuck global aspect is worse than no
+        feature."""
+        if not getattr(self, "_av_aspect_dirty", False):
+            return
+        saved = getattr(self, "_saved_av_aspect", None)
+        if saved is None:
+            return
+        try:
+            if eAVSwitch is not None:
+                eAVSwitch.getInstance().setAspectRatio(int(saved))
+            my_log("aspect: system aspect restored to {}".format(saved))
+        except Exception as e:
+            my_log("aspect: restore error: {}".format(e))
+        self._av_aspect_dirty = False
 
     # ─── audio ───────────────────────────────────────────────────────────
     def __audioSelect(self):
@@ -2707,6 +2873,19 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._showStudioOverlay()
 
 
+# ─── [PATCH 32a] per-site candidate memory key ──────────────────────────────
+def _candidate_pref_key(item_url):
+    """[PATCH 32] config key for the per-site 'candidate that worked' memory."""
+    try:
+        host = urlparse(str(item_url or "")).netloc or ""
+        host = host.lower()
+        if host.startswith("www."):
+            host = host[4:]
+        return ("cand_pref_" + host.replace(".", "_")) if host else ""
+    except Exception:
+        return ""
+
+
 # ─── Global play function ──────────────────────────────────────────────────
 
 def _play(session, url, title, resume_pos=0, item_url="",
@@ -2747,4 +2926,4 @@ def _play(session, url, title, resume_pos=0, item_url="",
                          next_episode=next_episode, on_next=on_next,
                          poster_url=poster_url)
     except Exception as e:
-        my_log("[PLAY_ERROR] " + str(e))                                                        
+        my_log("[PLAY_ERROR] " + str(e))

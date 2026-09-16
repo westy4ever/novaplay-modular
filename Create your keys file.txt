@@ -1,0 +1,13 @@
+cat > /usr/lib/enigma2/python/Plugins/Extensions/AdvancedArabicPlayer/api_keys.conf <<'EOF'
+# NovaPlay keys file — edit and restart Enigma2. Lines: KEY=value
+# These override the same keys stored in the state file.
+
+tmdb_api_key=
+subsource_api_key=
+opensubtitles_api_key=
+# browser_proxy=http://192.168.1.100:5000
+# torrserver_url=http://127.0.0.1:8090
+EOF
+chmod 600 /usr/lib/enigma2/python/Plugins/Extensions/AdvancedArabicPlayer/api_keys.conf
+python3 -m py_compile plugin_state.py
+init 4 && sleep 2 && init 3

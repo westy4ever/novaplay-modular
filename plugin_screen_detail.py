@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 """NovaPlay — Detail screen (servers / episodes / qualities / chain).
-
 MODULAR EXTRACTION of AdvancedArabicPlayerDetail with:
   * episode chain + auto-server (next-episode support, _playNextEpisode)
   * health hooks on load/extract
@@ -8,6 +7,8 @@ MODULAR EXTRACTION of AdvancedArabicPlayerDetail with:
   * watchdog race fix (_done re-check in the timeout callback)
   * OSD poster seeding (P1/P2) for the player
   * magnet prompt + TorrServer + download engine flows
+  * [PATCH 46-R2] poster badges: red year box (top-left) + gold-star
+    rating box (top-right) — universal TMDB rating source
 """
 
 import os
@@ -48,20 +49,22 @@ _PLUGIN_VERSION = "4.1.0"
 class AdvancedArabicPlayerDetail(Screen):
     skin = """
     <screen name="AdvancedArabicPlayerDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
-        <ePixmap position="0,0" size="1920,1080" pixmap="{plugin_path}/images/bg_detail.png" zPosition="0" alphatest="blend" />
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
 
         <widget name="poster_box" position="45,30" size="420,600" backgroundColor="#1C2333" zPosition="2" />
         <widget name="poster" position="68,52" size="375,555" zPosition="4" alphatest="blend" />
+        <!-- [PATCH 46-R2] poster badges: red year box (top-left) +
+             gold-star rating box (top-right), matching the grid cards -->
+        <widget name="posterYear" position="76,56" size="96,36" font="Regular;26" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
+        <widget name="posterRating" position="325,58" size="104,36" font="Regular;26" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
 
         <widget name="info_box" position="495,30" size="1380,405" backgroundColor="#161B22" zPosition="2" />
-        <widget name="badge" position="525,52" size="1320,33" font="Regular;26" foregroundColor="#E040FB" transparent="1" zPosition="4" />
+        <widget name="badge" position="525,52" size="800,33" font="Regular;26" foregroundColor="#E040FB" transparent="1" zPosition="4" />
         <widget name="title" position="525,93" size="1320,90" font="Regular;42" foregroundColor="#00E5FF" transparent="1" zPosition="4" />
         <widget name="meta" position="525,189" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
         <widget name="facts" position="525,255" size="1320,42" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="4" />
-        <widget name="source" position="525,300" size="1320,42" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
-        <widget name="tmdb_note" position="525,348" size="1320,33" font="Regular;22" foregroundColor="#39D98A" transparent="1" zPosition="4" />
-        <widget name="proxy_warning" position="525,52" size="400,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
+        <widget name="source" position="525,300" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
+        <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
 
         <widget name="plot_box" position="495,450" size="1380,180" backgroundColor="#1C2333" zPosition="2" />
         <widget name="plot_title" position="525,465" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
@@ -77,10 +80,10 @@ class AdvancedArabicPlayerDetail(Screen):
                 backgroundColor="#161B22"
                 backgroundColorSelected="#21262D" />
 
-        <widget name="key_red" position="45,1050" size="330,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="4" />
-        <widget name="key_yellow" position="385,1050" size="330,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="key_blue" position="725,1050" size="330,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
-        <widget name="status" position="1065,1050" size="795,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="4" />
+        <widget name="key_red"    position="45,1042"  size="330,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="4" />
+        <widget name="key_yellow" position="385,1042" size="330,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
+        <widget name="key_blue"   position="725,1042" size="330,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
+        <widget name="status"     position="1065,1042" size="795,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="4" />
     </screen>
     """
 
@@ -125,12 +128,14 @@ class AdvancedArabicPlayerDetail(Screen):
         self["plot_box"] = Label("")
         self["menu_box"] = Label("")
         self["poster"] = Pixmap()
+        # [PATCH 46-R2] poster badge widgets
+        self["posterYear"] = Label("")
+        self["posterRating"] = Label("")
         self["badge"]  = Label("")
         self["title"]  = Label(item.get("title", ""))
         self["meta"]   = Label("")
         self["facts"]  = Label("")
         self["source"] = Label("")
-        self["tmdb_note"] = Label("")
         self["proxy_warning"] = Label("")
         self["plot_title"] = Label("القصة")
         self["plot"]   = Label("")
@@ -187,7 +192,10 @@ class AdvancedArabicPlayerDetail(Screen):
             fallback = re.sub(r'[\U00010000-\U0010ffff]', '', meta_line).strip()
             fallback = re.sub(r'\s+', ' ', fallback)
             seeders_source = fallback
-        return ("[ {} ]".format(quality), release_name, size, seeders_source)
+        # [PATCH 43] quality is rendered in its own column now (PATCH
+        # 40's resolution/tag split) — the "[ X ]" wrapper just broke
+        # the column layout and fed a stray "[" to the first line
+        return (quality, release_name, size, seeders_source)
 
     def _format_episode_item(self, ep):
         title = ep.get("title", "Episode")
@@ -424,7 +432,6 @@ class AdvancedArabicPlayerDetail(Screen):
         if data.get("year"):
             counts.append("السنة: {}".format(data.get("year")))
         self["source"].setText(_wrap_ui_text("المصدر: {}  |  {}".format(_site_label(self._site), "  |  ".join(counts)), width=58, max_lines=2))
-        self["tmdb_note"].setText("TMDb: تم تعزيز البيانات والبوستر" if data.get("_tmdb") else "TMDb: لا توجد بيانات إضافية حالياً")
         if has_episodes:
             plot_label = "قصة المسلسل"
         elif has_servers:
@@ -502,6 +509,31 @@ class AdvancedArabicPlayerDetail(Screen):
             self["key_blue"].setText("تحميل ({})".format(len(self._downloads)))
         else:
             self["key_blue"].setText("")
+
+        # [PATCH 46-R2] poster badges — rating (top-right, gold star on
+        # black) + year (top-left, red box, white text). Rating source is
+        # universal: _merge_tmdb_data fills "rating" for every site when
+        # the site didn't provide one; YTS items carry it directly.
+        try:
+            _r = str(data.get("rating") or self._item.get("rating") or "").strip()
+            if _r and float(_r) > 0:
+                self["posterRating"].setText(u"★ " + _r[:3])
+                self["posterRating"].show()
+            else:
+                self["posterRating"].hide()
+        except Exception:
+            try: self["posterRating"].hide()
+            except Exception: pass
+        try:
+            _y = str(data.get("year") or self._item.get("year") or "").strip()[:4]
+            if _y:
+                self["posterYear"].setText(_y)
+                self["posterYear"].show()
+            else:
+                self["posterYear"].hide()
+        except Exception:
+            try: self["posterYear"].hide()
+            except Exception: pass
 
         poster_url = data.get("poster") or self._item.get("poster", "")
         if poster_url:
@@ -873,6 +905,67 @@ class AdvancedArabicPlayerDetail(Screen):
         self["status"].show()
         threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
 
+    def _applyQualityCap(self, url):
+        """[PATCH 25] max-quality cap: when max_quality is set (not Auto)
+        and the stream is an HLS master playlist, fetch the manifest and
+        rewrite the play URL to the best rendition at or below the cap.
+        Every failure path (not a master, no renditions, fetch error)
+        returns the ORIGINAL url — the cap can never break playback."""
+        try:
+            cap = str(_get_config("max_quality", "auto") or "auto").strip().lower()
+            if cap in ("", "auto"):
+                return url
+            digits = "".join(c for c in cap if c.isdigit())
+            cap_h = int(digits) if digits else 0
+            if not cap_h:
+                return url
+            base, frag = (url.split("#", 1) + [""])[:2]
+            if ".m3u8" not in base.lower():
+                return url
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            if frag:
+                for p in frag.split("&"):
+                    if "=" in p:
+                        k, v = p.split("=", 1)
+                        if k not in headers:
+                            headers[k] = v
+            from extractors.base import fetch
+            text, _final = fetch(base, extra_headers=headers)
+            if not text or "#EXT-X-STREAM-INF" not in text:
+                return url                     # media playlist — no menu to pick from
+            from urllib.parse import urljoin
+            lines = [l.strip() for l in text.splitlines()]
+            best = None        # tallest rendition <= cap
+            smallest = None    # smallest overall (fallback when all are above cap)
+            i = 0
+            while i < len(lines):
+                if lines[i].startswith("#EXT-X-STREAM-INF"):
+                    j = i + 1
+                    while j < len(lines) and not lines[j]:
+                        j += 1
+                    if j < len(lines) and not lines[j].startswith("#"):
+                        uri = lines[j]
+                        m = re.search(r"RESOLUTION=(\d+)[xX](\d+)", lines[i])
+                        h = int(m.group(2)) if m else 0
+                        if h and h <= cap_h and (best is None or h > best[0]):
+                            best = (h, uri)
+                        if h and (smallest is None or h < smallest[0]):
+                            smallest = (h, uri)
+                        i = j + 1
+                        continue
+                i += 1
+            pick = best or smallest
+            if not pick:
+                return url
+            variant = urljoin(base, pick[1])
+            if not variant or variant == base:
+                return url
+            my_log("quality cap: {}p master → {}p rendition".format(cap_h, pick[0]))
+            return variant + ("#" + frag if frag else "")
+        except Exception as e:
+            my_log("quality cap error: {} — playing original URL".format(e))
+            return url
+
     def _onStreamFound(self, stream_url, quality, final_ref, server):
         if getattr(self, "_closed", False): return
         try:
@@ -929,6 +1022,8 @@ class AdvancedArabicPlayerDetail(Screen):
             header_str = "&".join(["{}={}".format(k, v) for k, v in headers.items()])
             pure_url = main_url.split("|")[0].strip()
             url = pure_url + "#" + header_str if header_str else pure_url
+            # [PATCH 25] quality cap — swap in the best ≤cap HLS rendition
+            url = self._applyQualityCap(url)
 
             # v4.4 (Edit A): snapshot this server's quality variants —
             # get_last_quality_variants() holds the result of the resolver
@@ -986,6 +1081,7 @@ class AdvancedArabicPlayerDetail(Screen):
         except Exception as e:
             my_log("Error opening player: {}".format(e))
             self["status"].setText("خطأ في المشغل: {}".format(str(e)[:60]))
+
     def _openDownloads(self):
         if self._active_download_task and self._active_download_task.status == "downloading":
             pct = self._active_download_task.progress_pct()
@@ -1017,8 +1113,64 @@ class AdvancedArabicPlayerDetail(Screen):
         entry = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else None
         if not entry:
             return
-        self["status"].setText("جاري تجهيز رابط التحميل...")
-        threading.Thread(target=self._bgResolveAndDownload, args=(entry,), daemon=True).start()
+        # [PATCH 21] watch-or-download choice — same pattern as the
+        # magnet action prompt (_promptMagnetAction)
+        self.session.openWithCallback(
+            lambda c: self._onDownloadActionChosen(c, entry),
+            ChoiceBox,
+            title="شاهد أم حمّل؟",
+            list=[("▶ شاهد الآن", "watch"), ("⬇ حمّل على القرص", "download")]
+        )
+
+    def _onDownloadActionChosen(self, choice, entry):
+        if not choice:
+            return
+        action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
+        if action == "watch":
+            self["status"].setText("جاري تجهيز الرابط للمشاهدة...")
+            self["status"].show()
+            threading.Thread(target=self._bgResolveAndWatch, args=(entry,), daemon=True).start()
+        elif action == "download":
+            self["status"].setText("جاري تجهيز رابط التحميل...")
+            threading.Thread(target=self._bgResolveAndDownload, args=(entry,), daemon=True).start()
+
+    def _bgResolveAndWatch(self, entry):
+        """[PATCH 21] Resolve a caught download link and hand the direct
+        URL to the player — same resolution chain as _bgResolveAndDownload,
+        but the result plays instead of downloads (many file hosts expose
+        direct .mp4/.m3u8 URLs that stream fine)."""
+        try:
+            from plugin_downloads import resolve_download_link
+            resolved_url = resolve_download_link(entry["url"])
+            referer = entry["url"]
+
+            if not resolved_url:
+                extract_fn = None
+                try:
+                    extractor = _get_extractor(self._site)
+                    extract_fn = getattr(extractor, "extract_stream", None)
+                except Exception:
+                    extract_fn = None
+                if extract_fn is None:
+                    from extractors.base import extract_stream as extract_fn
+
+                result = extract_fn(entry["url"])
+                resolved_url = result[0] if result else None
+                referer = result[2] if result and len(result) >= 3 and result[2] else entry["url"]
+
+            if not resolved_url:
+                callInMainThread(self["status"].setText, "تعذر تجهيز الرابط للمشاهدة - جرب جودة أخرى")
+                return
+
+            label = entry.get("resolution") or entry.get("quality") or "HD"
+            server = {"name": entry.get("resolution") or "رابط تحميل",
+                      "url": entry["url"],
+                      "type": "embed",
+                      "quality": label}
+            callInMainThread(self._onStreamFound, resolved_url, label, referer, server)
+        except Exception as e:
+            my_log("resolve-and-watch error: {}".format(e))
+            callInMainThread(self["status"].setText, "فشل تجهيز الرابط للمشاهدة")
 
     def _bgResolveAndDownload(self, entry):
         try:
@@ -1087,4 +1239,4 @@ from plugin_assets import placeholder_for_item                # noqa: E402
 
 
 def _get_extractor(site):
-    return get_extractor(site)
+    return get_extractor(site)            
