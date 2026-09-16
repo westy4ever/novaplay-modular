@@ -12,10 +12,16 @@ Changes in this revision (PATCH 50 — settings persistence fix):
     "Browser proxy set to: DISABLED" fingerprint in every boot log).
     They are connection settings, not credentials owned by api_keys.conf.
 
+Changes in the previous revision (PATCH 18 — threshold unification):
+  * _continue_items() filter aligned to >30s (was >60s) — matching
+    _get_saved_position's threshold, so a 45s watch shows consistently
+    in the strip AND the carousel/grid badges (previously strip-only
+    misses under 60s).
+
 Changes in the previous revision (Continue-Watching support):
   * NEW _continue_items(limit): the Continue-Watching row query for
     the home screen. Returns history entries that have a resumable
-    position (> 60s), sorted by _pos_ts (watch recency) with
+    position (> 30s), sorted by _pos_ts (watch recency) with
     _saved_at as tiebreaker, deduped by url. Read by
     AdvancedArabicPlayerHome._paintContinueRow in plugin.py.
   * _save_position() now stamps item["_pos_ts"] = now on every
@@ -26,9 +32,6 @@ Changes in the previous revision (Continue-Watching support):
   * _upsert_library_item() preserves _pos_ts (the way it already
     preserves last_position_sec), so re-playing an item doesn't
     reset its recency ordering.
-  * (plugin_health.py stores per-site health under config key
-    "site_health" via _get_config/_set_config — no code needed here,
-    noted for discoverability.)
 
 Changes in the previous revision (kept for reference):
   * _save_position() no longer rewrites the state file on every 20s
@@ -36,21 +39,19 @@ Changes in the previous revision (kept for reference):
     fsync the identical state every 20s — ~1,400 pointless flash
     writes overnight); active playback writes at most once per
     _POS_DISK_MIN_DELTA (60s) of NEW progress; backward seeks (>30s)
-    write immediately; `force=True` flushes on demand (see
-    _stop_pos_tracker in plugin.py). The in-memory value that
-    _get_saved_position() reads stays current on every tick.
-  * import re moved to module level (was imported inside the per-item
-    loop of _library_search_suggestions).
+    write immediately; `force=True` flushes on demand. The in-memory
+    value that _get_saved_position() reads stays current on every
+    tick.
   * The state MUTATORS (_set_config / _upsert_library_item /
     _toggle_favorite_entry / _save_position) now run under an RLock,
     so a future background-thread caller can't interleave its dict
-    mutation with a concurrent _save_state() json.dump ("dictionary
-    changed size during iteration"). Readers stay unsynchronized —
-    all current read sites are on the main thread.
+    mutation with a concurrent _save_state() json.dump. Readers stay
+    unsynchronized — all current read sites are on the main thread.
 
 NOTE: This does NOT include the live in-memory position tracker
-(_GLOBAL_POS_TIMER / _global_pos_tick / _start_pos_tracker / _stop_pos_tracker)
-or the local proxy hit counters. Those live in novaplay_tracker.py.
+(_GLOBAL_POS_TIMER / _global_pos_tick / _start_pos_tracker /
+_stop_pos_tracker) or the local proxy hit counters. Those live in
+novaplay_tracker.py.
 """
 
 import os
@@ -376,8 +377,10 @@ def _continue_items(limit=7):
     """Continue-Watching row: most-recently-watched history entries
     that still have a resumable position.
 
-    Filter: position > 60s (anything shorter is a false start, and
-    EOF playback zeroes the position so finished titles drop out).
+    Filter: position > 30s ([PATCH 18] unified with _get_saved_position
+    — was 60, which hid 45s partial watches from the strip while the
+    grid showed them). EOF playback zeroes the position so finished
+    titles drop out.
     Sort: _pos_ts (last position progress) descending, _saved_at as
     tiebreaker for pre-upgrade entries that lack _pos_ts.
     Dedupe: by url — history can hold at most one entry per url, but
@@ -391,7 +394,8 @@ def _continue_items(limit=7):
     rows = []
     for item in (_load_state().get("history") or []):
         pos = int(item.get("last_position_sec") or 0)
-        if pos <= 60 or not item.get("url"):
+        # [PATCH 18] threshold unified to 30 — matches _get_saved_position
+        if pos <= 30 or not item.get("url"):
             continue
         if not (item.get("poster") or item.get("title")):
             continue
