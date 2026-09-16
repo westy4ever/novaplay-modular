@@ -13,12 +13,11 @@ with the full UX update set baked in:
   * category-list cache (Bug E) + keybar reset + pager in list mode
   * backdrop = real fanart only (Option A — no poster fallback)
   * search scope honored + 6-worker search cap (Bugs A & H)
-  * [PATCH 48] watched dimming (finished posters darken) + in-poster
-    watch-progress bar on grid cards
-  * [PATCH 49] grid card overlays (year/rating/progress) promoted to
-    zPosition=4 skin labels — the listbox-layer versions were always
-    covered by the poster pixmaps. Watched posters now get a proper
-    black & white treatment instead of a plain dim.
+  * [PATCH 48] watched dimming + in-poster watch-progress bar
+  * [PATCH 49] overlay badges at z=4 (above pixmaps): year/rating/bar
+    widgets; captions title-only; B&W watched posters
+  * [PATCH 51] selected-poster zoom (~8%) in grid + carousel rating
+    badge pop (+30% on center)
 """
 
 import os
@@ -43,10 +42,10 @@ from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
     HOME_CELL_MARGIN, HOME_BORDER_W, HOME_ICON_PAD_TOP, HOME_ICON_W, HOME_ICON_H,
     POSTER_GRID_COLS, POSTER_GRID_ROWS, POSTER_W, POSTER_H,
-    POSTER_CELL_W, POSTER_CELL_H, POSTER_CELL_MARGIN_H, POSTER_CELL_MARGIN_V,
-    POSTER_BADGE_H, sc,
     _CAROUSEL_GEOMETRY,
-    CONT_SLOTS, CONT_W, CONT_H, CONT_GAP, CONT_X0, CONT_Y)
+    CONT_SLOTS, CONT_W, CONT_H, CONT_GAP, CONT_X0, CONT_Y,
+    POSTER_CELL_W, POSTER_CELL_H, POSTER_CELL_MARGIN_H,
+    POSTER_CELL_MARGIN_V, POSTER_BADGE_H, sc)
 import plugin_imagecache
 import plugin_health
 from plugin_assets import placeholder_for_item
@@ -100,12 +99,6 @@ class AdvancedArabicPlayerHome(Screen):
     _HOME_GRID_Y = 330
     _POSTER_GRID_X = 40
     _POSTER_GRID_Y = 90
-    # [PATCH 49] poster cell geometry mirrors gridlist constants — used to
-    # place the runtime progress bar overlay
-    _pf_cell_w = POSTER_CELL_W
-    _pf_cell_h = POSTER_CELL_H
-    _pf_margin_h = POSTER_CELL_MARGIN_H
-    _pf_margin_v = POSTER_CELL_MARGIN_V
     carousel_slots = 7
     carousel_center = 3
 
@@ -172,7 +165,7 @@ class AdvancedArabicPlayerHome(Screen):
             for _c in range(POSTER_GRID_COLS):
                 self["poster_%d_%d" % (_r, _c)] = Pixmap()
                 self["pbadge_%d_%d" % (_r, _c)] = Label("")
-                # [PATCH 49] overlay badges above the poster pixmaps (z=4)
+                # [PATCH 49] overlay badges above the poster pixmaps
                 self["pyear_%d_%d" % (_r, _c)] = Label("")
                 self["prat_%d_%d" % (_r, _c)] = Label("")
                 self["pbar_%d_%d" % (_r, _c)] = Label("")
@@ -253,6 +246,11 @@ class AdvancedArabicPlayerHome(Screen):
             self._moveResize('cposterImg%d' % widget_id, x + pad, y + pad, max(1, w - pad * 2), max(1, h - pad * 2))
             rb_w = 38 if is_big else 34
             rb_h = 40 if is_big else 34
+            # [PATCH 51b] rating badge pop: the center (selected) card's
+            # badge is ~30% larger than the side cards'
+            if is_big:
+                rb_w = int(rb_w * 1.3)
+                rb_h = int(rb_h * 1.25)
             self._moveResize('cratingBadge%d' % widget_id, x + w - rb_w - 14, y + 22, rb_w, rb_h)
             self._moveResize('cfavMark%d' % widget_id, x + 10, y + 10, 42, 42)
             self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
@@ -336,7 +334,7 @@ class AdvancedArabicPlayerHome(Screen):
                 self["pic_%d_%d" % (i, _c)].hide()
         for i in range(CONT_SLOTS):
             self["cont%d" % i].hide()
-            self["contbadge%d" % i].hide()    
+            self["contbadge%d" % i].hide()
         self["cont_title"].hide()
         try: self["contSel"].hide()
         except Exception: pass
@@ -536,9 +534,8 @@ class AdvancedArabicPlayerHome(Screen):
                 path = ""
                 if url:
                     path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
-                # [PATCH 49] watched posters: black & white treatment
-                # (site-style grayscale + slight dim), replacing the old
-                # plain darkening. Cached as url+"|dim".
+                # [PATCH 48/49-G] watched posters paint a black & white
+                # variant (baked into cache on first request)
                 if path and item.get("url"):
                     try:
                         from plugin_watched import is_watched
@@ -552,18 +549,17 @@ class AdvancedArabicPlayerHome(Screen):
                                     try:
                                         from PIL import Image, ImageOps
                                         import io as _io
-                                        # resizeCover returns a color JPEG —
-                                        # convert to grayscale, then re-encode
-                                        _dim = plugin_imagecache.resizeCover(
+                                        _img2 = plugin_imagecache.resizeCover(
                                             _data, (POSTER_W, POSTER_H), darken=0.35)
-                                        _img2 = Image.open(_io.BytesIO(_dim)).convert("RGB")
-                                        _img2 = ImageOps.grayscale(_img2)
-                                        _buf = _io.BytesIO()
-                                        _img2.save(_buf, format="JPEG", quality=88)
-                                        _dim = _buf.getvalue()
+                                        if _img2:
+                                            _im = Image.open(_io.BytesIO(_img2)).convert("RGB")
+                                            _im = ImageOps.grayscale(_im)
+                                            _buf = _io.BytesIO()
+                                            _im.save(_buf, format="JPEG", quality=88)
+                                            _dim = _buf.getvalue()
                                     except Exception:
                                         _dim = plugin_imagecache.resizeCover(
-                                            _data, (POSTER_W, POSTER_H), darken=0.35) if _data else None
+                                            _data, (POSTER_W, POSTER_H), darken=0.35)
                                 if _dim is not None:
                                     plugin_imagecache.writeFileAtomic(_dp, _dim)
                             if os.path.exists(_dp):
@@ -574,6 +570,29 @@ class AdvancedArabicPlayerHome(Screen):
                     try:
                         widget.instance.setPixmapFromFile(path)
                         widget.show()
+                        # [PATCH 51a] selected-poster zoom: the highlighted
+                        # card's image grows ~8% and re-centers on its cell
+                        # (mirrors the carousel's big center slot). The
+                        # else-branch restores normal size when deselected.
+                        try:
+                            _g = self["poster_grid"]
+                            _idx = _g.getPageStart() + r * _g.cols + c
+                            _is_sel = (_idx == _g.currentIndex)
+                            if _is_sel:
+                                _zw, _zh = int(POSTER_W * 1.08), int(POSTER_H * 1.08)
+                                _zx = (self._POSTER_GRID_X + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
+                                       + (POSTER_W - _zw) // 2)
+                                _zy = (self._POSTER_GRID_Y + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
+                                       + (POSTER_H - _zh) // 2)
+                                widget.instance.move(ePoint(_zx, _zy))
+                                widget.instance.resize(eSize(_zw, _zh))
+                            else:
+                                _zx = self._POSTER_GRID_X + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
+                                _zy = self._POSTER_GRID_Y + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
+                                widget.instance.move(ePoint(_zx, _zy))
+                                widget.instance.resize(eSize(POSTER_W, POSTER_H))
+                        except Exception:
+                            pass
                     except Exception:
                         widget.hide()
                 else:
@@ -589,33 +608,28 @@ class AdvancedArabicPlayerHome(Screen):
                         widget.hide()
                     if url:
                         plugin_imagecache.requestImageAsync(url, target_size=(POSTER_W, POSTER_H))
-                # Resume badge: gold bar with the resume time at the poster's
-                # bottom edge, ABOVE the poster pixmap (mode-gated so a late
-                # poll callback can never paint it outside grid-poster mode).
-                # v4.5: ✓ شاهدته (watched) takes precedence — same widget,
-                # mutually exclusive with resume in practice.
-                # [PATCH 12] this block was dedented OUT of the column loop
-                # in the modular edit — it ran once per ROW, painting only
-                # the LAST column's badge (and raising AttributeError when
-                # that column was empty on a partial page). One level deeper
-                # = runs per cell, as in the monolith.
-                saved_pos = _get_saved_position(item.get("url", "")) if item.get("url") else 0
-                _watched = False
-                if item.get("url"):
-                    try:
-                        from plugin_watched import is_watched
-                        _watched = is_watched(item.get("url"))
-                    except Exception:
-                        pass
-                # [PATCH 49] paint the overlay badges — all ABOVE the
-                # poster pixmaps (z=4), replacing the never-visible
-                # listbox-layer versions (48's layering lesson)
+                # [PATCH 48] stash watch-state on the item so
+                # PosterCardGrid can draw the in-poster progress bar
+                # (grid layer) without re-querying
                 try:
-                    item["_is_watched"] = _watched
-                    item["_watch_pos"] = int(saved_pos or 0)
+                    item["_is_watched"] = bool(path and "_dim" not in path and False)
+                    _wt = False
+                    if item.get("url"):
+                        try:
+                            from plugin_watched import is_watched
+                            _wt = is_watched(item.get("url"))
+                        except Exception:
+                            pass
+                    item["_is_watched"] = _wt
+                    item["_watch_pos"] = int(_get_saved_position(item.get("url", "")) or 0)
                 except Exception:
                     pass
+                # [PATCH 49] paint the overlay badges — all ABOVE the
+                # poster pixmaps (z=4), replacing the never-visible
+                # listbox-layer versions
                 _in_grid = (self._display_mode == "poster" and self._layout_style == "grid")
+                _watched = bool(item.get("_is_watched"))
+                saved_pos = int(item.get("_watch_pos") or 0)
 
                 # year (top-left, red)
                 yb = self["pyear_%d_%d" % (r, c)]
@@ -626,8 +640,7 @@ class AdvancedArabicPlayerHome(Screen):
                 else:
                     yb.hide()
 
-                # rating (top-right, black/gold — no star glyph: the skin
-                # font drops ★, plain number reads clean)
+                # rating (top-right, black/gold)
                 rb = self["prat_%d_%d" % (r, c)]
                 _rt = str(item.get("rating") or "").strip()
                 try:
@@ -640,28 +653,28 @@ class AdvancedArabicPlayerHome(Screen):
                 else:
                     rb.hide()
 
-                # progress bar (bottom edge): gold fill width scales with
-                # watch position — real overlay now, actually visible
+                # progress bar (bottom edge): width scales with watch
+                # position — a real overlay, visible above the pixmap
                 bar = self["pbar_%d_%d" % (r, c)]
                 if (not _watched) and saved_pos > 30 and _in_grid:
                     try:
                         inst = bar.instance
-                        base_x = self._POSTER_GRID_X + c * self._pf_cell_w + self._pf_margin_h
-                        base_y = (self._POSTER_GRID_Y + r * self._pf_cell_h
-                                  + self._pf_margin_v + POSTER_H - POSTER_BADGE_H - sc(12))
+                        base_x = (self._POSTER_GRID_X + c * POSTER_CELL_W
+                                  + POSTER_CELL_MARGIN_H)
+                        base_y = (self._POSTER_GRID_Y + r * POSTER_CELL_H
+                                  + POSTER_CELL_MARGIN_V + POSTER_H
+                                  - POSTER_BADGE_H - 12)
                         _pct = item.get("_watch_pct") or (35 if saved_pos > 600 else 20)
                         _w = max(12, (POSTER_W * min(100, max(10, int(_pct)))) // 100)
-                        inst.move(ePoint(int(base_x), int(base_y)))
-                        inst.resize(eSize(int(_w), sc(8)))
-                        bar.setText("")
+                        inst.move(ePoint(base_x, base_y))
+                        inst.resize(eSize(_w, 8))
                         bar.show()
-                    except Exception as e:
-                        my_log("pbar move/resize failed: {}".format(e))
+                    except Exception:
                         bar.hide()
                 else:
                     bar.hide()
 
-                # bottom gold bar (resume/✓) — unchanged logic
+                # bottom gold bar (resume/✓) — v4.5/49 logic
                 if _watched and _in_grid:
                     badge.setText(u"✓ شاهدته")
                     badge.show()
@@ -814,7 +827,7 @@ class AdvancedArabicPlayerHome(Screen):
                 except Exception:
                     pass
         except Exception:
-            pass                
+            pass
 
     def _pollArtworkCache(self):
         # [PATCH 24] home mode: swap strip placeholders for posters as
@@ -870,7 +883,7 @@ class AdvancedArabicPlayerHome(Screen):
             self._cont_index = max(0, len(self._cont_items) - 1)
         for i in range(CONT_SLOTS):
             widget = self["cont%d" % i]
-            badge = self["contbadge%d" % i]      
+            badge = self["contbadge%d" % i]
             if i < len(self._cont_items):
                 item = self._cont_items[i]
                 url = item.get("poster") or ""
@@ -1089,7 +1102,7 @@ class AdvancedArabicPlayerHome(Screen):
             self._artworkPollTimer.stop()
             for i in range(CONT_SLOTS):
                 self["cont%d" % i].hide()
-                self["contbadge%d" % i].hide()    
+                self["contbadge%d" % i].hide()
             self["cont_title"].hide()
             try: self["contSel"].hide()
             except Exception: pass
@@ -1385,4 +1398,4 @@ def _get_favorite_items_list():
 
 
 def _get_extractor(site):
-    return get_extractor(site)
+    return get_extractor(site)        
