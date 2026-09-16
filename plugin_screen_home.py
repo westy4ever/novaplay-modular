@@ -13,11 +13,12 @@ with the full UX update set baked in:
   * category-list cache (Bug E) + keybar reset + pager in list mode
   * backdrop = real fanart only (Option A — no poster fallback)
   * search scope honored + 6-worker search cap (Bugs A & H)
-  * [PATCH 48] watched dimming + in-poster watch-progress bar
-  * [PATCH 49] overlay badges at z=4 (above pixmaps): year/rating/bar
-    widgets; captions title-only; B&W watched posters
-  * [PATCH 51] selected-poster zoom (~8%) in grid + carousel rating
-    badge pop (+30% on center)
+  * [PATCH 48/49/52] watched B&W + overlay badges (year/rating/bar)
+    at z=4, compact sizes; captions title-only
+  * [PATCH 51/52] selected-poster zoom (~8%) in grid; carousel
+    rating badge pop (+30% on center)
+  * [PATCH 53] carousel year badge (red, top-left) + star in rating;
+    grid focus frame removed (zoom is the selection signal)
 """
 
 import os
@@ -176,14 +177,19 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposterImg%d" % i] = Pixmap()
             self["cfavMark%d" % i] = Label("")
             self["cratingBadge%d" % i] = Label("")
+            # [PATCH 53] carousel year badge — red box, top-left
+            self["cyearBadge%d" % i] = Label("")
             self["cresumeMark%d" % i] = Label("")
 
         # ── Continue-watching strip ──
         self["cont_title"] = Label("")
         self["contSel"] = Label("")
         for i in range(CONT_SLOTS):
-            self["cont%d" % i] = Pixmap()
+            # [PATCH 54] badge created BEFORE the pixmap — stacking order
+            # follows creation order on this renderer; the pixmap was
+            # covering the badge (same lesson as the grid's 49)
             self["contbadge%d" % i] = Label("")
+            self["cont%d" % i] = Pixmap()
         self._cont_items = []
         self._cont_index = 0
         self._focus_zone = "grid"
@@ -210,9 +216,6 @@ class AdvancedArabicPlayerHome(Screen):
                 "right":  self._navRight,
             }, -1
         )
-
-        # Static focus — NO blink timers (removed: carouselFocusBlinkTimer,
-        # gridFocusBlinkTimer and both _*FocusBlink methods).
 
         self._artworkPollTimer = eTimer()
         self._artworkPollTimer.callback.append(self._pollArtworkCache)
@@ -253,6 +256,9 @@ class AdvancedArabicPlayerHome(Screen):
                 rb_h = int(rb_h * 1.25)
             self._moveResize('cratingBadge%d' % widget_id, x + w - rb_w - 14, y + 22, rb_w, rb_h)
             self._moveResize('cfavMark%d' % widget_id, x + 10, y + 10, 42, 42)
+            # [PATCH 53] year badge: top-left, red box (matches grid)
+            _yw = 58 if is_big else 52
+            self._moveResize('cyearBadge%d' % widget_id, x + 12, y + 22, _yw, 28)
             self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
             if logical_slot == self.carousel_center:
                 focus_extra = 7
@@ -306,6 +312,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposterImg%d" % i].hide()
             self["cfavMark%d" % i].hide()
             self["cratingBadge%d" % i].hide()
+            self["cyearBadge%d" % i].hide()
             self["cresumeMark%d" % i].hide()
         self["poster_grid"].hide()
         for i in range(POSTER_GRID_ROWS):
@@ -344,6 +351,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposterImg%d" % i].hide()
             self["cfavMark%d" % i].hide()
             self["cratingBadge%d" % i].hide()
+            self["cyearBadge%d" % i].hide()
             self["cresumeMark%d" % i].hide()
         self["poster_grid"].hide()
         for i in range(POSTER_GRID_ROWS):
@@ -393,6 +401,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposterImg%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cratingBadge%d" % widget_id].hide()
+            self["cyearBadge%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
             return
         item = self._items[pos]
@@ -400,6 +409,7 @@ class AdvancedArabicPlayerHome(Screen):
         if item.get("_is_next_page"):
             self["cposterImg%d" % widget_id].hide()
             self["cratingBadge%d" % widget_id].hide()
+            self["cyearBadge%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
             self["cposter%d" % widget_id].setText("الصفحة التالية")
@@ -407,6 +417,7 @@ class AdvancedArabicPlayerHome(Screen):
         if item.get("_is_prev_page"):
             self["cposterImg%d" % widget_id].hide()
             self["cratingBadge%d" % widget_id].hide()
+            self["cyearBadge%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
             self["cposter%d" % widget_id].setText("الصفحة السابقة")
@@ -438,14 +449,19 @@ class AdvancedArabicPlayerHome(Screen):
             self["cfavMark%d" % widget_id].hide()
         rating = item.get("rating", "")
         if rating:
-            self["cratingBadge%d" % widget_id].setText(" %s " % rating)
+            # [PATCH 53] star prefix — Labels render ★ (grid does too)
+            self["cratingBadge%d" % widget_id].setText(u"★ %s " % rating)
             self["cratingBadge%d" % widget_id].show()
         else:
             self["cratingBadge%d" % widget_id].hide()
-        # v4.5: watched badge — reuse the resumeMark widget (watched and
-        # resume are mutually exclusive: EOF clears the position at the
-        # moment the watched flag is set). Watched wins if both exist
-        # (finished, then re-watched partially).
+        # [PATCH 53] year badge — top-left red box
+        _cy = str(item.get("year") or "")[:4]
+        if _cy:
+            self["cyearBadge%d" % widget_id].setText(_cy)
+            self["cyearBadge%d" % widget_id].show()
+        else:
+            self["cyearBadge%d" % widget_id].hide()
+        # v4.5: watched badge — reuse the resumeMark widget
         _watched = False
         try:
             from plugin_watched import is_watched
@@ -496,8 +512,6 @@ class AdvancedArabicPlayerHome(Screen):
         self._updateBackdrop()
 
     def _updateGridFooter(self):
-        # Works for both grids: poster mode (PosterCardGrid) and the
-        # category list (TextListGrid) — geometry differs per grid.
         if self._display_mode == "poster":
             grid, cols, rows = self["poster_grid"], POSTER_GRID_COLS, POSTER_GRID_ROWS
         elif self._display_mode == "list":
@@ -534,14 +548,14 @@ class AdvancedArabicPlayerHome(Screen):
                 path = ""
                 if url:
                     path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
-                # [PATCH 48/49-G] watched posters paint a black & white
-                # variant (baked into cache on first request)
+                # [PATCH 48/49-G/52] watched posters paint a black & white
+                # variant (fresh "|bw" cache key)
                 if path and item.get("url"):
                     try:
                         from plugin_watched import is_watched
                         if is_watched(item.get("url")):
                             _dp = plugin_imagecache.buildCachePath(
-                                url + "|dim", target_size=(POSTER_W, POSTER_H))
+                                url + "|bw", target_size=(POSTER_W, POSTER_H))
                             if not os.path.exists(_dp):
                                 _data = plugin_imagecache.downloadUrl(url, timeout=8)
                                 _dim = None
@@ -571,12 +585,11 @@ class AdvancedArabicPlayerHome(Screen):
                         widget.instance.setPixmapFromFile(path)
                         widget.show()
                         # [PATCH 51a] selected-poster zoom: the highlighted
-                        # card's image grows ~8% and re-centers on its cell
-                        # (mirrors the carousel's big center slot). The
-                        # else-branch restores normal size when deselected.
+                        # card's image grows ~8% and re-centers on its cell.
+                        # The else-branch restores normal size when deselected.
                         try:
                             _g = self["poster_grid"]
-                            _idx = _g.getPageStart() + r * _g.cols + c
+                            _idx = _g._getPageStart() + r * _g.cols + c
                             _is_sel = (_idx == _g.currentIndex)
                             if _is_sel:
                                 _zw, _zh = int(POSTER_W * 1.08), int(POSTER_H * 1.08)
@@ -608,11 +621,9 @@ class AdvancedArabicPlayerHome(Screen):
                         widget.hide()
                     if url:
                         plugin_imagecache.requestImageAsync(url, target_size=(POSTER_W, POSTER_H))
-                # [PATCH 48] stash watch-state on the item so
-                # PosterCardGrid can draw the in-poster progress bar
-                # (grid layer) without re-querying
+                # [PATCH 48/49] stash watch-state on the item so
+                # PosterCardGrid can draw state without re-querying
                 try:
-                    item["_is_watched"] = bool(path and "_dim" not in path and False)
                     _wt = False
                     if item.get("url"):
                         try:
@@ -624,14 +635,13 @@ class AdvancedArabicPlayerHome(Screen):
                     item["_watch_pos"] = int(_get_saved_position(item.get("url", "")) or 0)
                 except Exception:
                     pass
-                # [PATCH 49] paint the overlay badges — all ABOVE the
-                # poster pixmaps (z=4), replacing the never-visible
-                # listbox-layer versions
+                # [PATCH 49/52] paint the overlay badges — all ABOVE the
+                # poster pixmaps (z=4), compact sizes
                 _in_grid = (self._display_mode == "poster" and self._layout_style == "grid")
                 _watched = bool(item.get("_is_watched"))
                 saved_pos = int(item.get("_watch_pos") or 0)
 
-                # year (top-left, red)
+                # year (top-left, red — compact)
                 yb = self["pyear_%d_%d" % (r, c)]
                 _yr = str(item.get("year") or "")[:4]
                 if _yr and _in_grid:
@@ -640,7 +650,7 @@ class AdvancedArabicPlayerHome(Screen):
                 else:
                     yb.hide()
 
-                # rating (top-right, black/gold)
+                # rating (top-right, black/gold — compact, with star)
                 rb = self["prat_%d_%d" % (r, c)]
                 _rt = str(item.get("rating") or "").strip()
                 try:
@@ -648,33 +658,33 @@ class AdvancedArabicPlayerHome(Screen):
                 except Exception:
                     _rtv = 0.0
                 if _rtv > 0 and _in_grid:
-                    rb.setText(_rt[:3])
+                    rb.setText(u"★ " + _rt[:3])
                     rb.show()
                 else:
                     rb.hide()
 
-                # progress bar (bottom edge): width scales with watch
-                # position — a real overlay, visible above the pixmap
+                # progress bar (bottom edge): gold fill, width = progress
                 bar = self["pbar_%d_%d" % (r, c)]
                 if (not _watched) and saved_pos > 30 and _in_grid:
                     try:
                         inst = bar.instance
-                        base_x = (self._POSTER_GRID_X + c * POSTER_CELL_W
-                                  + POSTER_CELL_MARGIN_H)
-                        base_y = (self._POSTER_GRID_Y + r * POSTER_CELL_H
-                                  + POSTER_CELL_MARGIN_V + POSTER_H
-                                  - POSTER_BADGE_H - 12)
-                        _pct = item.get("_watch_pct") or (35 if saved_pos > 600 else 20)
-                        _w = max(12, (POSTER_W * min(100, max(10, int(_pct)))) // 100)
-                        inst.move(ePoint(base_x, base_y))
-                        inst.resize(eSize(_w, 8))
+                        if inst is not None:
+                            base_x = (self._POSTER_GRID_X + c * POSTER_CELL_W
+                                      + POSTER_CELL_MARGIN_H)
+                            base_y = (self._POSTER_GRID_Y + r * POSTER_CELL_H
+                                      + POSTER_CELL_MARGIN_V + POSTER_H
+                                      - POSTER_BADGE_H - 10)
+                            _pct = item.get("_watch_pct") or (35 if saved_pos > 600 else 20)
+                            _w = max(12, (POSTER_W * min(100, max(10, int(_pct)))) // 100)
+                            inst.move(ePoint(base_x, base_y))
+                            inst.resize(eSize(_w, 8))
                         bar.show()
                     except Exception:
                         bar.hide()
                 else:
                     bar.hide()
 
-                # bottom gold bar (resume/✓) — v4.5/49 logic
+                # bottom gold bar (resume/✓)
                 if _watched and _in_grid:
                     badge.setText(u"✓ شاهدته")
                     badge.show()
@@ -767,7 +777,13 @@ class AdvancedArabicPlayerHome(Screen):
     def _paintTmdbText(self, meta, token):
         if token != self._tmdb_token: return
         if meta:
-            meta_str = "★ %s  |  %s  |  %s" % (meta.get("rating", "N/A"), meta.get("year", ""), meta.get("genres", ""))
+            # [PATCH 56] prefer the ITEM's rating/year (same source as
+            # the poster badge) so the backdrop info never disagrees
+            # with the card; TMDB's fresh lookup only fills gaps
+            _item = self._items[self.index] if (0 <= getattr(self, "index", -1) < len(self._items)) else None
+            _r = (_item or {}).get("rating") or meta.get("rating", "N/A")
+            _y = (_item or {}).get("year") or meta.get("year", "")
+            meta_str = "★ %s  |  %s  |  %s" % (_r, _y, meta.get("genres", ""))
             self["info_meta"].setText(meta_str)
             self["info_plot"].setText(meta.get("plot", ""))
         else:
@@ -1125,6 +1141,7 @@ class AdvancedArabicPlayerHome(Screen):
                 self["cposterImg%d" % i].hide()
                 self["cfavMark%d" % i].hide()
                 self["cratingBadge%d" % i].hide()
+                self["cyearBadge%d" % i].hide()
                 self["cresumeMark%d" % i].hide()
             for i in range(POSTER_GRID_ROWS):
                 for _c in range(POSTER_GRID_COLS):

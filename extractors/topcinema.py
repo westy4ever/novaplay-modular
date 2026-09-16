@@ -193,12 +193,23 @@ class TopCinemaExtractor(BaseExtractor):
                 item_type = "movie"
     
             title = self._clean_title(title)
-    
+
+            # [PATCH 52] year: extract from the title into its own field
+            # (feeds the red badge) and strip it from the caption text —
+            # topcinema titles arrive as "Movie Name 2026"
+            year = ""
+            ym = re.search(r'\b(19\d{2}|20\d{2})\b', title)
+            if ym:
+                year = ym.group(1)
+                title = re.sub(r'\s*\b' + year + r'\b\s*', ' ', title)
+                title = re.sub(r'\s{2,}', ' ', title).strip(' -|')
+
             items.append({
                 "title": title,
                 "url": link,
                 "poster": poster,
                 "type": item_type,
+                "year": year,
                 "rating": rating,
                 "_action": "details"
             })

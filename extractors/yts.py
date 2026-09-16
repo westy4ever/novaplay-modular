@@ -14,31 +14,16 @@ in addition to the original 2Embed/VidSrc embed fallbacks.
 Mirrors extractors/torrentio.py's magnet builder exactly so both sources
 share identical playback behavior.
 
-[PATCH 34]
-  * _extract_quality: word-boundary CAM/TS detection — plain 'TS'
-    matched HITS/ARTS/BITS and mislabeled releases as CAM (same fix as
-    torrentio's PATCH 30a)
-  * episode embed URLs: ?s= query separator (was &s= — malformed URL,
-    first fetch failed and only self-healed via the fallback chain)
-  * _torr_servers: seeders (👤 N) and size (N GB/MB) parsed from the
-    title → StreamList columns (sync with torrentio's PATCH 30d)
-
-[PATCH 40] quality tag preserves the ACTUAL source word from the
-  name — "1080p HDTS" instead of generic "1080p CAM". Longest-first
-  alternation (HDTS beats TS), word boundaries (HITS/ARTS don't match).
-
-[PATCH 44/47] Streaming sections (the site's sidebar menu): Netflix,
-  Prime Video, Disney+, Max, Hulu, Apple TV+ — flat paired Movies/
-  Series entries per provider. (The original two-level chooser never
-  fired: category items route to get_category_items, not get_page,
-  and its browse URLs collided with the yts_movie_ detail prefix.)
-
-[PATCH 45/47] multi-word category actions (now_playing, top_rated,
-  on_the_air, airing_today) got split by the "_" URL parser and built
-  truncated TMDB paths (/movie/now → 404). Rejoined at dispatch.
-
-[PATCH 47] Collection IDs verified against TMDB (Mission Impossible,
-  Shrek, Despicable Me, Avatar were wrong and 404'd).
+[PATCH 34] word-boundary CAM/TS detection; ?s= embed URLs; seeders/size
+[PATCH 40] quality tag preserves the ACTUAL source word (HDTS not CAM)
+[PATCH 44/47] Streaming sections (flat Movies/Series pairs per provider)
+[PATCH 45/47] multi-word category actions rejoined (now_playing etc.)
+[PATCH 47] collection IDs verified: LOTR 119, Pirates 295, Toy Story 10194,
+  Mission Impossible 87359, Shrek 2150, Despicable Me 86066, Avatar 87096
+[PATCH 55] Studio Ghibli company ID corrected 287 → 10342 (287 matched
+  nothing); all 11 studio IDs batch-verified live (83–3124 movies each).
+  Collection trio re-verified: LOTR 120→119, Pirates 259416→295,
+  Toy Story 101931→10194.
 """
 import re
 import urllib.parse
@@ -94,8 +79,6 @@ class YTSExtractor(BaseExtractor):
         return fetch_json(url) or {}
 
     # ═══ Torrent / magnet helpers (mirror torrentio.py exactly) ══════
-    # These must stay in sync with extractors/torrentio.py so both
-    # sources produce identical magnets → identical TorrServer behavior.
 
     def _clean_magnet_name(self, name):
         """Remove emojis, newlines, and control characters from torrent names"""
@@ -200,20 +183,24 @@ class YTSExtractor(BaseExtractor):
             ("🕵️ Mystery", 9648), ("💕 Romance", 10749), ("🚀 Sci-Fi", 878),
             ("😱 Thriller", 53), ("⚔️ War", 10752), ("🤠 Western", 37),
         ]
+        # [PATCH 55] Studio Ghibli 287 → 10342 (287 matched nothing);
+        # all 11 IDs batch-verified live against discover/company.
         movie_studios = [
             ("🦸 Marvel Studios", 420), ("🪄 Pixar", 3), ("🐉 DreamWorks", 521),
             ("🏰 Walt Disney", 2), ("🎞️ Warner Bros", 174), ("🌐 Universal", 33),
-            ("🎭 A24", 41077), ("🍃 Studio Ghibli", 287), ("🐲 Legendary", 923),
+            ("🎭 A24", 41077), ("🍃 Studio Ghibli", 10342), ("🐲 Legendary", 923),
             ("🔥 Lionsgate", 35), ("😱 Blumhouse", 3172),
         ]
-        # [PATCH 47] Collection IDs verified against TMDB — Mission
-        # Impossible, Shrek, Despicable Me and Avatar were wrong (404).
+        # [PATCH 47/55] All 19 collection IDs verified live:
+        # LOTR 119, Pirates 295, Toy Story 10194 (55); MI 87359, Shrek
+        # 2150, Despicable Me 86066, Avatar 87096 (47); rest confirmed
+        # by batch test.
         movie_collections = [
             ("🦸 The Avengers", 86311), ("⚡ Harry Potter", 1241), ("🌌 Star Wars", 10),
-            ("🕴️ James Bond 007", 645), ("🏎️ Fast & Furious", 9485), ("💍 Lord of the Rings", 120),
+            ("🕴️ James Bond 007", 645), ("🏎️ Fast & Furious", 9485), ("💍 Lord of the Rings", 119),
             ("🧝 The Hobbit", 121938), ("🦖 Jurassic Park", 328), ("🏹 Hunger Games", 131635),
-            ("🏴‍☠️ Pirates Caribbean", 259416), ("🕵️ Mission Impossible", 87359), ("🔫 John Wick", 404609),
-            ("🦇 Dark Knight", 263), ("🕶️ The Matrix", 2344), ("🧸 Toy Story", 101931),
+            ("🏴‍☠️ Pirates Caribbean", 295), ("🕵️ Mission Impossible", 87359), ("🔫 John Wick", 404609),
+            ("🦇 Dark Knight", 263), ("🕶️ The Matrix", 2344), ("🧸 Toy Story", 10194),
             ("🟢 Shrek", 2150), ("🍌 Despicable Me", 86066), ("🌊 Avatar", 87096),
             ("🧬 X-Men", 748), ("👽 Alien", 8091),
         ]
@@ -272,11 +259,10 @@ class YTSExtractor(BaseExtractor):
             cats.append({"title": title, "url": "yts_series_genre_{}".format(gid), "type": "category"})
 
         # ─── Streaming section ─────────────────────────────────
-        # [PATCH 47] flat paired entries per provider. The two-level
+        # [PATCH 44/47] flat paired entries per provider. The two-level
         # chooser never fired: category-type items route to
         # get_category_items (not get_page), and the chooser's browse
         # URLs collided with the yts_movie_/yts_series_ detail prefixes.
-        # Paired entries go through the provider dispatch directly.
         streaming = [
             ("🔴 Netflix", 8), ("🔵 Prime Video", 9), ("🏰 Disney+", 337),
             ("🟪 Max", 1899), ("💚 Hulu", 15), ("🍎 Apple TV+", 350),
@@ -502,6 +488,7 @@ class YTSExtractor(BaseExtractor):
                 "title": movie_data.get("title") or movie_data.get("name") or "Movie",
                 "plot": movie_data.get("overview") or "",
                 "poster": "https://image.tmdb.org/t/p/w342" + movie_data.get("poster_path", "") if movie_data.get("poster_path") else "",
+                "rating": "{:.1f}".format(movie_data["vote_average"]) if movie_data.get("vote_average") else "",
                 "servers": servers,
                 "items": [],
                 "type": "movie"
