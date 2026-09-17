@@ -24,6 +24,17 @@ with the full UX update set baked in:
   * [PATCH 58] poster-grid selection bar hoisted to a dedicated widget
     ("pgridSel", z=5) so the 8% zoom can never paint over it — that
     was why the bar only showed while a poster was still loading
+  * [PATCH 59] home site grid: 4x2 → 6x2 (narrower tiles); continue
+    strip: 6 @ 240x280 (was 180x200)
+  * [PATCH 60] continue-strip ratio was wrong (240:280 ≈ 0.857, near
+    square, while posters are 2:3 ≈ 0.667) — resizeCover was squashing
+    every poster. Strip is now 220x330 (proper 2:3); home grid anchor
+    pushed y=400 → y=440 to clear it
+  * [PATCH 61] memoized pixmap paths so setPixmapFromFile only runs
+    when a path actually changed; the poll tick is 1s instead of 600ms;
+    the continue-strip fallback no longer decodes full-size originals.
+    These were the three things that made navigation feel "heavy"
+    after the strip got bigger.
 """
 
 import os
@@ -83,7 +94,7 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="content_title" position="40,95"  size="1200,50"  font="Bold;38" foregroundColor="#00E5FF" transparent="1" zPosition="5" halign="left" valign="top" />
         <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="5" halign="left" />
         <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
-        <widget name="home_grid" position="20,330" size="1880,632" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        <widget name="home_grid" position="20,440" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
         <widget name="poster_grid" position="40,90" size="1840,820" scrollbarMode="showNever" transparent="1" zPosition="3" />
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
@@ -103,7 +114,8 @@ class AdvancedArabicPlayerHome(Screen):
     """
 
     _HOME_GRID_X = 20
-    _HOME_GRID_Y = 330
+    _HOME_GRID_Y = 440          # [PATCH 60] was 400 — pushed down to clear
+                                # the taller 2:3 continue strip
     _POSTER_GRID_X = 40
     _POSTER_GRID_Y = 90
     carousel_slots = 7
@@ -202,6 +214,12 @@ class AdvancedArabicPlayerHome(Screen):
         self._cont_items = []
         self._cont_index = 0
         self._focus_zone = "grid"
+        # [PATCH 61] memoize what's already painted — setPixmapFromFile
+        # re-decodes from disk every call, and it was being called on
+        # every arrow key and every poll tick with identical data
+        self._last_cont_painted = {}      # slot i → path
+        self._last_icon_painted = {}      # (row, col) → icon path
+        self._last_poster_painted = {}    # (row, col) → poster path
         self.onExecBegin.append(self._paintContinueRow)
 
         self["grid_status_left"] = Label("")
@@ -303,7 +321,7 @@ class AdvancedArabicPlayerHome(Screen):
         # [PATCH 24] keep the artwork poll running in home mode — it now
         # also refreshes continue-strip posters as downloads land
         try:
-            self._artworkPollTimer.start(600, False)
+            self._artworkPollTimer.start(1000, False)   # [PATCH 61] was 600
         except Exception:
             pass
         self["backdropImg"].hide()
@@ -400,7 +418,7 @@ class AdvancedArabicPlayerHome(Screen):
         self["key_blue"].setText("الصفحة التالية")
         self["grid_status_left"].show()
         self["grid_status_right"].show()
-        self._artworkPollTimer.start(600, False)
+        self._artworkPollTimer.start(1000, False)   # [PATCH 61] was 600
 
     def _carouselPositionForSlot(self, slot):
         total = len(self._items)
@@ -582,6 +600,8 @@ class AdvancedArabicPlayerHome(Screen):
                     self["pyear_%d_%d" % (r, c)].hide()
                     self["prat_%d_%d" % (r, c)].hide()
                     self["pbar_%d_%d" % (r, c)].hide()
+                    # [PATCH 61] clear the memo so the next paint isn't skipped
+                    self._last_poster_painted.pop((r, c), None)
                     continue
                 url = item.get("poster") or ""
                 path = ""
@@ -621,7 +641,12 @@ class AdvancedArabicPlayerHome(Screen):
                         pass
                 if path:
                     try:
-                        widget.instance.setPixmapFromFile(path)
+                        # [PATCH 61] only decode when the path changed —
+                        # was re-decoding all 8 visible posters on every
+                        # arrow key and again every poll tick.
+                        if self._last_poster_painted.get((r, c)) != path:
+                            widget.instance.setPixmapFromFile(path)
+                            self._last_poster_painted[(r, c)] = path
                         widget.show()
                         # [PATCH 51a] selected-poster zoom: the highlighted
                         # card's image grows ~8% and re-centers on its cell.
@@ -651,8 +676,10 @@ class AdvancedArabicPlayerHome(Screen):
                     ph = placeholder_for_item(item)
                     if ph:
                         try:
-                            widget.instance.setScale(1)
-                            widget.instance.setPixmapFromFile(ph)
+                            if self._last_poster_painted.get((r, c)) != ph:
+                                widget.instance.setScale(1)
+                                widget.instance.setPixmapFromFile(ph)
+                                self._last_poster_painted[(r, c)] = ph
                             widget.show()
                         except Exception:
                             widget.hide()
@@ -863,22 +890,32 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _refreshContinuePosters(self):
         """[PATCH 24] repaint strip posters from cache only — no re-query,
-        no re-request: just swaps placeholders for arrived posters."""
+        no re-request: just swaps placeholders for arrived posters.
+        [PATCH 61] memoized: only calls setPixmapFromFile when the path
+        actually changed — re-decoding on every poll tick was what made
+        home-mode navigation feel heavy after the strip got bigger."""
         try:
             items = getattr(self, "_cont_items", []) or []
+            last = self._last_cont_painted
             for i in range(min(CONT_SLOTS, len(items))):
                 u = items[i].get("poster") or ""
                 if not u:
                     continue
-                p = plugin_imagecache.getCachedImage(u, target_size=(CONT_W, CONT_H)) \
-                    or plugin_imagecache.getCachedImage(u)
+                p = plugin_imagecache.getCachedImage(u, target_size=(CONT_W, CONT_H))
                 if not p:
+                    # Do NOT fall back to full-size here — decoding a
+                    # 500x750 original into a 220x330 widget every tick
+                    # was the real hammer. Leave whatever's already
+                    # painted (a placeholder) until the right size lands.
                     continue
+                if last.get(i) == p:
+                    continue                    # already painted
                 try:
                     w = self["cont%d" % i]
                     w.instance.setScale(1)
                     w.instance.setPixmapFromFile(p)
                     w.show()
+                    last[i] = p
                 except Exception:
                     pass
         except Exception:
@@ -887,6 +924,8 @@ class AdvancedArabicPlayerHome(Screen):
     def _pollArtworkCache(self):
         # [PATCH 24] home mode: swap strip placeholders for posters as
         # the async downloads land — without leaving the plugin
+        # [PATCH 61] tick is now 1s (was 600ms); the memoized refresh
+        # makes each tick near-free when nothing has changed.
         if self._display_mode == "home":
             if getattr(self, "_cont_items", None):
                 self._refreshContinuePosters()
@@ -910,21 +949,28 @@ class AdvancedArabicPlayerHome(Screen):
             self._updateGridFooter()
 
     def _updateIcons(self):
+        # [PATCH 61] hide()/show() are cheap; setPixmapFromFile is not.
+        # Memoize the icon path per cell so navigating the 6x2 home grid
+        # doesn't re-decode all 12 tiles on every arrow key.
         for _r in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
                 self["pic_%d_%d" % (_r, _c)].hide()
-        # Site icons belong to the home tiles only. Category/list cells
-        # are text-only — default.png fallback must not paint over names.
         if self._display_mode != "home":
             return
+        last = self._last_icon_painted
         for row, col, item in self["home_grid"].getPageItems():
             icon_path = resolve_icon_path(item, PLUGIN_PATH)
-            if not icon_path: continue
+            if not icon_path:
+                continue
+            key = (row, col)
             widget = self["pic_%d_%d" % (row, col)]
             try:
-                widget.instance.setPixmapFromFile(icon_path)
+                if last.get(key) != icon_path:
+                    widget.instance.setPixmapFromFile(icon_path)
+                    last[key] = icon_path
                 widget.show()
-            except: pass
+            except Exception:
+                pass
 
     # ── Continue-watching row ───────────────────────────────────────────
     def _paintContinueRow(self):
@@ -949,8 +995,11 @@ class AdvancedArabicPlayerHome(Screen):
                     path = placeholder_for_item(item)
                 if path:
                     try:
-                        widget.instance.setScale(1)
-                        widget.instance.setPixmapFromFile(path)
+                        # [PATCH 61] memoized: only re-decode on change
+                        if self._last_cont_painted.get(i) != path:
+                            widget.instance.setScale(1)
+                            widget.instance.setPixmapFromFile(path)
+                            self._last_cont_painted[i] = path
                         widget.show()
                     except Exception:
                         widget.hide()

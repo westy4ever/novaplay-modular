@@ -3,18 +3,23 @@
 Advanced Arabic Player - Custom grid widgets (resolution-aware)
 ================================================================
 
-[PATCH 58] poster-grid selection bar hoisted out of the listbox into a
-  dedicated widget (skin-side pgridSel at z=5) — the old in-listbox bar
-  shared z=3 with the poster pixmaps, so the selected cell's 8% zoom
-  painted over it (bar appeared only while a poster was still loading).
-[PATCH 57] continue-strip selection now mirrors the poster grid:
-  thin right-edge cyan bar + 8% zoom (was: full frame, no zoom).
-[PATCH 56] right-edge cyan selection bar (6px strip on the poster's
-  right side — not a full frame); wider Continue strip (6 @ 180px).
+[PATCH 61] navigation performance: plugin_screen_home now memoizes
+  pixmap paths so setPixmapFromFile only runs when the path actually
+  changed (was re-decoding on every arrow key and every poll tick —
+  the size bump in 59/60 made that visible).
+[PATCH 60] continue-strip ratio was wrong (240:280 ≈ 0.857, near
+  square, while posters are 2:3 ≈ 0.667) — resizeCover was squashing
+  every poster. Strip is now 220x330 (proper 2:3).
+[PATCH 59] home site grid 4x2 → 6x2 (narrower tiles); continue strip
+  6 @ 240x280 (was 180x200).
+[PATCH 58] poster-grid selection bar hoisted out of the listbox into
+  a dedicated widget (skin-side pgridSel at z=5).
+[PATCH 57] continue-strip selection mirrors the poster grid:
+  thin right-edge cyan bar + 8% zoom.
+[PATCH 56] right-edge cyan selection bar on the poster grid.
 [PATCH 54] strip badge z=8 + carousel progress bar.
 [PATCH 53] carousel year badge + star in rating; grid frame removed.
-[PATCH 46-R2/49/52] overlay badges at z=4, compact sizes; gold
-  progress bar; B&W watched posters (home side).
+[PATCH 46-R2/49/52] overlay badges at z=4, compact sizes.
 [PATCH 48] in-poster watch-progress state rides the item dict.
 [PATCH 15+16] bigger 3-line captions.
 [PATCH 14] TextListGrid (vertical category list).
@@ -251,12 +256,15 @@ class _BaseCardGrid(GUIComponent):
     def preWidgetDelete(self, instance): instance.setContent(None)
 
 
-# --- Home site-menu grid (design: 4x3 cells of 470x300 @1080p) ---
-HOME_GRID_COLS = 4
+# --- Home site-menu grid (design: 6x2 cells of 313x260 @1080p) ---
+# [PATCH 60] row height 280 → 260 so 2 rows fit the 520px frame the
+# screen now reserves (grid anchor moved to y=440 to clear the bigger
+# 2:3 continue strip).
+HOME_GRID_COLS = 6
 HOME_GRID_ROWS = 2
-HOME_CELL_W = sc(470)
-HOME_CELL_H = sc(300)
-HOME_CELL_MARGIN = sc(16)
+HOME_CELL_W = sc(313)
+HOME_CELL_H = sc(260)
+HOME_CELL_MARGIN = sc(12)
 HOME_BORDER_W = max(2, sc(4))
 HOME_CELL_INNER_W = HOME_CELL_W - 2 * HOME_CELL_MARGIN
 HOME_CELL_INNER_H = HOME_CELL_H - 2 * HOME_CELL_MARGIN
@@ -503,18 +511,23 @@ def build_carousel_xml():
 
 
 # --- Continue-watching strip (design space @1080p) -------------------------
-# [PATCH 56] wider strip: 6 posters @ 180px (was 7 @ 140) — same height
-# (200) so it clears the home grid at y=330. Badges at z=8 (54).
+# [PATCH 60] posters were 240x280 (0.857 — nearly square). Poster artwork
+# is 2:3 (≈0.667), so resizeCover was cover-cropping every poster into a
+# squashed frame — this is why strip posters looked "strange" in size.
+# Back to a proper 2:3 shape: 220x330 (bigger than the original 180x200,
+# and the same silhouette as the poster grid's 210x330). Width check:
+#   6*220 + 5*16 = 1400px  (fits 1920 with X0=45 margin)
 CONT_SLOTS = 6
-CONT_W = 180
-CONT_H = 200
+CONT_W = 220
+CONT_H = 330
 CONT_GAP = 16
 CONT_X0 = 45
-CONT_Y = 120
+CONT_Y = 95
 
 
 def build_continue_row_xml():
-    parts = ['<widget name="cont_title" position="45,88" size="1300,30" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="7" />']
+    # cont_title stays above the taller strip: 65 + 30 = 95 = strip top.
+    parts = ['<widget name="cont_title" position="45,65" size="1300,30" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="7" />']
     # [PATCH 57] contSel is now a thin right-edge bar (matches poster
     # grid's selection strip) and lives ABOVE the poster pixmaps so the
     # zoomed poster can't cover it. Was: cornerRadius="8", zPosition="3".
@@ -523,7 +536,7 @@ def build_continue_row_xml():
         parts.append('<widget name="cont%d" position="%d,%d" size="%d,%d" zPosition="4" alphatest="blend" scale="1" />'
                       % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y, CONT_W, CONT_H))
         # [PATCH 13/54] per-item resume-time badge — gold bar, z=8 so the
-        # poster pixmap can never cover it
-        parts.append('<widget name="contbadge%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="8" font="Regular;15" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="4" />'
-                     % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y + CONT_H - 22, CONT_W, 22))
+        # poster pixmap can never cover it.
+        parts.append('<widget name="contbadge%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="8" font="Regular;16" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="4" />'
+                     % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y + CONT_H - 26, CONT_W, 26))
     return "\n".join(parts)
