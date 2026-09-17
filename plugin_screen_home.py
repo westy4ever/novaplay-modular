@@ -19,6 +19,11 @@ with the full UX update set baked in:
     rating badge pop (+30% on center)
   * [PATCH 53] carousel year badge (red, top-left) + star in rating;
     grid focus frame removed (zoom is the selection signal)
+  * [PATCH 57] continue-watching strip: same selection signal as the
+    poster grid — right-edge 6px cyan bar + ~8% zoom + recenter
+  * [PATCH 58] poster-grid selection bar hoisted to a dedicated widget
+    ("pgridSel", z=5) so the 8% zoom can never paint over it — that
+    was why the bar only showed while a poster was still loading
 """
 
 import os
@@ -84,6 +89,7 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {poster_grid_pics}
         {poster_badge_xml}
+        <widget name="pgridSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="5" transparent="0" />
         {carousel_xml}
         {continue_xml}
         <widget name="grid_status_left"  position="40,965"  size="900,32" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="left" zPosition="7" />
@@ -170,6 +176,9 @@ class AdvancedArabicPlayerHome(Screen):
                 self["pyear_%d_%d" % (_r, _c)] = Label("")
                 self["prat_%d_%d" % (_r, _c)] = Label("")
                 self["pbar_%d_%d" % (_r, _c)] = Label("")
+        # [PATCH 58] Poster-grid selection bar — its own widget (z=5)
+        # so the 8% zoom on the selected cell can't paint over it.
+        self["pgridSel"] = Label("")
 
         for i in range(self.carousel_slots):
             self["cfocus%d" % i] = Label("")
@@ -306,6 +315,9 @@ class AdvancedArabicPlayerHome(Screen):
         self._tmdb_token += 1
         self["grid_status_left"].hide()
         self["grid_status_right"].hide()
+        # [PATCH 58] poster-grid selection bar off in home mode
+        try: self["pgridSel"].hide()
+        except Exception: pass
         for i in range(self.carousel_slots):
             self["cfocus%d" % i].hide()
             self["cposter%d" % i].hide()
@@ -344,6 +356,10 @@ class AdvancedArabicPlayerHome(Screen):
             self["contbadge%d" % i].hide()
         self["cont_title"].hide()
         try: self["contSel"].hide()
+        except Exception: pass
+        # [PATCH 58] hide poster-grid selection bar; _updatePosterPixmaps
+        # re-shows it in grid mode after layout settles
+        try: self["pgridSel"].hide()
         except Exception: pass
         for i in range(self.carousel_slots):
             self["cfocus%d" % i].hide()
@@ -529,6 +545,29 @@ class AdvancedArabicPlayerHome(Screen):
         self["grid_status_right"].setText("Page {} / {}".format(page, total_pages))
 
     def _updatePosterPixmaps(self):
+        # [PATCH 58] Selection bar is its own widget above the pixmaps
+        # (z=5). The old in-listbox bar was at z=3, same as the poster
+        # pixmaps, so the 8% zoom on the selected cell painted over it —
+        # which is why it only showed while a poster was still loading.
+        try:
+            _g = self["poster_grid"]
+            if (self._display_mode == "poster" and self._layout_style == "grid"
+                    and 0 <= _g.currentIndex < len(self._items)):
+                _sel_i = _g.currentIndex - _g._getPageStart()
+                _sr = _sel_i // _g.cols
+                _scol = _sel_i % _g.cols
+                _sx = (self._POSTER_GRID_X + _scol * POSTER_CELL_W
+                       + POSTER_CELL_MARGIN_H + POSTER_W + 2)
+                _sy = (self._POSTER_GRID_Y + _sr * POSTER_CELL_H
+                       + POSTER_CELL_MARGIN_V)
+                self._moveResize("pgridSel", _sx, _sy, 6, POSTER_H)
+                self["pgridSel"].show()
+            else:
+                self["pgridSel"].hide()
+        except Exception:
+            try: self["pgridSel"].hide()
+            except Exception: pass
+
         visible = {}
         for row, col, item in self["poster_grid"].getPageItems():
             visible[(row, col)] = item
@@ -931,15 +970,15 @@ class AdvancedArabicPlayerHome(Screen):
         if self._cont_items:
             self["cont_title"].show()
             if self._focus_zone == "row":
-                self._moveContinueSel()
+                self._moveContinueSel()             # re-asserts bar + zoom
             else:
+                self._applyContinueLayout(None)     # keep base sizes
                 try: self["contSel"].hide()
                 except Exception: pass
             self._updateContinueLabel()
         else:
             self["cont_title"].hide()
-            try: self["contSel"].hide()
-            except Exception: pass
+            self._resetContinueZoom()
 
     def _updateContinueLabel(self):
         if not (0 <= self._cont_index < len(self._cont_items)):
@@ -956,14 +995,40 @@ class AdvancedArabicPlayerHome(Screen):
         else:
             self["cont_title"].setText("متابعة المشاهدة")
 
+    # [PATCH 57] Continue strip now mirrors the poster grid's selection
+    # effect: 8% zoom + recenter on the selected card, thin cyan bar on
+    # its right edge, no full frame.
+
+    def _applyContinueLayout(self, zoom_index=None):
+        """Position all continue-strip posters. zoom_index=None means
+        'no selection' (all at base size)."""
+        for i in range(CONT_SLOTS):
+            base_x = CONT_X0 + i * (CONT_W + CONT_GAP)
+            if i == zoom_index:
+                zw = int(CONT_W * 1.08)
+                zh = int(CONT_H * 1.08)
+                zx = base_x + (CONT_W - zw) // 2
+                zy = CONT_Y + (CONT_H - zh) // 2
+                self._moveResize("cont%d" % i, zx, zy, zw, zh)
+            else:
+                self._moveResize("cont%d" % i, base_x, CONT_Y, CONT_W, CONT_H)
+
+    def _resetContinueZoom(self):
+        """Drop the zoom — call whenever we leave the continue row zone."""
+        self._applyContinueLayout(None)
+        try: self["contSel"].hide()
+        except Exception: pass
+
     def _moveContinueSel(self):
         if not (0 <= self._cont_index < len(self._cont_items)):
-            try: self["contSel"].hide()
-            except Exception: pass
+            self._resetContinueZoom()
             return
-        pad = 6
-        x = CONT_X0 + self._cont_index * (CONT_W + CONT_GAP)
-        self._moveResize("contSel", x - pad, CONT_Y - pad, CONT_W + pad * 2, CONT_H + pad * 2)
+        # Zoom the selected poster (matches poster-grid 8% pop)
+        self._applyContinueLayout(self._cont_index)
+        # Right-edge cyan bar (6px) — same signal as the poster grid
+        bar_w = 6
+        base_x = CONT_X0 + self._cont_index * (CONT_W + CONT_GAP)
+        self._moveResize("contSel", base_x + CONT_W + 2, CONT_Y, bar_w, CONT_H)
         self["contSel"].show()
         self._updateContinueLabel()
 
@@ -973,8 +1038,7 @@ class AdvancedArabicPlayerHome(Screen):
             if self._focus_zone == "row" and self._cont_items:
                 item = self._cont_items[min(self._cont_index, len(self._cont_items) - 1)]
                 self._focus_zone = "grid"
-                try: self["contSel"].hide()
-                except Exception: pass
+                self._resetContinueZoom()
                 if item: self._openItem(item)
                 return
             item = self["home_grid"].getCurrent()
@@ -1031,8 +1095,7 @@ class AdvancedArabicPlayerHome(Screen):
     def _navDown(self):
         if self._display_mode == "home" and self._focus_zone == "row":
             self._focus_zone = "grid"
-            try: self["contSel"].hide()
-            except Exception: pass
+            self._resetContinueZoom()
             return
         if self._display_mode == "home":
             self["home_grid"].moveDown()
@@ -1121,6 +1184,9 @@ class AdvancedArabicPlayerHome(Screen):
                 self["contbadge%d" % i].hide()
             self["cont_title"].hide()
             try: self["contSel"].hide()
+            except Exception: pass
+            # [PATCH 58] poster-grid selection bar off in list mode
+            try: self["pgridSel"].hide()
             except Exception: pass
 
             self["backdropImg"].hide()
@@ -1396,8 +1462,7 @@ class AdvancedArabicPlayerHome(Screen):
         else:
             if self._focus_zone == "row":
                 self._focus_zone = "grid"
-                try: self["contSel"].hide()
-                except Exception: pass
+                self._resetContinueZoom()
                 return
             self.close()
 
@@ -1415,4 +1480,4 @@ def _get_favorite_items_list():
 
 
 def _get_extractor(site):
-    return get_extractor(site)        
+    return get_extractor(site)

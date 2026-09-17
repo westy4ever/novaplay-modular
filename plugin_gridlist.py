@@ -3,6 +3,12 @@
 Advanced Arabic Player - Custom grid widgets (resolution-aware)
 ================================================================
 
+[PATCH 58] poster-grid selection bar hoisted out of the listbox into a
+  dedicated widget (skin-side pgridSel at z=5) — the old in-listbox bar
+  shared z=3 with the poster pixmaps, so the selected cell's 8% zoom
+  painted over it (bar appeared only while a poster was still loading).
+[PATCH 57] continue-strip selection now mirrors the poster grid:
+  thin right-edge cyan bar + 8% zoom (was: full frame, no zoom).
 [PATCH 56] right-edge cyan selection bar (6px strip on the poster's
   right side — not a full frame); wider Continue strip (6 @ 180px).
 [PATCH 54] strip badge z=8 + carousel progress bar.
@@ -408,17 +414,12 @@ class PosterCardGrid(_BaseCardGrid):
             if item_idx >= self._getPageEnd(): continue
             cx = col_idx * self.cell_w + POSTER_CELL_MARGIN_H
             item = self._items[item_idx]
-            is_sel = is_sr and col_idx == self.currentCol
 
-            # [PATCH 56] right-edge cyan selection bar (6px strip, not a
-            # full frame) — sits in the cell's right margin where the
-            # poster pixmap (which covers listbox drawing beneath it)
-            # cannot reach it
-            if is_sel:
-                _sbw = 6
-                row.append(MultiContentEntryText(
-                    pos=(cx + POSTER_W + 2, cy), size=(_sbw, POSTER_H),
-                    font=0, text="", color=0, backcolor=_G_CLR["cyan"], flags=0))
+            # [PATCH 58] The right-edge cyan selection bar was removed from
+            # the listbox cell content — it lived at z=3 (same layer as the
+            # poster pixmaps), so the 8% zoom on the selected cell painted
+            # over it. It's now a dedicated screen-level widget
+            # ("pgridSel", z=5) positioned in _updatePosterPixmaps.
 
             # Solid Pure Opaque Black Background for Poster
             row.append(MultiContentEntryText(pos=(cx, cy), size=(POSTER_W, POSTER_H), font=0, text="", color=0, backcolor="#000000", flags=0))
@@ -514,7 +515,10 @@ CONT_Y = 120
 
 def build_continue_row_xml():
     parts = ['<widget name="cont_title" position="45,88" size="1300,30" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="7" />']
-    parts.append('<widget name="contSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="8" zPosition="3" transparent="0" />')
+    # [PATCH 57] contSel is now a thin right-edge bar (matches poster
+    # grid's selection strip) and lives ABOVE the poster pixmaps so the
+    # zoomed poster can't cover it. Was: cornerRadius="8", zPosition="3".
+    parts.append('<widget name="contSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="6" transparent="0" />')
     for i in range(CONT_SLOTS):
         parts.append('<widget name="cont%d" position="%d,%d" size="%d,%d" zPosition="4" alphatest="blend" scale="1" />'
                       % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y, CONT_W, CONT_H))

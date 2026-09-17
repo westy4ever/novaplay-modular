@@ -684,7 +684,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 if variants:
                     callInMainThread(self._onQualityChoices, url, qual, final_ref, variants, server)
                 else:
-                    callInMainThread(self._onStreamFound, url, qual, final_ref, server)
+                    callInMainThread(self._onStreamFound, url, qual, final_ref, server, variants)
             else:
                 if get_curl_failed_needs_proxy():
                     plugin_health.record(self._site, "blocked")
@@ -966,7 +966,7 @@ class AdvancedArabicPlayerDetail(Screen):
             my_log("quality cap error: {} — playing original URL".format(e))
             return url
 
-    def _onStreamFound(self, stream_url, quality, final_ref, server):
+    def _onStreamFound(self, stream_url, quality, final_ref, server, variants=None):
         if getattr(self, "_closed", False): return
         try:
             if server in self._servers:
@@ -1032,15 +1032,25 @@ class AdvancedArabicPlayerDetail(Screen):
             # NOTE: this only works together with the _SharedQualityStore
             # fix in extractors/htmlmedia.py — with the old
             # threading.local() storage the main thread always saw [].
-            try:
-                from extractors.base import get_last_quality_variants
-                _qv = get_last_quality_variants() or []
-            except Exception:
-                _qv = []
-            if _qv:
-                my_log("quality: passing {} variant(s) to player".format(len(_qv)))
+            if variants is not None:
+                # Trust the caller's own extract_stream() result — it was
+                # computed under _quality_lock in this same call, so it
+                # can't be contaminated by a concurrent extraction on
+                # another screen. An empty list here means "this stream
+                # genuinely has no alternates," not "go check the global."
+                _qv = variants or None
+                if _qv:
+                    my_log("quality: passing {} variant(s) to player".format(len(_qv)))
             else:
-                _qv = None
+                try:
+                    from extractors.base import get_last_quality_variants
+                    _qv = get_last_quality_variants() or []
+                except Exception:
+                    _qv = []
+                if _qv:
+                    my_log("quality: passing {} variant(s) to player".format(len(_qv)))
+                else:
+                    _qv = None
 
             _item_url = self._item.get("url", "")
             _saved_pos = _get_saved_position(_item_url)
@@ -1157,6 +1167,9 @@ class AdvancedArabicPlayerDetail(Screen):
                 result = extract_fn(entry["url"])
                 resolved_url = result[0] if result else None
                 referer = result[2] if result and len(result) >= 3 and result[2] else entry["url"]
+                variants = result[3] if result and len(result) >= 4 and result[3] else []
+            else:
+                variants = []
 
             if not resolved_url:
                 callInMainThread(self["status"].setText, "تعذر تجهيز الرابط للمشاهدة - جرب جودة أخرى")
@@ -1167,7 +1180,7 @@ class AdvancedArabicPlayerDetail(Screen):
                       "url": entry["url"],
                       "type": "embed",
                       "quality": label}
-            callInMainThread(self._onStreamFound, resolved_url, label, referer, server)
+            callInMainThread(self._onStreamFound, resolved_url, label, referer, server, variants)
         except Exception as e:
             my_log("resolve-and-watch error: {}".format(e))
             callInMainThread(self["status"].setText, "فشل تجهيز الرابط للمشاهدة")
