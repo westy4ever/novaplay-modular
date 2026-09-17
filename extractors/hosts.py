@@ -32,7 +32,7 @@ from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
                         _best_media_url, get_last_quality_variants,
                         get_synthesized_variants, _correct_stream_url,
                         _is_placeholder_media_url, extract_iframes,
-                        _quality_tls)
+                        _quality_tls, _quality_lock)
 from .referers import get_referer
 
 
@@ -2429,7 +2429,6 @@ def extract_stream(url):
     Returns (stream_url, quality_label, referer, variants).
     """
     log("--- extract_stream START: {} ---".format(url))
-    _quality_tls.variants = []
     raw_url = (url or "").strip()
     if not raw_url:
         return None, "", url, []
@@ -2473,33 +2472,42 @@ def extract_stream(url):
         return main_url, q, ref, []
 
     # ─── RESOLVE VIA HOST RESOLVERS ────────────────────────────────────────
-    stream = resolve_host(main_url, referer=piped_headers.get("Referer"))
-    if not stream:
-        log("resolve_host failed, trying iframe chain")
-        stream, _ = resolve_iframe_chain(main_url, referer=piped_headers.get("Referer"))
+    # NEW: serialize the reset->resolve->readback sequence. _quality_tls
+    # is one shared object (see htmlmedia.py) — without this lock, a
+    # second extract_stream() on another thread (e.g. a stale _bgExtract
+    # from a Detail screen the user already backed out of) can write
+    # its own resolve's variants into _quality_tls between THIS thread's
+    # resolve_host() and its get_last_quality_variants() readback below,
+    # so this thread would silently return another title's qualities.
+    with _quality_lock:
+        _quality_tls.variants = []
+        stream = resolve_host(main_url, referer=piped_headers.get("Referer"))
+        if not stream:
+            log("resolve_host failed, trying iframe chain")
+            stream, _ = resolve_iframe_chain(main_url, referer=piped_headers.get("Referer"))
 
-    if stream:
-        stream = _correct_stream_url(stream)
+        if stream:
+            stream = _correct_stream_url(stream)
 
-        q = "HD"
-        stream_lower = stream.lower()
-        if "1080" in stream_lower or "fhd" in stream_lower or "hd1080" in stream_lower:
-            q = "1080p"
-        elif "720" in stream_lower or "hd" in stream_lower or "hd720" in stream_lower:
-            q = "720p"
-        elif "480" in stream_lower:
-            q = "480p"
-        elif "index-f2" in stream_lower:
-            q = "720p"
-        elif "index-f1" in stream_lower:
-            q = "480p"
+            q = "HD"
+            stream_lower = stream.lower()
+            if "1080" in stream_lower or "fhd" in stream_lower or "hd1080" in stream_lower:
+                q = "1080p"
+            elif "720" in stream_lower or "hd" in stream_lower or "hd720" in stream_lower:
+                q = "720p"
+            elif "480" in stream_lower:
+                q = "480p"
+            elif "index-f2" in stream_lower:
+                q = "720p"
+            elif "index-f1" in stream_lower:
+                q = "480p"
 
-        variants = [(lbl, u) for lbl, u in get_last_quality_variants() if u != stream]
-        if not variants:
-            variants = [(lbl, u) for lbl, u in get_synthesized_variants(stream) if u != stream]
+            variants = [(lbl, u) for lbl, u in get_last_quality_variants() if u != stream]
+            if not variants:
+                variants = [(lbl, u) for lbl, u in get_synthesized_variants(stream) if u != stream]
 
-        log("extract_stream SUCCESS: {} ({}), {} extra variant(s)".format(stream[:120], q, len(variants)))
-        return stream, q, main_url, variants
+            log("extract_stream SUCCESS: {} ({}), {} extra variant(s)".format(stream[:120], q, len(variants)))
+            return stream, q, main_url, variants
 
     log("extract_stream FAILED for: {}".format(main_url))
     # [PATCH 35] the failure path returns the documented 4-tuple. The

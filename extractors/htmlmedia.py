@@ -6,6 +6,7 @@ Depends only on net.log — deliberately does NOT import net.fetch
 (keeps the Phase-2 graph acyclic: net never imports htmlmedia)."""
 
 import re
+import threading
 from urllib.parse import urljoin, urlparse
 
 from .net import log
@@ -18,11 +19,18 @@ from .net import log
 # attributes are per-thread by design, so the main thread always saw an
 # empty list. A plain shared holder gives the intended "last writer
 # wins" semantics; list reassignment is atomic in CPython, no lock
-# needed.
+# needed FOR A SINGLE reset-then-read. It is NOT safe for two
+# concurrent extract_stream() calls (e.g. a stale _bgExtract thread
+# from a Detail screen the user already backed out of, racing a fresh
+# extraction on a new screen) — one thread's resolve can land between
+# the other's reset and readback, handing back the wrong stream's
+# variants. _quality_lock (used in hosts.py's extract_stream) closes
+# that specific window.
 class _SharedQualityStore(object):
     pass
 
 _quality_tls = threading_local = _SharedQualityStore()
+_quality_lock = threading.Lock()
 
 _QUALITY_SUFFIX_LABELS = {
     "_o": "Original", "_x": "Original", "_h": "720p", "_n": "480p", "_l": "360p",
@@ -159,7 +167,11 @@ def _label_quality_variant(url):
     m = re.search(r'[-_]f([123])(?=[-/_.])', lower)
     if m:
         return {"3": "1080p", "2": "720p", "1": "480p"}.get(m.group(1))
-    m = re.search(r'\b(2160|1080|720|480|360|240)\b', lower)
+    # was \b...\b — '_' is a \w character, so \b never matches between
+    # '_' and a digit (e.g. "movie_the_hunt_1080.mp4" was silently
+    # skipped). Explicit non-alnum lookaround catches both '_' and '-'
+    # separators as well as string start/end.
+    m = re.search(r'(?<![a-z0-9])(2160|1080|720|480|360|240)(?![a-z0-9])', lower)
     if m:
         return m.group(1) + "p"
     if "fhd" in lower or "4k" in lower:
