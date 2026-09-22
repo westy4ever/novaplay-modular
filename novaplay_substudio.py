@@ -43,6 +43,11 @@ try:
 except Exception:
     parseColor = None
 
+try:
+    from enigma import addFont          # [PATCH 68] font picker support
+except Exception:
+    addFont = None
+
 # ── Native Shadow Detection (runs at import time inside Enigma2) ──
 _NATIVE_SHADOW = False
 _FONT_METRICS = False
@@ -238,6 +243,12 @@ class SubtitleStudio(object):
         }
         self._load_style()
         self._validate_colors()
+        # [PATCH 68] fonts registered via addFont() don't survive a restart
+        try:
+            if self.style.get("font_path") and os.path.isfile(self.style["font_path"]):
+                self.register_font(self.style["font_path"])
+        except Exception:
+            pass
         
         # Log native shadow status once
         logger.info(f"SubtitleStudio: native shadow = {_NATIVE_SHADOW}, font metrics = {_FONT_METRICS}")
@@ -397,12 +408,59 @@ class SubtitleStudio(object):
         return False
 
     # ── Binding / Attach ───────────────────────────────────────────────
+    def _reset_playback_state(self):
+        """[PATCH 68] STUDIO is a module singleton: without this the previous
+        episode's cues kept rendering on the next player, and attach()
+        preserved its stale offset."""
+        self._cues = []
+        self._starts = []
+        self._path = ""
+        self._offset_ms = 0
+        self._last_rendered = None
+        self._preview_body = None
+        self._current_cue_index = -1
+        self._font_state = None
+
+    _registered_fonts = set()
+
+    def register_font(self, path):
+        """[PATCH 68] the player calls this from the font browser; it never existed."""
+        path = str(path or "")
+        if not path or not os.path.isfile(path) or addFont is None:
+            return False
+        base = re.sub(r"[^A-Za-z0-9]+", "", os.path.splitext(os.path.basename(path))[0])[:24] or "Custom"
+        name = "NovaSub" + base
+        try:
+            if name not in SubtitleStudio._registered_fonts:
+                try:
+                    addFont(path, name, 100, False, 0)
+                except TypeError:            # older images: 4-arg signature
+                    addFont(path, name, 100, False)
+                SubtitleStudio._registered_fonts.add(name)
+        except Exception as e:
+            logger.warning("register_font failed: %s" % e)
+            return False
+        self.style["font_name"] = name
+        self.style["font_path"] = path
+        self._font_state = None
+        self._last_rendered = None
+        self._layout_static()
+        return True
+
+    def use_default_font(self):
+        self.style["font_name"] = "Regular"
+        self.style["font_path"] = ""
+        self._font_state = None
+        self._last_rendered = None
+        self._layout_static()
+
     def bind(self, screen):
         """Bind studio to a player screen instance."""
         self._screen = screen
         self._last_rendered = None
         self._preview_body = None
         self._active = True
+        self._reset_playback_state()      # [PATCH 68]
         self._layout_static()
         logger.debug("Studio bound to screen")
 
@@ -411,6 +469,7 @@ class SubtitleStudio(object):
         self._hide_lines()
         self._screen = None
         self._active = False
+        self._reset_playback_state()      # [PATCH 68]
         logger.debug("Studio unbound from screen")
 
     def attach(self, path):
@@ -521,39 +580,28 @@ class SubtitleStudio(object):
         return _FALLBACK_FONT
 
     def _apply_font_all(self, override_name=None):
-        """Set the font face on every text widget (lines + shadows).
-        Uses native shadow (AJ Panel style) when available, 16-widget fallback when not."""
+        """[PATCH 68] _font_state is only recorded once at least one widget
+        instance actually took the style."""
         if self._screen is None or gFont is None:
             return
         fname = override_name or self._fallback_font()
         size = self.style["size"]
-        self._font_state = (fname, size)
-        
+        applied = False
         try:
             from skin import parseColor as _pc
         except Exception:
             _pc = None
 
         if _NATIVE_SHADOW:
-            # Native shadow mode: apply shadow directly to the 2 line widgets
             for key in ("subLine1", "subLine2"):
                 w = self._w(key)
                 if w is not None and w.instance is not None:
                     w.instance.setFont(gFont(fname, size))
+                    applied = True
                     if _pc is not None:
                         w.instance.setForegroundColor(_pc(self._style_color_hex()))
                         w.instance.setShadowColor(_pc(self._style_outline_hex()))
                         w.instance.setShadowOffset((-2, -2))
-            
-            # Apply background colors
-            if _pc is not None:
-                bg = self._style_bg_hex()
-                for key in ("subBg1", "subBg2"):
-                    w = self._w(key)
-                    if w is not None and w.instance is not None:
-                        w.instance.setBackgroundColor(_pc(bg))
-            
-            # Permanently hide the 16 shadow widgets
             for key in self._SHADOW_KEYS:
                 w = self._w(key)
                 if w is not None:
@@ -562,20 +610,28 @@ class SubtitleStudio(object):
                     except Exception:
                         pass
         else:
-            # Fallback: 16-widget shadow stack
-            for key in ("subLine1", "subLine2") + tuple(self._SHADOW_KEYS):
+            for key in ("subLine1", "subLine2"):
+                w = self._w(key)
+                if w is not None and w.instance is not None:
+                    w.instance.setFont(gFont(fname, size))
+                    applied = True
+                    if _pc is not None:
+                        w.instance.setForegroundColor(_pc(self._style_color_hex()))
+            for key in self._SHADOW_KEYS:
                 w = self._w(key)
                 if w is not None and w.instance is not None:
                     w.instance.setFont(gFont(fname, size))
                     if _pc is not None:
-                        w.instance.setForegroundColor(_pc(self._style_color_hex()))
-            
-            if _pc is not None:
-                bg = self._style_bg_hex()
-                for key in ("subBg1", "subBg2"):
-                    w = self._w(key)
-                    if w is not None and w.instance is not None:
-                        w.instance.setBackgroundColor(_pc(bg))
+                        w.instance.setForegroundColor(_pc(self._style_outline_hex()))
+
+        if _pc is not None:
+            bg = self._style_bg_hex()
+            for key in ("subBg1", "subBg2"):
+                w = self._w(key)
+                if w is not None and w.instance is not None:
+                    w.instance.setBackgroundColor(_pc(bg))
+
+        self._font_state = (fname, size) if applied else None
 
     def _layout_static(self):
         """Apply font, size, and color settings."""
@@ -713,7 +769,7 @@ class SubtitleStudio(object):
                 self._hide_lines()
             return
         
-        p = pos_ms + self._offset_ms
+        p = pos_ms - self._offset_ms     # [PATCH 67] +offset = subtitles LATER, same as _shift_srt_text
         idx = bisect.bisect_right(self._starts, p) - 1
         active = None
         j = idx

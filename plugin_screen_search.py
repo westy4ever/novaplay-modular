@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""NovaPlay — search screen (query, scope, suggestions, TMDB async)."""
+"""NovaPlay — search screen (query, scope, suggestions, TMDB async).
+
+[A1] Recent searches are now saved on every submit, and re-appear at
+the top of the suggestions list via _library_search_suggestions().
+"""
 
 import threading
 
@@ -11,7 +15,7 @@ from Components.MenuList import MenuList
 
 from plugin_common import PLUGIN_PATH
 from plugin_gridlist import scale_skin_xml
-from plugin_state import _library_search_suggestions
+from plugin_state import (_library_search_suggestions, _save_search_query)
 from plugin_tmdb import _tmdb_enabled, _tmdb_search_suggestions
 from plugin_util import (_wrap_ui_text, _single_line_text,
                          _search_scope_label, _normalize_query)
@@ -111,7 +115,7 @@ class AdvancedArabicPlayerSearch(Screen):
         self["suggestions"].setList(rows)
 
     def _refresh_suggestions(self):
-        self._suggestions = _library_search_suggestions(self._query, self._current_site, limit=6)
+        self._suggestions = _library_search_suggestions(self._query, self._current_site, limit=8)
         self._refresh_suggestion_list()
         ticket = self._suggestion_ticket = self._suggestion_ticket + 1
         if len((self._query or "").strip()) >= 2 and _tmdb_enabled():
@@ -130,7 +134,7 @@ class AdvancedArabicPlayerSearch(Screen):
             if not norm or norm in seen: continue
             seen.add(norm)
             self._suggestions.append(item)
-        self._suggestions = self._suggestions[:8]
+        self._suggestions = self._suggestions[:10]
         self._refresh_suggestion_list()
 
     def _toggle_scope(self):
@@ -162,7 +166,10 @@ class AdvancedArabicPlayerSearch(Screen):
         idx = self["suggestions"].getSelectedIndex()
         if self._suggestions and idx >= 0 and idx < len(self._suggestions):
             chosen = self._suggestions[idx]
-            self.close(((chosen.get("query") or chosen.get("title") or "").strip(), self._scope or "all"))
+            q = (chosen.get("query") or chosen.get("title") or "").strip()
+            if q:
+                _save_search_query(q)    # [A1] remember picked suggestion too
+            self.close((q, self._scope or "all"))
             return
         if self._query.strip():
             self._submit()
@@ -174,4 +181,5 @@ class AdvancedArabicPlayerSearch(Screen):
         if not query:
             self._edit_query()
             return
+        _save_search_query(query)        # [A1] persist the submitted query
         self.close((query, self._scope or "all"))

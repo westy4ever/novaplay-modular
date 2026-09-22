@@ -9,6 +9,10 @@ MODULAR EXTRACTION of AdvancedArabicPlayerDetail with:
   * magnet prompt + TorrServer + download engine flows
   * [PATCH 46-R2] poster badges: red year box (top-left) + gold-star
     rating box (top-right) — universal TMDB rating source
+  * [PATCH 65-B3] per-title quality preference: when a stored quality
+    matches an available variant, auto-play it instead of showing the
+    quality menu. Saved by plugin_screen_player when the user picks a
+    quality from the in-player menu.
 """
 
 import os
@@ -30,13 +34,16 @@ from plugin_common import my_log, PLUGIN_PATH, _TYPE_LABELS
 from extractors import get_extractor
 from extractors.base import get_curl_failed_needs_proxy
 from plugin_state import (_get_config, _entry_from_item, _upsert_library_item,
-                          _is_favorite, _get_saved_position, _save_position)
+                          _is_favorite, _get_saved_position, _save_position,
+                          _toggle_favorite_entry)
+from urllib.parse import urlparse
 from plugin_util import (_single_line_text, _wrap_ui_text,
                           _strip_arabic_from_english_title,
                           _pick_plot_text, _pick_plot_text_with_source,
                           _poster_cache_path, _normalize_poster_url,
                           _get_cached_poster, _fetch_poster_bytes)
 from plugin_tmdb import _tmdb_enabled, _merge_tmdb_data
+from plugin_util import _split_episode_label                    # [PATCH 81]
 from plugin_screen_player import AdvancedArabicPlayerSimplePlayer, _play
 from plugin_widgets import StreamList
 import plugin_health
@@ -46,6 +53,21 @@ from novaplay_thread import callInMainThread
 _PLUGIN_VERSION = "4.1.0"
 
 
+# ── [B3] quality-preference key ─────────────────────────────────────
+def _quality_pref_key(title):
+    """Normalize a title into a config key for its per-title quality
+    preference. Series episode titles reduce to the series base so an
+    entire show shares one preference."""
+    t = str(title or "").strip()
+    t = re.sub(r"\bS\d{1,2}E\d{1,2}\b.*$", "", t, flags=re.I)
+    t = re.sub(r"\b\d{1,2}x\d{1,2}\b.*$", "", t)
+    t = re.sub(r"\s*\[\d+p\]\s*$", "", t)
+    t = re.sub(r"\s+", " ", t).strip(" -|:")
+    t = t.lower()
+    t = re.sub(r"[^a-z0-9\u0600-\u06ff]+", "_", t)[:60].strip("_")
+    return ("qpref_" + t) if t else ""
+
+
 class AdvancedArabicPlayerDetail(Screen):
     skin = """
     <screen name="AdvancedArabicPlayerDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
@@ -53,8 +75,6 @@ class AdvancedArabicPlayerDetail(Screen):
 
         <widget name="poster_box" position="45,30" size="420,600" backgroundColor="#1C2333" zPosition="2" />
         <widget name="poster" position="68,52" size="375,555" zPosition="4" alphatest="blend" />
-        <!-- [PATCH 46-R2] poster badges: red year box (top-left) +
-             gold-star rating box (top-right), matching the grid cards -->
         <widget name="posterYear" position="76,56" size="96,36" font="Regular;26" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
         <widget name="posterRating" position="325,58" size="104,36" font="Regular;26" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
 
@@ -109,7 +129,6 @@ class AdvancedArabicPlayerDetail(Screen):
         self._extracting = False
         self._quality_choices = []
 
-        # ── Episode chain (next-episode support) ──
         self._episode_chain = list(episode_chain) if episode_chain else []
         self._episode_index = int(episode_index if episode_index is not None else -1)
         self._auto_server_idx = auto_server_idx
@@ -119,7 +138,6 @@ class AdvancedArabicPlayerDetail(Screen):
         else:
             self._next_episode = None
         self._auto_menu_timer = None
-        # OSD poster: seed from the item; upgraded by _onLoaded.
         self._osd_poster = (item.get("poster") or item.get("image") or "")
 
         self["bg"]     = Label("")
@@ -128,7 +146,6 @@ class AdvancedArabicPlayerDetail(Screen):
         self["plot_box"] = Label("")
         self["menu_box"] = Label("")
         self["poster"] = Pixmap()
-        # [PATCH 46-R2] poster badge widgets
         self["posterYear"] = Label("")
         self["posterRating"] = Label("")
         self["badge"]  = Label("")
@@ -192,14 +209,11 @@ class AdvancedArabicPlayerDetail(Screen):
             fallback = re.sub(r'[\U00010000-\U0010ffff]', '', meta_line).strip()
             fallback = re.sub(r'\s+', ' ', fallback)
             seeders_source = fallback
-        # [PATCH 43] quality is rendered in its own column now (PATCH
-        # 40's resolution/tag split) — the "[ X ]" wrapper just broke
-        # the column layout and fed a stray "[" to the first line
         return (quality, release_name, size, seeders_source)
 
     def _format_episode_item(self, ep):
-        title = ep.get("title", "Episode")
-        return (title, "", "", "")
+        marker, name = _split_episode_label(ep.get("title", "Episode"))   # [PATCH 81]
+        return (marker, name, "", "")
 
     def _onOk(self):
         idx = self["menu"].getCurrentIndex()
@@ -208,10 +222,6 @@ class AdvancedArabicPlayerDetail(Screen):
         if self._quality_choices:
             if idx >= len(self._quality_choices): return
             choice = self._quality_choices[idx]
-            # Keep _quality_choices POPULATED: the variants list stays
-            # painted during playback; on exit from the player the
-            # Detail re-exposes showing it — variants → Back → servers
-            # → Back → grid.
             self._last_quality_selection = choice
             self._onStreamFound(choice["url"], choice["label"], choice["final_ref"], choice["server"])
             return
@@ -313,8 +323,6 @@ class AdvancedArabicPlayerDetail(Screen):
             if not _done[0] and not getattr(self, "_closed", False):
                 my_log("_bgLoad watchdog: timeout for {}".format(url[:60]))
                 def _show_timeout_msg():
-                    # Bug I fix: re-check completion inside the main-thread
-                    # callback — a 31s load must not ALSO show the timeout box.
                     if not getattr(self, "_closed", False) and not _done[0]:
                         self.session.open(MessageBox, "Timeout — please try again", MessageBox.TYPE_ERROR, timeout=5)
                 callInMainThread(_show_timeout_msg)
@@ -360,8 +368,6 @@ class AdvancedArabicPlayerDetail(Screen):
 
     def _onCancel(self):
         if self._quality_choices:
-            # Variants stay populated: Back from the quality list returns
-            # to the SERVERS list (not out of the screen).
             self._quality_choices = []
             self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
@@ -463,8 +469,6 @@ class AdvancedArabicPlayerDetail(Screen):
 
         self._servers = _sort_servers([s for s in data.get("servers", []) if s.get("url")])
         self._episodes = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
-        # Episodes usually carry no poster — inherit the series/page poster
-        # so the auto-next card shows artwork instead of a placeholder.
         _chain_poster = data.get("poster") or self._item.get("poster") or ""
         if _chain_poster:
             for _ep in self._episodes:
@@ -510,10 +514,6 @@ class AdvancedArabicPlayerDetail(Screen):
         else:
             self["key_blue"].setText("")
 
-        # [PATCH 46-R2] poster badges — rating (top-right, gold star on
-        # black) + year (top-left, red box, white text). Rating source is
-        # universal: _merge_tmdb_data fills "rating" for every site when
-        # the site didn't provide one; YTS items carry it directly.
         try:
             _r = str(data.get("rating") or self._item.get("rating") or "").strip()
             if _r and float(_r) > 0:
@@ -538,11 +538,7 @@ class AdvancedArabicPlayerDetail(Screen):
         poster_url = data.get("poster") or self._item.get("poster", "")
         if poster_url:
             threading.Thread(target=self._downloadPoster, args=(poster_url,), daemon=True).start()
-            # OSD poster: the same URL the Detail uses — the shared
-            # imagecache means the player finds it cached.
             self._osd_poster = poster_url
-        # Next-episode auto-start: chained episodes remember which server
-        # you used and auto-extract it.
         if getattr(self, "_auto_server_idx", None) is not None and self._servers:
             _asi = self._auto_server_idx
             self._auto_server_idx = None
@@ -662,7 +658,7 @@ class AdvancedArabicPlayerDetail(Screen):
             except Exception:
                 extractor = None
             if extractor is None or getattr(extractor, "extract_stream", None) is None:
-                from extractors import base as extractor   # module-level fallback
+                from extractors import base as extractor
 
             from novaplay_proxy import cached_extract, attach_cookies
             try:
@@ -813,12 +809,42 @@ class AdvancedArabicPlayerDetail(Screen):
         except Exception as e:
             my_log("TorrServer Error: {}".format(e))
             callInMainThread(self["status"].setText, "TorrServer Error: {}".format(str(e)[:30]))
+        finally:
+            # [PATCH 80] every early return above used to leave _extracting stuck True
+            if token is not None:
+                with self._extract_lock:
+                    if token == self._extract_token:
+                        self._extracting = False
 
     def _showProxyWarningPopup(self, msg):
         self.session.open(MessageBox, msg, MessageBox.TYPE_WARNING, timeout=8)
 
     def _onQualityChoices(self, url, qual, final_ref, variants, server):
         if getattr(self, "_closed", False): return
+        # [B3] if a stored quality preference matches an available variant,
+        # auto-play it directly instead of showing the menu
+        try:
+            _pk = _quality_pref_key(self._raw_title or self._item.get("title", ""))
+            if _pk:
+                _pl = str(_get_config(_pk, "") or "").strip()
+                if _pl:
+                    for _lbl, _vurl in (variants or []):
+                        if str(_lbl).strip().lower() == _pl.lower():
+                            # [PATCH 96] same viability rule as the menu filter below: with a
+                            # tokened master, tokenless / cross-host variants are dead links
+                            try:
+                                _mu0 = urlparse(url)
+                                if _mu0.query and not (urlparse(_vurl).query
+                                                       and urlparse(_vurl).netloc == _mu0.netloc):
+                                    continue
+                            except Exception:
+                                pass
+                            my_log("quality pref: auto-selecting '{}' for key '{}'".format(_pl, _pk))
+                            self._onStreamFound(_vurl, _pl, final_ref, server)
+                            return
+        except Exception as e:
+            my_log("quality pref check failed: {}".format(e))
+
         choices = [{
             "label": qual or "افتراضي",
             "url": url,
@@ -826,9 +852,6 @@ class AdvancedArabicPlayerDetail(Screen):
             "server": server,
         }]
         seen_urls = {url}
-        # Drop variants that cannot actually play: a tokened master makes
-        # tokenless variants dead, and cross-domain variants without the
-        # auth query are dead too.
         try:
             _mu = urlparse(url)
             if _mu.query:
@@ -906,11 +929,6 @@ class AdvancedArabicPlayerDetail(Screen):
         threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
 
     def _applyQualityCap(self, url):
-        """[PATCH 25] max-quality cap: when max_quality is set (not Auto)
-        and the stream is an HLS master playlist, fetch the manifest and
-        rewrite the play URL to the best rendition at or below the cap.
-        Every failure path (not a master, no renditions, fetch error)
-        returns the ORIGINAL url — the cap can never break playback."""
         try:
             cap = str(_get_config("max_quality", "auto") or "auto").strip().lower()
             if cap in ("", "auto"):
@@ -932,11 +950,11 @@ class AdvancedArabicPlayerDetail(Screen):
             from extractors.base import fetch
             text, _final = fetch(base, extra_headers=headers)
             if not text or "#EXT-X-STREAM-INF" not in text:
-                return url                     # media playlist — no menu to pick from
+                return url
             from urllib.parse import urljoin
             lines = [l.strip() for l in text.splitlines()]
-            best = None        # tallest rendition <= cap
-            smallest = None    # smallest overall (fallback when all are above cap)
+            best = None
+            smallest = None
             i = 0
             while i < len(lines):
                 if lines[i].startswith("#EXT-X-STREAM-INF"):
@@ -1022,22 +1040,9 @@ class AdvancedArabicPlayerDetail(Screen):
             header_str = "&".join(["{}={}".format(k, v) for k, v in headers.items()])
             pure_url = main_url.split("|")[0].strip()
             url = pure_url + "#" + header_str if header_str else pure_url
-            # [PATCH 25] quality cap — swap in the best ≤cap HLS rendition
             url = self._applyQualityCap(url)
 
-            # v4.4 (Edit A): snapshot this server's quality variants —
-            # get_last_quality_variants() holds the result of the resolver
-            # run that produced stream_url (auto bg-extract for the first
-            # server, or the on-demand extract when the user picks one).
-            # NOTE: this only works together with the _SharedQualityStore
-            # fix in extractors/htmlmedia.py — with the old
-            # threading.local() storage the main thread always saw [].
             if variants is not None:
-                # Trust the caller's own extract_stream() result — it was
-                # computed under _quality_lock in this same call, so it
-                # can't be contaminated by a concurrent extraction on
-                # another screen. An empty list here means "this stream
-                # genuinely has no alternates," not "go check the global."
                 _qv = variants or None
                 if _qv:
                     my_log("quality: passing {} variant(s) to player".format(len(_qv)))
@@ -1072,7 +1077,7 @@ class AdvancedArabicPlayerDetail(Screen):
                         _save_position(_iu, 0)
                     _play(self.session, _u, _t, resume_pos=_sp if _ans else 0, item_url=_iu,
                           next_episode=_ne, on_next=_cb, poster_url=_po,
-                          quality_variants=_qv)      # v4.4 (Edit B)
+                          quality_variants=_qv)
                 self["status"].setText("جاري فتح المشغل...")
                 self.session.openWithCallback(_on_resume, MessageBox, resume_text, MessageBox.TYPE_YESNO, timeout=8, default=True)
             else:
@@ -1080,7 +1085,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 _play(self.session, url, title, resume_pos=0, item_url=_item_url,
                       next_episode=self._next_episode, on_next=self._playNextEpisode,
                       poster_url=self._osd_poster,
-                      quality_variants=_qv)          # v4.4 (Edit C)
+                      quality_variants=_qv)
             from extractors.base import get_proxy_used
             if get_proxy_used():
                 self["status"].setText("✓ Proxy  " + self["status"].getText())
@@ -1123,8 +1128,6 @@ class AdvancedArabicPlayerDetail(Screen):
         entry = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else None
         if not entry:
             return
-        # [PATCH 21] watch-or-download choice — same pattern as the
-        # magnet action prompt (_promptMagnetAction)
         self.session.openWithCallback(
             lambda c: self._onDownloadActionChosen(c, entry),
             ChoiceBox,
@@ -1145,10 +1148,6 @@ class AdvancedArabicPlayerDetail(Screen):
             threading.Thread(target=self._bgResolveAndDownload, args=(entry,), daemon=True).start()
 
     def _bgResolveAndWatch(self, entry):
-        """[PATCH 21] Resolve a caught download link and hand the direct
-        URL to the player — same resolution chain as _bgResolveAndDownload,
-        but the result plays instead of downloads (many file hosts expose
-        direct .mp4/.m3u8 URLs that stream fine)."""
         try:
             from plugin_downloads import resolve_download_link
             resolved_url = resolve_download_link(entry["url"])
@@ -1245,11 +1244,9 @@ class AdvancedArabicPlayerDetail(Screen):
             self._active_download_task = None
 
 
-# module-level helpers the class body references (kept verbatim from
-# the monolith's call sites)
 from plugin_util import _site_label, _sort_servers            # noqa: E402
 from plugin_assets import placeholder_for_item                # noqa: E402
 
 
 def _get_extractor(site):
-    return get_extractor(site)            
+    return get_extractor(site)

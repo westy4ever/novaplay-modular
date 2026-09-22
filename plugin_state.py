@@ -4,6 +4,13 @@ Advanced Arabic Player - State / persistence
 ==============================================
 Config, favorites, history and saved-playback-position storage.
 
+Adds (this revision):
+  * [A1] _save_search_query() / _get_recent_searches() — persisting
+    the last 20 search queries; merged into _library_search_suggestions
+    as the highest-priority suggestion source.
+  * [B1] _clear_continue_item() — zeros an item's resume position so
+    the home screen's Continue-Watching strip drops it immediately.
+
 Changes in this revision (PATCH 50 — settings persistence fix):
   * _KEY_NAMES trimmed to the three real API keys. browser_proxy and
     torrserver_url were members, which made _save_state() STRIP them
@@ -13,40 +20,13 @@ Changes in this revision (PATCH 50 — settings persistence fix):
     They are connection settings, not credentials owned by api_keys.conf.
 
 Changes in the previous revision (PATCH 18 — threshold unification):
-  * _continue_items() filter aligned to >30s (was >60s) — matching
-    _get_saved_position's threshold, so a 45s watch shows consistently
-    in the strip AND the carousel/grid badges (previously strip-only
-    misses under 60s).
+  * _continue_items() filter aligned to >30s (was >60s).
 
 Changes in the previous revision (Continue-Watching support):
-  * NEW _continue_items(limit): the Continue-Watching row query for
-    the home screen. Returns history entries that have a resumable
-    position (> 30s), sorted by _pos_ts (watch recency) with
-    _saved_at as tiebreaker, deduped by url. Read by
-    AdvancedArabicPlayerHome._paintContinueRow in plugin.py.
+  * NEW _continue_items(limit): the Continue-Watching row query.
   * _save_position() now stamps item["_pos_ts"] = now on every
-    in-memory update, so the continue row sorts by when you last
-    *progressed* in a title, not when the entry was created. The
-    stamp rides along with the existing throttled disk write —
-    zero extra flash writes.
-  * _upsert_library_item() preserves _pos_ts (the way it already
-    preserves last_position_sec), so re-playing an item doesn't
-    reset its recency ordering.
-
-Changes in the previous revision (kept for reference):
-  * _save_position() no longer rewrites the state file on every 20s
-    position tick. Paused playback now writes NOTHING (it used to
-    fsync the identical state every 20s — ~1,400 pointless flash
-    writes overnight); active playback writes at most once per
-    _POS_DISK_MIN_DELTA (60s) of NEW progress; backward seeks (>30s)
-    write immediately; `force=True` flushes on demand. The in-memory
-    value that _get_saved_position() reads stays current on every
-    tick.
-  * The state MUTATORS (_set_config / _upsert_library_item /
-    _toggle_favorite_entry / _save_position) now run under an RLock,
-    so a future background-thread caller can't interleave its dict
-    mutation with a concurrent _save_state() json.dump. Readers stay
-    unsynchronized — all current read sites are on the main thread.
+    in-memory update.
+  * _upsert_library_item() preserves _pos_ts.
 
 NOTE: This does NOT include the live in-memory position tracker
 (_GLOBAL_POS_TIMER / _global_pos_tick / _start_pos_tracker /
@@ -68,23 +48,14 @@ _DEFAULT_TMDB_API_KEY = "46b050dc88e3c52e9d1bca4b656036e4"
 PLUGIN_PATH = os.path.dirname(__file__)
 
 _STATE_CACHE = None
-# RLock (not Lock): the mutators below wrap _load_state()/_save_state(),
-# which each acquire the same lock — a plain Lock would self-deadlock.
 _STATE_LOCK = threading.RLock()
 
-# ─── position disk-write throttling ──────────────────────────────────────
-_POS_DISK_MIN_DELTA = 60  # seconds of NEW progress before the file is rewritten
+_POS_DISK_MIN_DELTA = 60
 _POS_DISK_LAST = {"url": "", "sec": 0}
 
-# ─── api_keys.conf support ──────────────────────────────────────────────
 _KEYS_FILE = os.path.join(os.path.dirname(__file__), "api_keys.conf")
-# [PATCH 50] browser_proxy and torrserver_url REMOVED from this tuple:
-# as members, _save_state() stripped them from the state file on every
-# write, so a proxy or TorrServer URL set in the Settings screen was
-# lost on restart. They are connection settings, not credentials owned
-# by api_keys.conf. The three remaining keys ARE credentials and stay
-# file-owned.
-_KEY_NAMES = ("tmdb_api_key", "subsource_api_key", "opensubtitles_api_key")
+_KEY_NAMES = ("tmdb_api_key", "subsource_api_key", "opensubtitles_api_key",
+              "opensubtitles_user", "opensubtitles_pass")     # [PATCH 91]
 
 
 def _state_path():
@@ -103,18 +74,16 @@ def _default_state():
         "config": {
             "owner": _PLUGIN_OWNER,
             "tmdb_api_key": _DEFAULT_TMDB_API_KEY,
-            "browser_proxy": "",   # external proxy URL
-            "torrserver_url": "http://127.0.0.1:8090", # TorrServer URL
+            "browser_proxy": "",
+            "torrserver_url": "http://127.0.0.1:8090",
         },
         "favorites": [],
         "history": [],
+        "search_history": [],
     }
 
 
 def _load_api_keys_file(state):
-    """Optional api_keys.conf next to the plugin: KEY=value lines.
-    Values here WIN over state (edit the file, restart, done) and are
-    never written back — the file is the owner of these keys."""
     try:
         if not os.path.exists(_KEYS_FILE):
             return
@@ -150,8 +119,6 @@ def _load_state():
                     state["config"] = dict(_default_state()["config"], **(loaded.get("config") or {}))
         except Exception as e:
             _log("State load error: {}".format(e))
-            # Last-good twin: a corrupt main file no longer resets
-            # favorites/history to defaults.
             try:
                 with open(path + ".bak", "r") as f:
                     loaded = json.load(f)
@@ -172,8 +139,6 @@ def _save_state(state=None):
         _STATE_CACHE = state or _STATE_CACHE or _default_state()
         path = _state_path()
         tmp  = path + ".tmp"
-        # api_keys.conf owns these keys: strip them from the state copy
-        # so a state restore/backup never fights the file.
         _out = dict(_STATE_CACHE)
         _cfg = dict(_out.get("config") or {})
         for _k in _KEY_NAMES:
@@ -205,10 +170,50 @@ def _get_config(key, default=""):
     return value
 
 
+def _write_api_key_to_file(key, value):
+    """[PATCH 79] api_keys.conf owns the credential keys (_save_state strips them
+    from the state file), so a key entered in Settings must be written HERE or
+    it is lost on restart. Preserves comments and other lines; atomic; 0600."""
+    try:
+        value = str(value or "").replace("\r", "").replace("\n", "").strip()
+        lines = []
+        if os.path.exists(_KEYS_FILE):
+            with open(_KEYS_FILE, "r") as f:
+                lines = f.read().splitlines()
+        new_line = "{}={}".format(key, value)
+        out, done = [], False
+        for line in lines:
+            s = line.strip()
+            if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == key:
+                if not done:
+                    out.append(new_line)
+                    done = True
+                continue
+            out.append(line)
+        if not done:
+            out.append(new_line)
+        tmp = _KEYS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("\n".join(out) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, 0o600)
+        except Exception:
+            pass
+        os.rename(tmp, _KEYS_FILE)
+        return True
+    except Exception as e:
+        _log("api_keys.conf write error: {}".format(e))
+        return False
+
+
 def _set_config(key, value):
     with _STATE_LOCK:
         state = _load_state()
         state.setdefault("config", {})[key] = value
+        if key in _KEY_NAMES:
+            _write_api_key_to_file(key, value)      # [PATCH 79]
         _save_state(state)
 
 
@@ -240,9 +245,6 @@ def _upsert_library_item(bucket, entry, limit=100):
             for _old in items:
                 if _old.get("url") == key and _old.get("last_position_sec"):
                     entry["last_position_sec"] = _old["last_position_sec"]
-                    # Preserve the watch-recency stamp too, so re-playing
-                    # an item keeps (rather than resets) its Continue-row
-                    # ordering.
                     entry["_pos_ts"] = _old.get("_pos_ts") or 0
                     break
         items = [i for i in items if i.get("url") != key]
@@ -290,16 +292,10 @@ def _get_saved_position(url):
 def _save_position(url, seconds, force=False):
     """Record playback position.
 
-    Memory is updated on every call (so _get_saved_position is always
-    current); the on-disk state file is rewritten only when:
-      - forced (force=True — playback stop / plugin exit), or
-      - >= _POS_DISK_MIN_DELTA seconds of NEW progress, or
-      - the position JUMPED BACKWARD by > 30s (a seek — persist intent)
-    Paused playback (same seconds as stored) writes nothing at all.
-
-    Every in-memory update also stamps item["_pos_ts"] (watch
-    recency for the Continue-Watching row) — it reaches disk with
-    the next throttled write, at no extra cost.
+    Memory is updated on every call; the on-disk state file is rewritten
+    only when forced, or >= _POS_DISK_MIN_DELTA seconds of NEW progress,
+    or the position jumped backward by > 30s. Paused playback writes
+    nothing at all.
     """
     seconds = int(seconds or 0)
     if 0 < seconds < 30:
@@ -310,7 +306,7 @@ def _save_position(url, seconds, force=False):
         for item in (state.get("history") or []):
             if item.get("url") == url:
                 if item.get("last_position_sec") == seconds:
-                    return  # paused / no progress — memory matches, skip disk write
+                    return
                 old_pos = int(item.get("last_position_sec") or 0)
                 item["last_position_sec"] = seconds
                 item["_pos_ts"] = int(time.time())
@@ -326,11 +322,67 @@ def _save_position(url, seconds, force=False):
                 return
 
 
+# ── [B1] Continue-Watching removal ────────────────────────────────────
+def _clear_continue_item(url):
+    """Zero an item's resume position so it drops off the Continue strip."""
+    if not url:
+        return
+    with _STATE_LOCK:
+        state = _load_state()
+        for item in (state.get("history") or []):
+            if item.get("url") == url:
+                item["last_position_sec"] = 0
+                item["_pos_ts"] = 0
+                _save_state(state)
+                return
+
+
+# ── [A1] Search history ──────────────────────────────────────────────
+def _save_search_query(query):
+    """Record a submitted search query. Most-recent-first, deduped
+    case-insensitively, capped at 20."""
+    q = re.sub(r"\s+", " ", (query or "")).strip()
+    if len(q) < 2:
+        return
+    with _STATE_LOCK:
+        state = _load_state()
+        rows = state.setdefault("search_history", [])
+        ql = q.lower()
+        rows = [r for r in rows if str(r).lower() != ql]
+        rows.insert(0, q)
+        state["search_history"] = rows[:20]
+        _save_state(state)
+
+
+def _get_recent_searches(limit=10):
+    rows = _load_state().get("search_history") or []
+    return [str(r) for r in rows[:limit] if r]
+
+
 def _library_search_suggestions(query="", current_site="", limit=8):
     from plugin_util import _normalize_query
     q = _normalize_query(query)
     rows = []
     seen = set()
+
+    # [A1] Recent searches — highest priority (-1 source rank)
+    for r in _get_recent_searches(10):
+        nr = _normalize_query(r)
+        if not nr or nr in seen:
+            continue
+        if q:
+            if nr == q:               score = 0
+            elif nr.startswith(q):    score = 1
+            elif q in nr:             score = 2
+            else:                     continue
+        else:
+            score = 3
+        seen.add(nr)
+        rows.append((score, -1, -int(time.time()), {
+            "title": r, "query": r,
+            "source": "بحث سابق", "site": "", "kind": "", "year": "",
+        }))
+
     for source_name, items, source_rank in (
         ("المفضلة", _favorite_items(), 0),
         ("السجل", _history_items(), 1),
@@ -343,14 +395,10 @@ def _library_search_suggestions(query="", current_site="", limit=8):
             if not norm or norm in seen:
                 continue
             if q:
-                if norm == q:
-                    score = 0
-                elif norm.startswith(q):
-                    score = 1
-                elif q in norm:
-                    score = 2
-                else:
-                    continue
+                if norm == q:              score = 0
+                elif norm.startswith(q):   score = 1
+                elif q in norm:            score = 2
+                else:                      continue
             else:
                 score = 5
             if current_site and item.get("_site") == current_site:
@@ -375,26 +423,11 @@ def _library_search_suggestions(query="", current_site="", limit=8):
 
 def _continue_items(limit=7):
     """Continue-Watching row: most-recently-watched history entries
-    that still have a resumable position.
-
-    Filter: position > 30s ([PATCH 18] unified with _get_saved_position
-    — was 60, which hid 45s partial watches from the strip while the
-    grid showed them). EOF playback zeroes the position so finished
-    titles drop out.
-    Sort: _pos_ts (last position progress) descending, _saved_at as
-    tiebreaker for pre-upgrade entries that lack _pos_ts.
-    Dedupe: by url — history can hold at most one entry per url, but
-    the guard costs nothing and keeps the row stable if that ever
-    changes.
-
-    Reads the in-memory state, so the row updates immediately after
-    playback exits (no disk round-trip needed). Call sites are on the
-    main thread, consistent with the other unsynchronized readers.
-    """
+    that still have a resumable position (>30s, dedup by url, sorted
+    by watch recency)."""
     rows = []
     for item in (_load_state().get("history") or []):
         pos = int(item.get("last_position_sec") or 0)
-        # [PATCH 18] threshold unified to 30 — matches _get_saved_position
         if pos <= 30 or not item.get("url"):
             continue
         if not (item.get("poster") or item.get("title")):

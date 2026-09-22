@@ -3,13 +3,19 @@
 Advanced Arabic Player - Custom grid widgets (resolution-aware)
 ================================================================
 
+[PATCH 63] continue strip pushed down y=95 → y=110 so the strip no
+  longer crowds its "متابعة المشاهدة" label; home grid anchor also
+  moved y=410 → y=425 in plugin_screen_home.py to keep a 30px gap.
+[PATCH 62] shrunken continue strip (220x330 → 190x285, gap 16 → 20) and
+  home site grid (313x260 → 290x230) so the taller dual-calendar top
+  bar fits without crowding.
 [PATCH 61] navigation performance: plugin_screen_home now memoizes
   pixmap paths so setPixmapFromFile only runs when the path actually
   changed (was re-decoding on every arrow key and every poll tick —
   the size bump in 59/60 made that visible).
 [PATCH 60] continue-strip ratio was wrong (240:280 ≈ 0.857, near
   square, while posters are 2:3 ≈ 0.667) — resizeCover was squashing
-  every poster. Strip is now 220x330 (proper 2:3).
+  every poster. Strip is now a proper 2:3 (190x285 after PATCH 62).
 [PATCH 59] home site grid 4x2 → 6x2 (narrower tiles); continue strip
   6 @ 240x280 (was 180x200).
 [PATCH 58] poster-grid selection bar hoisted out of the listbox into
@@ -256,14 +262,13 @@ class _BaseCardGrid(GUIComponent):
     def preWidgetDelete(self, instance): instance.setContent(None)
 
 
-# --- Home site-menu grid (design: 6x2 cells of 313x260 @1080p) ---
-# [PATCH 60] row height 280 → 260 so 2 rows fit the 520px frame the
-# screen now reserves (grid anchor moved to y=440 to clear the bigger
-# 2:3 continue strip).
+# --- Home site-menu grid (design: 6x2 cells of 290x230 @1080p) ---
+# [PATCH 62] shrunken from 313x260 → 290x230 to visually balance the
+# shrunken continue strip below.
 HOME_GRID_COLS = 6
 HOME_GRID_ROWS = 2
-HOME_CELL_W = sc(313)
-HOME_CELL_H = sc(260)
+HOME_CELL_W = sc(290)
+HOME_CELL_H = sc(230)
 HOME_CELL_MARGIN = sc(12)
 HOME_BORDER_W = max(2, sc(4))
 HOME_CELL_INNER_W = HOME_CELL_W - 2 * HOME_CELL_MARGIN
@@ -505,32 +510,30 @@ def build_carousel_xml():
         # [PATCH 53] year badge — red box, top-left (matches grid)
         parts.append('<widget name="cyearBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
         parts.append('<widget name="cresumeMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
-        # [PATCH 54] watch-progress bar — gold fill, bottom edge
-        parts.append('<widget name="cbar{i}" position="0,0" size="1,1" backgroundColor="#FFD740" transparent="0" cornerRadius="2" zPosition="7" />'.format(i=i))
+        # [PATCH 84] the carousel progress-bar widgets were declared but never
+        # created in the Home screen (no code draws them) — removed
     return "\n".join(parts)
 
 
 # --- Continue-watching strip (design space @1080p) -------------------------
-# [PATCH 60] posters were 240x280 (0.857 — nearly square). Poster artwork
-# is 2:3 (≈0.667), so resizeCover was cover-cropping every poster into a
-# squashed frame — this is why strip posters looked "strange" in size.
-# Back to a proper 2:3 shape: 220x330 (bigger than the original 180x200,
-# and the same silhouette as the poster grid's 210x330). Width check:
-#   6*220 + 5*16 = 1400px  (fits 1920 with X0=45 margin)
+# [PATCH 63] CONT_Y 95 → 110 so "متابعة المشاهدة" has a proper gap
+# before the strip starts. Strip bottom now 110+285 = 395.
+# [PATCH 62] shrunken 220x330 → 190x285 with 20px gaps.
+# Total width: 6*190 + 5*20 = 1240px.
 CONT_SLOTS = 6
-CONT_W = 220
-CONT_H = 330
-CONT_GAP = 16
+CONT_W = 190
+CONT_H = 285
+CONT_GAP = 20
 CONT_X0 = 45
-CONT_Y = 95
+CONT_Y = 110
 
 
 def build_continue_row_xml():
-    # cont_title stays above the taller strip: 65 + 30 = 95 = strip top.
+    # cont_title stays above the strip: 65 + 30 = 95, then 15px gap to 110.
     parts = ['<widget name="cont_title" position="45,65" size="1300,30" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="7" />']
-    # [PATCH 57] contSel is now a thin right-edge bar (matches poster
-    # grid's selection strip) and lives ABOVE the poster pixmaps so the
-    # zoomed poster can't cover it. Was: cornerRadius="8", zPosition="3".
+    # [PATCH 57] contSel is a thin right-edge bar (matches poster grid's
+    # selection strip) and lives ABOVE the poster pixmaps so the zoomed
+    # poster can't cover it.
     parts.append('<widget name="contSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="6" transparent="0" />')
     for i in range(CONT_SLOTS):
         parts.append('<widget name="cont%d" position="%d,%d" size="%d,%d" zPosition="4" alphatest="blend" scale="1" />'

@@ -281,6 +281,15 @@ def _decorate_item_title(item, site=None):
 
     return "{} {}".format(prefix, title)
 
+def _split_episode_label(title):
+    """[PATCH 81] 'S01E05: Pilot' -> ('S01E05', 'Pilot'); anything else ->
+    ('', title) so it lands in the wide name column instead of the 130px one."""
+    title = (title or "Episode").strip()
+    m = re.match(r'^(S\d{1,3}E\d{1,4})\s*[:\-\u2013]?\s*(.*)$', title, re.I)
+    if m:
+        return m.group(1).upper(), m.group(2).strip()
+    return "", title
+
 
 # ─── Plot text selection ─────────────────────────────────────────────────────
 

@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """NovaPlay — settings screen + tools & diagnostics menu.
-Includes the showMenu/mainMenu MENU-key fix and the Subtitle Settings
-entry (both were missing from the monolith's live version)."""
+
+Adds (this revision):
+  * [A2] "📥 Downloads Manager" entry in the tools menu, opening
+    the new AdvancedArabicPlayerDownloads screen.
+  * [A3] "⏭️ Next-Episode Delay" entry — a ChoiceBox for the seconds
+    the auto-next card counts down before auto-starting.
+"""
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
@@ -17,6 +22,7 @@ from plugin_state import _get_config, _set_config, _PLUGIN_OWNER, _favorite_item
 from plugin_util import _site_label, _site_tagline
 from novaplay_diagnostics import NovaDiagnosticsScreen
 from install_dependencies import open_installer_with_restart, open_restart_prompt
+from plugin_screen_downloads import AdvancedArabicPlayerDownloads
 
 
 class AdvancedArabicPlayerSettings(Screen):
@@ -66,10 +72,6 @@ class AdvancedArabicPlayerSettings(Screen):
                 "yellow": self._edit_tmdb_key,
                 "blue": self._edit_torrserver_url,
                 "showEventInfo": self._clear_tmdb_key,
-                # MENU → tools on every image: "showMenu" is what
-                # InfobarMenuActions actually delivers on this keymap;
-                # "menu" (MenuActions) and "mainMenu" (ButtonSetupActions,
-                # openPLi/DreamOS) cover the rest.
                 "menu": self._open_tools_menu,
                 "showMenu": self._open_tools_menu,
                 "mainMenu": self._open_tools_menu,
@@ -96,24 +98,30 @@ class AdvancedArabicPlayerSettings(Screen):
         maxq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
         if maxq not in ("AUTO", "480P", "720P", "1080P"):
             maxq = "AUTO"
+        try:
+            _nxdelay = int(_get_config("next_episode_delay", "10") or 10)
+        except Exception:
+            _nxdelay = 10
         body = (
             "NovaPlay Media Center v{version}\n\n"
             "واجهة العرض: {layout_style}\n"
             "محتوى الكبار: {adult_status}\n"
-            "جودة البث القصوى: {maxq}\n\n"
+            "جودة البث القصوى: {maxq}\n"
+            "مدة العد التنازلي للحلقة التالية: {nxdelay} ثانية\n\n"
             "TMDb:\n• الحالة: {tmdb_status}\n• المفتاح: {tmdb_key}\n\n"
             "TorrServer:\n• الحالة: {ts_status}\n• العنوان: {ts_url}\n\n"
             "Browser Proxy:\n• الحالة: {proxy_status}\n• العنوان: {proxy_addr}\n\n"
             "المكتبة:\n• المفضلة: {fav_count}\n• السجل: {hist_count}\n\n"
             "طريقة الاستخدام:\n• أخضر: تبديل عرض محتوى الكبار\n"
             "• أحمر: Proxy\n• أصفر: TMDb API Key\n• أزرق: TorrServer URL\n"
-            "• Menu: الأدوات والتشخيص (ترجمة، تشخيص، تثبيت، إعادة تشغيل)\n"
+            "• Menu: الأدوات والتشخيص (ترجمة، تشخيص، تثبيت، إعادة تشغيل، التنزيلات)\n"
             "• Info: حذف مفتاح TMDb"
         ).format(
             version=_PLUGIN_VERSION,
             layout_style=layout.upper(),
             adult_status="مفعل (ظهر)" if adult == "true" else "مخفي (آمن للعائلة)",
             maxq=maxq,
+            nxdelay=_nxdelay,
             tmdb_status="مفعل" if api_key else "غير مفعل",
             tmdb_key=("********" + api_key[-4:]) if api_key else "غير مضبوط",
             ts_status="مفعل" if ts_url else "غير مفعل",
@@ -136,7 +144,7 @@ class AdvancedArabicPlayerSettings(Screen):
         _set_config("browser_proxy", v)
         try:
             from extractors.base import set_browser_proxy
-            set_browser_proxy(v)          # same validated value that was saved
+            set_browser_proxy(v)
         except Exception: pass
         self._refresh()
 
@@ -159,17 +167,20 @@ class AdvancedArabicPlayerSettings(Screen):
         self._refresh()
 
     def _open_tools_menu(self):
-        """Tools & diagnostics: diagnostics, dependency install,
-        subtitle settings (API keys / folder / auto-attach / cache),
-        Enigma2 restart."""
         _mq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
         if _mq not in ("AUTO", "480P", "720P", "1080P"):
             _mq = "AUTO"
+        try:
+            _nxdelay = int(_get_config("next_episode_delay", "10") or 10)
+        except Exception:
+            _nxdelay = 10
         choices = [
             ("🛠️ System Diagnostics", "diagnostics"),
+            ("📥 Downloads Manager — التنزيلات", "downloads"),
             ("📦 Install Missing Dependencies", "install_deps"),
             ("🎬 Subtitle Settings — ترجمة", "subtitles"),
             ("🎚️ Max Stream Quality — الجودة القصوى ({})".format(_mq), "maxq"),
+            ("⏭️ Next-Episode Delay — العد التنازلي ({}ث)".format(_nxdelay), "nxdelay"),
             ("🔄 Restart Enigma2", "restart"),
         ]
         self.session.openWithCallback(
@@ -185,6 +196,8 @@ class AdvancedArabicPlayerSettings(Screen):
         action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
         if action == "diagnostics":
             self.session.open(NovaDiagnosticsScreen)
+        elif action == "downloads":
+            self.session.open(AdvancedArabicPlayerDownloads)
         elif action == "install_deps":
             open_installer_with_restart(self.session)
         elif action == "subtitles":
@@ -192,13 +205,12 @@ class AdvancedArabicPlayerSettings(Screen):
             self.session.open(NovaSubtitleSettings)
         elif action == "maxq":
             self._openMaxQuality()
+        elif action == "nxdelay":
+            self._openNextDelay()
         elif action == "restart":
             open_restart_prompt(self.session)
 
     def _openMaxQuality(self):
-        """[PATCH 27] stream quality cap. When set, playback automatically
-        picks the best HLS rendition at or below the cap (_applyQualityCap
-        in the detail screen); Auto = whatever the site serves."""
         current = str(_get_config("max_quality", "auto") or "auto").strip().lower()
         options = [
             ("Auto — تلقائي (أعلى جودة متاحة)", "auto"),
@@ -220,4 +232,32 @@ class AdvancedArabicPlayerSettings(Screen):
 
         self.session.openWithCallback(_picked, ChoiceBox,
                                       title="Max Stream Quality — الجودة القصوى",
+                                      list=items)
+
+    def _openNextDelay(self):
+        try:
+            current = int(_get_config("next_episode_delay", "10") or 10)
+        except Exception:
+            current = 10
+        options = [
+            ("5 ثوانٍ", 5), ("10 ثوانٍ (افتراضي)", 10), ("15 ثانية", 15),
+            ("20 ثانية", 20), ("30 ثانية", 30), ("60 ثانية", 60),
+        ]
+        items = []
+        for label, value in options:
+            mark = "● " if value == current else "   "
+            items.append(("{}{}".format(mark, label), value))
+
+        def _picked(choice):
+            if not choice:
+                return
+            value = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
+            try:
+                _set_config("next_episode_delay", str(int(value)))
+            except Exception:
+                pass
+            self._refresh()
+
+        self.session.openWithCallback(_picked, ChoiceBox,
+                                      title="Next-Episode Delay — العد التنازلي",
                                       list=items)

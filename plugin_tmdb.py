@@ -204,7 +204,7 @@ def _tmdb_pick_best(results, query, year=""):
     query_norm = _normalize_query(query)
     target_year = (year or "")[:4]
     scored = []
-    for result in results or []:
+    for idx, result in enumerate(results or []):     # [PATCH 85]
         # Get both localized title and original title
         title = result.get("title") or result.get("name") or ""
         original_title = result.get("original_title") or result.get("original_name") or ""
@@ -226,7 +226,7 @@ def _tmdb_pick_best(results, query, year=""):
             score -= 1
             
         # Sort by score, then by original title to avoid weird alphabetical mismatches
-        scored.append((score, (original_title or title).lower(), result))
+        scored.append((score, idx, result))      # [PATCH 85] ties keep TMDB's popularity order
     scored.sort(key=lambda row: (row[0], row[1]))
     return scored[0][2] if scored else None
 

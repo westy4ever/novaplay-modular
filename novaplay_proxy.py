@@ -157,7 +157,8 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie):
             m = _URI_ATTR_RE.search(s)
             if m:
                 s = (s[:m.start()] + 'URI="%s"' % _proxied(
-                    urljoin(base_url, m.group(1)), referer, ua, cookie))
+                    urljoin(base_url, m.group(1)), referer, ua, cookie)
+                     + s[m.end():])          # [PATCH 65] keep IV=, BYTERANGE=, etc.
             out.append(s)
         else:
             out.append(_proxied(urljoin(base_url, s), referer, ua, cookie))
@@ -391,7 +392,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
 
             _log("Proxy: {} {}".format(method, stream_url[:120]))
             _PROXY_LAST_HIT = time.time()
-            _PROXY_LAST_BYTES = 0
+            # [PATCH 87] no per-request reset: the player resets the counters per candidate
             _PROXY_LAST_URL = stream_url
             _bump("requests")
 

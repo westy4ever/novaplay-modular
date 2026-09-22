@@ -22,19 +22,23 @@ with the full UX update set baked in:
   * [PATCH 57] continue-watching strip: same selection signal as the
     poster grid — right-edge 6px cyan bar + ~8% zoom + recenter
   * [PATCH 58] poster-grid selection bar hoisted to a dedicated widget
-    ("pgridSel", z=5) so the 8% zoom can never paint over it — that
-    was why the bar only showed while a poster was still loading
-  * [PATCH 59] home site grid: 4x2 → 6x2 (narrower tiles); continue
-    strip: 6 @ 240x280 (was 180x200)
-  * [PATCH 60] continue-strip ratio was wrong (240:280 ≈ 0.857, near
-    square, while posters are 2:3 ≈ 0.667) — resizeCover was squashing
-    every poster. Strip is now 220x330 (proper 2:3); home grid anchor
-    pushed y=400 → y=440 to clear it
-  * [PATCH 61] memoized pixmap paths so setPixmapFromFile only runs
-    when a path actually changed; the poll tick is 1s instead of 600ms;
-    the continue-strip fallback no longer decodes full-size originals.
-    These were the three things that made navigation feel "heavy"
-    after the strip got bigger.
+    ("pgridSel", z=5) so the 8% zoom can never paint over it
+  * [PATCH 59] home site grid 4x2 → 6x2
+  * [PATCH 60] continue-strip proper 2:3 aspect
+  * [PATCH 61] memoized pixmap paths (navigation performance)
+  * [PATCH 62] shrunken continue strip (190x285) + home grid (290x230)
+  * [PATCH 63] continue strip pushed down y=95 → y=110, grid anchor
+    y=410 → y=425, and the dual-calendar block shifted further right
+    with both date lines right-aligned to the screen's edge
+  * [PATCH 64] home-screen polish (4 fixes):
+      1. version string restored in _showHome (title_bar)
+      2. _source = "search" set on results so Back returns home
+      3. empty continue strip now shows a hint instead of a blank band
+      5. blocked-sites summary always reflects current state (was
+         only set when discovered mid-session, and never cleared)
+  * [PATCH 65] Bucket B additions:
+      B1 — MENU on a Continue-Watching card → "remove from continue?"
+      B2 — number keys 1–9 jump to that page in grid/list modes
 """
 
 import os
@@ -69,7 +73,7 @@ from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _set_config,
     _is_favorite, _get_saved_position,
     _continue_items, _library_search_suggestions,
-    _history_items)
+    _history_items, _clear_continue_item)                     # [B1]
 from plugin_util import (_site_label, _site_tagline, _site_search_item,
     _wrap_ui_text, _single_line_text, _dedupe_items, _rank_search_items,
     _strip_arabic_from_english_title)
@@ -77,6 +81,9 @@ from plugin_tmdb import _tmdb_enabled, _tmdb_search_metadata
 from plugin_screen_detail import AdvancedArabicPlayerDetail
 from plugin_screen_search import AdvancedArabicPlayerSearch
 from novaplay_thread import callInMainThread
+
+# Dual-calendar helper — must exist as novaplay_dualclock.py
+from novaplay_dualclock import format_dual_dates
 
 _SEARCH_SITE_ORDER = get_search_site_order()
 
@@ -89,12 +96,20 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="backdropImg" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" scale="1" />
         <widget name="shade_overlay" position="0,0" size="1920,1080" backgroundColor="#0D1117" transparency="150" zPosition="2" />
         <widget name="title_bar"  position="0,0"     size="1920,80" backgroundColor="#0D1117" zPosition="6" />
-        <widget name="title_text" position="45,6"    size="1100,36" font="Regular;28" foregroundColor="#00E5FF" transparent="1" zPosition="7" />
-        <widget name="status"     position="1150,8"  size="725,30"  font="Regular;22" foregroundColor="#FFD740" transparent="1" halign="right" zPosition="7" />
+        <widget name="title_text" position="45,6"    size="600,36"  font="Regular;28" foregroundColor="#00E5FF" transparent="1" zPosition="7" />
+
+        <!-- Dual-calendar block — tight cluster pinned to right edge -->
+        <widget name="clock_time"   position="1440,4"  size="110,34" font="Regular;30" halign="right" valign="center" foregroundColor="#F0F6FC" transparent="1" zPosition="7" />
+        <widget name="clock_period" position="1555,10" size="60,26"  font="Regular;18" halign="left"  valign="center" foregroundColor="#8B949E" transparent="1" zPosition="7" />
+        <widget name="clock_sep"    position="1625,8"  size="2,34"   backgroundColor="#30363D" zPosition="7" />
+        <widget name="clock_greg"   position="1637,4"  size="268,34" font="Regular;20" halign="right" valign="center" foregroundColor="#F0F6FC" transparent="1" zPosition="7" />
+        <widget name="clock_hijri"  position="1637,42" size="268,32" font="Regular;20" halign="right" valign="center" foregroundColor="#FFD740" transparent="1" zPosition="7" />
+
+        <widget name="status"     position="660,8"   size="520,30"  font="Regular;22" foregroundColor="#FFD740" transparent="1" halign="right" zPosition="7" />
         <widget name="content_title" position="40,95"  size="1200,50"  font="Bold;38" foregroundColor="#00E5FF" transparent="1" zPosition="5" halign="left" valign="top" />
         <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="5" halign="left" />
         <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
-        <widget name="home_grid" position="20,440" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        <widget name="home_grid" position="20,425" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
         <widget name="poster_grid" position="40,90" size="1840,820" scrollbarMode="showNever" transparent="1" zPosition="3" />
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
@@ -114,8 +129,8 @@ class AdvancedArabicPlayerHome(Screen):
     """
 
     _HOME_GRID_X = 20
-    _HOME_GRID_Y = 440          # [PATCH 60] was 400 — pushed down to clear
-                                # the taller 2:3 continue strip
+    _HOME_GRID_Y = 425          # [PATCH 63] was 440 — moved up 15px after
+                                # the strip moved down to y=110, 30px gap
     _POSTER_GRID_X = 40
     _POSTER_GRID_Y = 90
     carousel_slots = 7
@@ -160,6 +175,12 @@ class AdvancedArabicPlayerHome(Screen):
         self["title_bar"]  = Label("")
         self["title_text"] = Label("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
         self["status"]     = Label("جاري التحميل...")
+        # Dual-calendar widget registration
+        self["clock_time"]   = Label("")
+        self["clock_period"] = Label("")
+        self["clock_sep"]    = Label("")
+        self["clock_greg"]   = Label("")
+        self["clock_hijri"]  = Label("")
         self["content_title"] = Label("")
         self["info_meta"]  = Label("")
         self["info_plot"]  = Label("")
@@ -229,7 +250,8 @@ class AdvancedArabicPlayerHome(Screen):
         self.onClose.append(self._onPluginClose)
 
         self["actions"] = ActionMap(
-            ["OkCancelActions", "ColorActions", "DirectionActions", "InfobarMenuActions"],
+            ["OkCancelActions", "ColorActions", "DirectionActions",
+             "InfobarMenuActions", "NumberActions", "MenuActions"],   # [B2]
             {
                 "ok":     self._onOk,
                 "cancel": self._onBack,
@@ -241,11 +263,29 @@ class AdvancedArabicPlayerHome(Screen):
                 "down":   self._navDown,
                 "left":   self._navLeft,
                 "right":  self._navRight,
+                # [B1] MENU on a Continue-Watching card → remove prompt
+                "menu":     self._onMenu,
+                "showMenu": self._onMenu,
+                # [B2] number keys → jump to that page in grid/list mode
+                "1": lambda: self._pageJump(1),
+                "2": lambda: self._pageJump(2),
+                "3": lambda: self._pageJump(3),
+                "4": lambda: self._pageJump(4),
+                "5": lambda: self._pageJump(5),
+                "6": lambda: self._pageJump(6),
+                "7": lambda: self._pageJump(7),
+                "8": lambda: self._pageJump(8),
+                "9": lambda: self._pageJump(9),
             }, -1
         )
 
         self._artworkPollTimer = eTimer()
         self._artworkPollTimer.callback.append(self._pollArtworkCache)
+
+        # Dual-calendar timer — 1s tick, paints immediately
+        self._clockTimer = eTimer()
+        self._clockTimer.callback.append(self._tickClock)
+        self.onLayoutFinish.append(self._startClock)
 
         self.onLayoutFinish.append(self._init)
 
@@ -256,6 +296,25 @@ class AdvancedArabicPlayerHome(Screen):
                 except: pass
         self._applyCarouselGeometry()
         self._showHome()
+
+    # ── Dual-calendar ───────────────────────────────────────────────────
+    def _startClock(self):
+        """Paint once immediately, then tick every second."""
+        self._tickClock()
+        try:
+            self._clockTimer.start(1000, False)
+        except Exception as e:
+            my_log("clock timer start failed: {}".format(e))
+
+    def _tickClock(self):
+        try:
+            greg, hijri, t, period = format_dual_dates()
+            self["clock_time"].setText(t)
+            self["clock_period"].setText(period)
+            self["clock_greg"].setText(greg)
+            self["clock_hijri"].setText(hijri)
+        except Exception as e:
+            my_log("clock tick error: {}".format(e))
 
     def _moveResize(self, key, x, y, w, h):
         try:
@@ -298,7 +357,8 @@ class AdvancedArabicPlayerHome(Screen):
         self._display_mode = "home"
         self._page   = 1
         self._nav_stack = []
-        self["title_text"].setText("NovaPlay Media Center")
+        # [PATCH 64 fix 1] version restored (was overwritten to bare title)
+        self["title_text"].setText("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
         self["status"].setText("")
         site_items = []
         for key, title, tagline in get_home_sites():
@@ -308,9 +368,14 @@ class AdvancedArabicPlayerHome(Screen):
                 "_action": "site_" + key,
                 "_health": plugin_health.get(key),
             })
+        # [PATCH 64 fix 5] always reflect CURRENT blocked count, and
+        # explicitly clear the status line when none are blocked
         blocked = plugin_health.blocked_sites()
         if blocked:
-            self["status"].setText("⚠ %d موقع محجوب (Cloudflare) — فعّل بروكسي المتصفح من الإعدادات" % len(blocked))
+            self["status"].setText("⚠ %d/%d محجوب — فعّل البروكسي" % (
+                len(blocked), len(site_items)))
+        else:
+            self["status"].setText("")
         self._items = site_items
         self["home_grid"].setList(self._items)
         self._showHomeMode()
@@ -613,30 +678,10 @@ class AdvancedArabicPlayerHome(Screen):
                     try:
                         from plugin_watched import is_watched
                         if is_watched(item.get("url")):
-                            _dp = plugin_imagecache.buildCachePath(
-                                url + "|bw", target_size=(POSTER_W, POSTER_H))
-                            if not os.path.exists(_dp):
-                                _data = plugin_imagecache.downloadUrl(url, timeout=8)
-                                _dim = None
-                                if _data:
-                                    try:
-                                        from PIL import Image, ImageOps
-                                        import io as _io
-                                        _img2 = plugin_imagecache.resizeCover(
-                                            _data, (POSTER_W, POSTER_H), darken=0.35)
-                                        if _img2:
-                                            _im = Image.open(_io.BytesIO(_img2)).convert("RGB")
-                                            _im = ImageOps.grayscale(_im)
-                                            _buf = _io.BytesIO()
-                                            _im.save(_buf, format="JPEG", quality=88)
-                                            _dim = _buf.getvalue()
-                                    except Exception:
-                                        _dim = plugin_imagecache.resizeCover(
-                                            _data, (POSTER_W, POSTER_H), darken=0.35)
-                                if _dim is not None:
-                                    plugin_imagecache.writeFileAtomic(_dp, _dim)
-                            if os.path.exists(_dp):
-                                path = _dp
+                            _bw = plugin_imagecache.getBwVariant(
+                                url, (POSTER_W, POSTER_H))      # [PATCH 86] worker thread
+                            if _bw:
+                                path = _bw
                     except Exception:
                         pass
                 if path:
@@ -904,7 +949,7 @@ class AdvancedArabicPlayerHome(Screen):
                 p = plugin_imagecache.getCachedImage(u, target_size=(CONT_W, CONT_H))
                 if not p:
                     # Do NOT fall back to full-size here — decoding a
-                    # 500x750 original into a 220x330 widget every tick
+                    # larger original into a smaller widget every tick
                     # was the real hammer. Leave whatever's already
                     # painted (a placeholder) until the right size lands.
                     continue
@@ -1026,7 +1071,9 @@ class AdvancedArabicPlayerHome(Screen):
                 except Exception: pass
             self._updateContinueLabel()
         else:
-            self["cont_title"].hide()
+            # [PATCH 64 fix 3] show a hint instead of a blank band
+            self["cont_title"].setText("لا يوجد محتوى قيد المشاهدة — ابدأ من الشبكة أدناه")
+            self["cont_title"].show()
             self._resetContinueZoom()
 
     def _updateContinueLabel(self):
@@ -1080,6 +1127,57 @@ class AdvancedArabicPlayerHome(Screen):
         self._moveResize("contSel", base_x + CONT_W + 2, CONT_Y, bar_w, CONT_H)
         self["contSel"].show()
         self._updateContinueLabel()
+
+    # ── [B1] MENU handler on Continue-Watching ──────────────────────────
+    def _onMenu(self):
+        """[B1] MENU on a Continue-Watching card → remove-from-continue."""
+        if (self._display_mode == "home" and self._focus_zone == "row"
+                and self._cont_items
+                and 0 <= self._cont_index < len(self._cont_items)):
+            item = self._cont_items[self._cont_index]
+            url = item.get("url", "")
+            title = item.get("title", "")
+            if not url:
+                return
+            def _confirm(ans, _url=url, _title=title):
+                if not ans:
+                    return
+                try:
+                    _clear_continue_item(_url)
+                    my_log("continue strip: removed '{}'".format(_title[:50]))
+                except Exception as e:
+                    my_log("clear continue item failed: {}".format(e))
+                self._paintContinueRow()
+            self.session.openWithCallback(
+                _confirm, MessageBox,
+                u"إزالة من متابعة المشاهدة؟\n{}".format(_single_line_text(title, width=40, fallback="عنصر")),
+                MessageBox.TYPE_YESNO, timeout=8, default=False)
+
+    # ── [B2] number-key page jump ───────────────────────────────────────
+    def _pageJump(self, page_num):
+        """[B2] Number keys 1-9 → jump to that page in grid/list modes."""
+        if self._display_mode == "poster":
+            if self._layout_style != "grid":
+                return    # carousel has no fixed pages
+            grid = self["poster_grid"]
+        elif self._display_mode == "list":
+            grid = self["text_list"]
+        else:
+            return        # home-mode has no pages
+        try:
+            target = max(0, min(int(page_num) - 1, grid.totalPages - 1))
+            if target == grid.currentPage:
+                return
+            grid.currentPage = target
+            grid.currentRow = 0
+            grid.currentCol = 0
+            grid._updateIndex()
+            grid._redraw()
+            grid._notify()
+            self._updateGridFooter()
+            self["status"].setText("صفحة {} / {}".format(target + 1, grid.totalPages))
+        except Exception as e:
+            my_log("pageJump error: {}".format(e))
 
     # ── Key handlers ────────────────────────────────────────────────────
     def _onOk(self):
@@ -1386,6 +1484,7 @@ class AdvancedArabicPlayerHome(Screen):
     def _showLibrary(self, kind):
         if kind == "favorites": items = _get_favorite_items_list()
         else: items = _history_items()
+        self._source = "library"          # [PATCH 89]
         self._setList(items)
         self["title_text"].setText("المفضلة" if kind == "favorites" else "السجل")
         self["status"].setText("")
@@ -1438,6 +1537,9 @@ class AdvancedArabicPlayerHome(Screen):
         if not items:
             self["status"].setText("لا توجد نتائج")
             return
+        # [PATCH 64 fix 2] tag source so Back from search results
+        # returns HOME, not "categories for the last-touched site"
+        self._source = "search"
         self._setList(_rank_search_items(items, query))
 
     def _openItem(self, item):
@@ -1501,6 +1603,9 @@ class AdvancedArabicPlayerHome(Screen):
         else: self._nextPage()
 
     def _onBack(self):
+        if self._source == "library":          # [PATCH 89] Back from favorites → Home
+            self._showHome()
+            return
         if self._display_mode == "poster":
             if len(getattr(self, "_page_history", [])) > 1 and self._source == "category":
                 self._prevPage()
@@ -1517,6 +1622,9 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _onPluginClose(self):
         try: self._artworkPollTimer.stop()
+        except: pass
+        # Stop the dual-calendar timer
+        try: self._clockTimer.stop()
         except: pass
         try: plugin_imagecache.cancelAsyncImages()
         except: pass

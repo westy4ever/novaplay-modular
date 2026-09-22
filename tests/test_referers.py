@@ -28,3 +28,8 @@ def test_garbage_input():
     get_referer("")     # must not raise
     get_referer(None)   # must not raise
     get_referer("not a url at all")  # must not raise
+
+def test_non_str_input_returns_empty():
+    assert get_referer(None) == ""
+    assert get_referer(None, default_self=False) == ""
+    assert get_referer(b"https://govid.live/e/x") == "https://faselhd.rip/"

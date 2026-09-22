@@ -55,14 +55,19 @@ def open_installer(session, offer_restart=True):
 
 
 def open_installer_with_restart(session):
-    """Same as open_installer, but automatically restarts the Enigma2 GUI
-    5s after the commands finish (the running plugin can't see freshly
-    pip-installed packages without a restart)."""
+    """[PATCH 92] Run the installer, then open the Enigma2 restart screen when
+    the console is closed (a running plugin can't see freshly pip-installed
+    packages without a restart)."""
     try:
         from Screens.Console import Console
-        session.open(Console, title="NovaPlay dependency installer (+GUI restart)",
-                     cmdlist=_DEPS_CMD + _RESTART_CMD + _cmd_quit(),
-                     closeOnSuccess=False)
+
+        def _after(*args):
+            open_restart_prompt(session)
+
+        session.openWithCallback(
+            _after, Console,
+            title="NovaPlay dependency installer",
+            cmdlist=list(_DEPS_CMD), closeOnSuccess=False)
         return True
     except Exception:
         return False

@@ -37,6 +37,11 @@ Fixes vs. the original revision:
     FULL shift; a live studio offset would double-apply
     (STUDIO.attach() preserves a live offset across re-attach).
 
+  * [PATCH 91] OpenSubtitles.com login support (username + password):
+    /login → Bearer token (cached ~20h) → /download. Real HTTP errors
+    reported (401/403 = bad login, 406 = quota). Also added the
+    credentials to the API Keys picker.
+
 NovaSubtitleBrowser._refresh and NovaSubtitleSettings are the plugin's
 ORIGINAL classes (verbatim); only the browser's _ok/_cancel handlers are
 new code (the original handlers were never shared).
@@ -1076,6 +1081,47 @@ def opensubtitles_search(title, video_url='', api_key=''):
     return True, '', unique[:80]
 
 
+# find
+# def opensubtitles_download(file_id, title, api_key=''):
+# replace
+_OS_TOKEN = {"token": "", "base": "", "user": "", "ts": 0}
+
+
+def _os_post_json(url, body, headers, timeout=25):
+    """[PATCH 91] POST a JSON string. Returns (json_or_None, http_status_or_0)."""
+    try:
+        req = _urlreq.Request(url, data=body.encode('utf-8'), headers=headers)
+        raw = _urlreq.urlopen(req, timeout=timeout).read()
+        return json.loads(raw.decode('utf-8', 'ignore')), 200
+    except _urlreq.HTTPError as e:
+        return None, int(getattr(e, 'code', 0) or 0)
+    except Exception:
+        return None, 0
+
+
+def _os_login(api_key):
+    """[PATCH 91] Returns (bearer_token, base_url) or ('', '') when no
+    credentials are configured or the login fails. Token cached ~20h."""
+    user = str(_cfg("opensubtitles_user", "")).strip()
+    pw = str(_cfg("opensubtitles_pass", "")).strip()
+    if not user or not pw:
+        return "", ""
+    if (_OS_TOKEN["token"] and _OS_TOKEN["user"] == user
+            and time.time() - _OS_TOKEN["ts"] < 20 * 3600):
+        return _OS_TOKEN["token"], _OS_TOKEN["base"]
+    js, _code = _os_post_json(_OS_BASE + '/login',
+                              json.dumps({'username': user, 'password': pw}),
+                              _os_headers(api_key, json_body=True), timeout=20)
+    if not isinstance(js, dict) or not js.get('token'):
+        return "", ""
+    host = (str(js.get('base_url') or '').replace('https://', '')
+            .replace('http://', '').strip().strip('/'))
+    base = ('https://%s/api/v1' % host) if host else ""
+    _OS_TOKEN.update({"token": str(js['token']), "base": base,
+                      "user": user, "ts": time.time()})
+    return _OS_TOKEN["token"], base
+
+
 def opensubtitles_download(file_id, title, api_key=''):
     api_key = str(api_key or '').strip()
     file_id = str(file_id or '').strip()
@@ -1085,25 +1131,25 @@ def opensubtitles_download(file_id, title, api_key=''):
         body = json.dumps({'file_id': int(file_id)})
     except (TypeError, ValueError):
         return False, 'Invalid OpenSubtitles file id.', ''
-    js = None
-    # POST returns JSON (text) — base.fetch is fine here.
-    if _BASE_FETCH is not None:
-        try:
-            text, _f = _BASE_FETCH(_OS_BASE + '/download',
-                                   extra_headers=_os_headers(api_key, json_body=True),
-                                   post_data=body)
-            if text:
-                js = json.loads(text)
-        except Exception:
-            js = None
+    # [PATCH 91] login (when credentials are set) → Bearer; real HTTP errors reported
+    creds = bool(str(_cfg("opensubtitles_user", "")).strip()
+                 and str(_cfg("opensubtitles_pass", "")).strip())
+    token, base = _os_login(api_key)
+    hdrs = _os_headers(api_key, json_body=True)
+    if token:
+        hdrs["Authorization"] = "Bearer " + token
+    js, code = _os_post_json((base or _OS_BASE) + '/download', body, hdrs)
     if js is None:
-        try:
-            req = _urlreq.Request(_OS_BASE + '/download', data=body.encode('utf-8'),
-                                  headers=_os_headers(api_key, json_body=True))
-            raw = _urlreq.urlopen(req, timeout=25).read()
-            js = json.loads(raw.decode('utf-8', 'ignore'))
-        except Exception:
-            return False, 'OpenSubtitles download failed.', ''
+        if code in (401, 403):
+            _OS_TOKEN["token"] = ""
+            if creds:
+                return False, 'OpenSubtitles rejected the login.\nCheck username / password.', ''
+            return False, ('OpenSubtitles needs a login to download.\n'
+                           'Add username + password in Subtitle Settings > API Keys.'), ''
+        if code == 406:
+            return False, 'OpenSubtitles download limit reached (HTTP 406).', ''
+        return False, 'OpenSubtitles download failed (%s).' % (
+            ('HTTP %d' % code) if code else 'network'), ''
     link = _ss_value(js, ('link', 'url', 'download_url'))
     if not link:
         return False, 'OpenSubtitles returned no download link.', ''
@@ -1227,7 +1273,20 @@ def _make_shifted_copy(path, offset_ms):
 
 
 def get_subtitle_state():
-    return dict(_CURRENT_SUB)
+    return dict(_CURRENT_SUB)          # a COPY — use update_subtitle_state() to write
+
+
+def update_subtitle_state(**kw):
+    """[PATCH 88] real writer for the in-session subtitle state."""
+    _CURRENT_SUB.update(kw)
+
+
+def has_subtitle_for(item_url):
+    """[PATCH 88] True when a subtitle is attached for THIS item, or remembered for it."""
+    item_url = str(item_url or "").strip()
+    if _CURRENT_SUB.get("path") and _CURRENT_SUB.get("item_url") == item_url:
+        return True
+    return bool(recall_subtitle(item_url)[0])        # a COPY — use update_subtitle_state() to write
 
 
 def adjust_sync(session, delta_ms):
@@ -1467,6 +1526,10 @@ def maybe_resume_subtitle(session, title, item_url=""):
     the eTimer callback (= main thread) and could freeze the UI for
     seconds right when the user reaches for the remote."""
     item_url = str(item_url or "").strip()
+    # [PATCH 88] drop the previous title's subtitle state NOW, not 3.5s later
+    if _CURRENT_SUB.get("item_url") != item_url:
+        _CURRENT_SUB.update({"item_url": item_url, "path": "",
+                             "_orig_path": "", "offset_ms": 0})
 
     def _do():
         try:
@@ -1605,16 +1668,22 @@ class NovaOnlineSubsScreen(Screen):
         except Exception:
             pass
         prov = _PROVIDERS[self.provider]
-        ok, error, results = prov["search"](title, self.video_url, self.api_key)
-        callInMainThread(self._onSearchDone, results or [])
+        try:
+            ok, error, results = prov["search"](title, self.video_url, self.api_key)
+        except Exception as e:      # [PATCH 90]
+            ok, error, results = False, "Search error: %s" % str(e)[:80], []
+        callInMainThread(self._onSearchDone, results or [], ("" if ok else (error or "")))
 
     def _downloadThread(self):
         prov = _PROVIDERS[self.provider]
-        ok, error, path = prov["download"](
-            self.chosen.get("id", ""), self.chosen.get("title", ""), self.api_key)
+        try:
+            ok, error, path = prov["download"](
+                self.chosen.get("id", ""), self.chosen.get("title", ""), self.api_key)
+        except Exception as e:      # [PATCH 90]
+            ok, error, path = False, "Download error: %s" % str(e)[:80], ""
         callInMainThread(self._onDownloadDone, bool(ok), error or "Download failed.", path or "")
 
-    def _onSearchDone(self, results):
+    def _onSearchDone(self, results, error=""):
         # FIX: user may EXIT while the search thread is in flight —
         # touching widgets on a closed screen raises.
         try:
@@ -1632,7 +1701,7 @@ class NovaOnlineSubsScreen(Screen):
             if label:
                 pairs.append((label, i))
         if not pairs:
-            self._fail('No subtitles found.')
+            self._fail(error or 'No subtitles found.')
             return
         self.results = [i for _, i in pairs]
         self["list"].setList([l for l, _ in pairs])
@@ -1920,29 +1989,35 @@ class NovaSubtitleSettings(Screen):
              _cfg("subtitle_dir", "/media/hdd/subtitles"), auto)
         self["body"].setText(txt)
 
+    _KEY_MAP = {
+        "subsource": "subsource_api_key",
+        "opensubtitles": "opensubtitles_api_key",
+        "os_user": "opensubtitles_user",
+        "os_pass": "opensubtitles_pass",
+    }
+
     def _chooseKey(self):
         entries = [
             ("SubSource API Key", "subsource"),
             ("OpenSubtitles API Key", "opensubtitles"),
+            ("OpenSubtitles username (for downloads)", "os_user"),
+            ("OpenSubtitles password (for downloads)", "os_pass"),
         ]
         self.session.openWithCallback(self._keyProviderChosen, ChoiceBox,
                                       title="API Keys", list=entries)
 
     def _keyProviderChosen(self, choice):
-        if not choice:
-            return
-        if VirtualKeyBoard is None:
+        if not choice or VirtualKeyBoard is None:
             return
         which = choice[1]
-        current = _ss_api_key() if which == "subsource" else _os_api_key()
+        current = str(_cfg(self._KEY_MAP[which], "")).strip()
         self.session.openWithCallback(
             lambda v: self._keyCb(which, v), VirtualKeyBoard,
-            title="%s API Key" % choice[0], text=current)
+            title=choice[0], text=current)
 
     def _keyCb(self, which, value):
         if value is not None and str(value).strip():
-            _cfg_set("subsource_api_key" if which == "subsource" else "opensubtitles_api_key",
-                     str(value).strip())
+            _cfg_set(self._KEY_MAP[which], str(value).strip())
         self._refresh()
 
     def _editDir(self):

@@ -40,6 +40,18 @@ def current_play_secs():
         return int(max(0, (time.time() - wall) + base))
     return 0
 
+def current_play_ms():
+    """[PATCH 69] same estimate as current_play_secs(), millisecond precision."""
+    with _GLOBAL_POS_LOCK:
+        wall = _GLOBAL_PLAY_START_WALL
+        base = _GLOBAL_PLAY_START_POS
+        paused = _GLOBAL_IS_PAUSED
+    if paused:
+        return int(max(0, base * 1000))
+    if wall:
+        return int(max(0, ((time.time() - wall) + base) * 1000))
+    return 0
+
 
 def _global_pos_tick():
     global _GLOBAL_POS_ITEM, _GLOBAL_PLAY_START_WALL, _GLOBAL_PLAY_START_POS

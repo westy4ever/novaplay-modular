@@ -9,6 +9,11 @@ CONSOLIDATED FILE — contains every amendment from the whole port
 (pipe-guard, encrypted-HLS refusal, fMP4 init segment, segment retries,
 .part cleanup, item_url, subtitle sidecar).
 
+[A2] Added a session-wide task registry so the new Downloads Manager
+screen can list active/finished/failed tasks. Tasks auto-register in
+DownloadTask.__init__ — every existing call site gets the benefit with
+zero changes.
+
 Changes in this revision (audit fixes):
   * _write_stream() buffers each HLS segment in memory and only appends
     to the output file after the segment downloaded completely. The old
@@ -75,6 +80,28 @@ SAFE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, 
 CHUNK_SIZE = 256 * 1024  # keeps RAM flat regardless of file size
 
 
+# ── [A2] Task registry ──────────────────────────────────────────────────
+_ALL_TASKS = []
+_TASKS_LOCK = threading.Lock()
+_TASK_CAP = 50
+
+
+def get_all_tasks():
+    """Newest-first copy of every DownloadTask created this session.
+    The Downloads Manager screen polls this."""
+    with _TASKS_LOCK:
+        return list(_ALL_TASKS)
+
+
+def clear_finished_tasks():
+    """Remove done/error/cancelled tasks from the registry. Active
+    downloads survive."""
+    global _ALL_TASKS
+    with _TASKS_LOCK:
+        _ALL_TASKS = [t for t in _ALL_TASKS
+                      if t.status in ("queued", "downloading")]
+
+
 def download_dir():
     d = (_get_config("download_dir", "") or "").strip()
     if not d:
@@ -97,6 +124,11 @@ class DownloadCancelled(Exception):
     pass
 
 
+class _LooksLikeHls(Exception):
+    """[PATCH 70] the 'direct' URL actually served an HLS manifest."""
+    pass
+
+
 class DownloadTask(object):
     """Tracks one in-progress download; cancel_flag lets the UI stop it."""
 
@@ -113,6 +145,15 @@ class DownloadTask(object):
         self.bytes_done = 0
         self.bytes_total = 0
         self.started_at = 0
+        self.finished_at = 0          # [A2] set on done/error/cancelled
+        # [A2] auto-register in the module registry
+        try:
+            with _TASKS_LOCK:
+                _ALL_TASKS.insert(0, self)
+                if len(_ALL_TASKS) > _TASK_CAP:
+                    del _ALL_TASKS[_TASK_CAP:]
+        except Exception:
+            pass
 
     def cancel(self):
         self.cancel_flag.set()
@@ -181,6 +222,8 @@ def download_direct(task, dest_path):
                         except Exception:
                             pass
                         head = chunk[:512].lstrip().lower()
+                        if head.startswith(b"#extm3u"):
+                            raise _LooksLikeHls()
                         if "text/html" in ctype or head.startswith(b"<!doctype") or head.startswith(b"<html"):
                             raise Exception("الرابط أعاد صفحة HTML وليس ملف فيديو — انتهت صلاحية الرابط، أعد المحاولة")
                     f.write(chunk)
@@ -200,11 +243,11 @@ def download_direct(task, dest_path):
 _M3U8_URL_RE = re.compile(r'^https?://', re.I)
 
 
-def _resolve_hls_media_playlist(m3u8_url, referer):
+def _resolve_hls_media_playlist(m3u8_url, referer, cookie=""):
     """If m3u8_url is a master (multi-variant) playlist, pick the
     highest-bandwidth variant and return its media-playlist URL + body;
     otherwise return (m3u8_url, body)."""
-    resp = _open_request(m3u8_url, referer)
+    resp = _open_request(m3u8_url, referer, cookie)
     body = resp.read().decode("utf-8", "ignore")
     resp.close()
     if not body.lstrip().startswith("#EXTM3U"):
@@ -234,7 +277,7 @@ def _resolve_hls_media_playlist(m3u8_url, referer):
             best_bw, best_url = bw, target
     if not best_url:
         return m3u8_url, body
-    resp2 = _open_request(best_url, referer)
+    resp2 = _open_request(best_url, referer, cookie)
     media_body = resp2.read().decode("utf-8", "ignore")
     resp2.close()
     return best_url, media_body
@@ -243,7 +286,7 @@ def _resolve_hls_media_playlist(m3u8_url, referer):
 def download_hls(task, dest_path):
     """Fetch an HLS stream (resolving a master playlist if needed) and
     concatenate all segments into a single playable .ts file."""
-    media_url, body = _resolve_hls_media_playlist(task.url, task.referer)
+    media_url, body = _resolve_hls_media_playlist(task.url, task.referer, task.cookie)
 
     # Refuse encrypted HLS — AES segments would concatenate into a
     # file that "downloads fine" and then refuses to play.
@@ -420,7 +463,7 @@ def resolve_download_link(url, referer=""):
     if "luluvdo.com" in domain or "lulustream" in domain:
         html, _ = _fetch(url, referer=referer or url)
         if html:
-            m = _re.search(r'https?://luluvdo\.com/([A-Za-z0-9]+)(?!["\'/])', html, _re.I)
+            m = _re.search(r'https?://luluvdo\.com/([A-Za-z0-9]+)(?![A-Za-z0-9"\'/])', html, _re.I)
             if m:
                 bare_url = "https://luluvdo.com/{}".format(m.group(1))
                 result = _resolve_host(bare_url)
@@ -519,22 +562,32 @@ def download_manager(task, title_hint=""):
     try:
         if ".m3u8" in lower:
             _log("download_manager: HLS strategy for {}".format(task.url[:100]))
-            download_hls(task, dest_path)
+            dest_path = download_hls(task, dest_path)
         else:
             _log("download_manager: direct strategy for {}".format(task.url[:100]))
-            download_direct(task, dest_path)
+            try:
+                download_direct(task, dest_path)
+            except _LooksLikeHls:
+                _log("download_manager: manifest behind a non-.m3u8 URL — switching to HLS")
+                task.bytes_done = 0
+                dest_path = os.path.splitext(dest_path)[0] + ".ts"
+                task.dest_path = dest_path
+                dest_path = download_hls(task, dest_path)
         task.status = "done"
+        task.finished_at = time.time()          # [A2]
         try:
             _save_subtitle_sidecar(task, dest_path)
         except Exception as e:
             _log("sidecar subtitle skipped: {}".format(e))
     except DownloadCancelled:
         task.status = "cancelled"
+        task.finished_at = time.time()          # [A2]
         _remove_part(dest_path)
         raise
     except Exception as e:
         task.status = "error"
         task.error = str(e)
+        task.finished_at = time.time()          # [A2]
         _remove_part(dest_path)
         _log("download_manager error: {}".format(e))
         raise

@@ -440,6 +440,57 @@ def _ensure_async_workers():
             pass
 
 
+_BW_IN_PROGRESS = set()
+_BW_FAILED = set()
+
+
+def getBwVariant(url, target_size, darken=0.35):
+    """[PATCH 86] Watched-poster black & white variant, built from the ALREADY
+    CACHED grid-size poster on a worker thread. Returns the path once it exists,
+    "" until then (caller keeps painting the normal poster; the poll picks the
+    variant up). Never touches the network."""
+    try:
+        if not url:
+            return ""
+        bw_path = buildCachePath(url + "|bw", target_size=target_size)
+        if os.path.exists(bw_path):
+            touch(bw_path)
+            return bw_path
+        src = getCachedImage(url, target_size)
+        if not src:
+            return ""
+        with _ASYNC_LOCK:
+            if bw_path in _BW_IN_PROGRESS or bw_path in _BW_FAILED:
+                return ""
+            _BW_IN_PROGRESS.add(bw_path)
+    except Exception:
+        return ""
+
+    def _work():
+        ok = False
+        try:
+            from PIL import Image, ImageOps, ImageEnhance
+            import io
+            img = ImageOps.grayscale(Image.open(src).convert("RGB"))
+            if darken and darken < 1.0:
+                img = ImageEnhance.Brightness(img).enhance(darken)
+            out = io.BytesIO()
+            img.convert("RGB").save(out, format="JPEG", quality=88)
+            ok = writeFileAtomic(bw_path, out.getvalue())
+        except Exception as e:
+            _log("plugin_imagecache: bw variant failed for {}: {}".format(url[:60], e))
+        finally:
+            with _ASYNC_LOCK:
+                _BW_IN_PROGRESS.discard(bw_path)
+                if not ok:
+                    _BW_FAILED.add(bw_path)      # no retry every poll tick
+
+    t = threading.Thread(target=_work)
+    t.daemon = True
+    t.start()
+    return ""
+
+
 def cancelAsyncImages():
     """Stop pending artwork downloads for the screen that is closing.
 

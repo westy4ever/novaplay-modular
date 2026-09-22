@@ -67,13 +67,13 @@ def run_diagnostics(on_row, on_done):
             status = "ERROR: %s" % str(e)[:60]
         on_row(name, status)
 
-    import extractors.base as _b
+    import extractors.net as _n  
     import novaplay_proxy as _np
     from plugin_state import _get_config
 
-    add("curl_cffi (Cloudflare bypass)", lambda: _b._CURL_CFFI_OK)
-    add("brotli decompression", lambda: _b.brotli is not None)
-    add("external browser proxy configured", lambda: bool(_b._BROWSER_PROXY_URL))
+    add("curl_cffi (Cloudflare bypass)", lambda: _n._CURL_CFFI_OK)
+    add("brotli decompression", lambda: _n.brotli is not None)
+    add("external browser proxy configured", lambda: bool(_n._BROWSER_PROXY_URL))
     add("network / DNS", _net_ok)
     add("TMDB API key", lambda: bool(str(_get_config("tmdb_api_key", "")).strip()))
     add("SubSource API key (optional)", lambda: bool(str(_get_config("subsource_api_key", "")).strip()))
