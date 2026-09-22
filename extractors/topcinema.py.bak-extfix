@@ -574,15 +574,7 @@ class TopCinemaExtractor(BaseExtractor):
                     log("TopCinema: host-resolver fallback failed: {}".format(e))
                 log("TopCinema: no stream from embed {}".format(v_url))
                 return None, "", self._get_base(), []
-            # [PATCH 98] the AJAX reply had no <iframe>: report a clean failure (Detail shows
-            # "try another server") instead of falling off the end and returning None
-            log("TopCinema: no iframe in the server reply for {}".format(ajax_url))
-            return None, "", self._get_base(), []
-
-        # [PATCH 98] not a topcinema_server URL (direct link): let the generic resolvers handle it
-        from .base import extract_stream as _generic_extract
-        return _generic_extract(url)
-
+    
     def _quality_from_url(self, url):
         if not url:
             return ""

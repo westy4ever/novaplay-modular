@@ -10,6 +10,11 @@ parsed into the same {"resolution", "size", "quality", "url"} entry shape,
 and get_page() returns it under the "downloads" key so the shared
 plugin_downloads.resolve_download_link() -> download_manager() flow works
 unchanged for both extractors.
+
+FIX (2026-09-10): [PATCH 77] _extract_next_page_sarl no longer invents a
+next URL on the last page and no longer picks the first numbered link
+(which walked backwards on page 3+). It now only returns a real next
+link, or the numbered link matching current_page+1.
 """
 
 import re
@@ -369,62 +374,32 @@ class WecimaSarlExtractor(BaseExtractor):
         return cards
 
     def _extract_next_page_sarl(self, html, current_url):
-        """
-        Extract next page URL from wecima.sarl.
-        Based on the HTML snapshot, pagination uses ul.page-numbers.
-        """
+        """[PATCH 77] only a real next link, or the numbered link for page+1."""
         if not html:
             return ""
-        
-        # Look for pagination block
-        pagination_block = re.search(r'<div[^>]*class="[^"]*pagination[^"]*"[^>]*>(.*?)</div>', html, re.S | re.I)
-        pagination_html = pagination_block.group(1) if pagination_block else html
-        
-        # Primary patterns for 'next' or 'previous' links
-        patterns = [
-            r'<a[^>]+class="[^"]*next[^"]*"[^>]+href="([^"]+)"',
-            r'<a[^>]+rel="next"[^>]+href="([^"]+)"',
-            r'<a[^>]+href="([^"]+)"[^>]+rel="next"',
-            r'<a[^>]+class="[^"]*page-numbers[^"]*"[^>]+href="([^"]+)"[^>]*>(\d+)</a>',
-        ]
-        
-        for pat in patterns:
-            matches = re.findall(pat, pagination_html, re.I | re.S)
-            for match in matches:
-                if isinstance(match, tuple):
-                    url, num = match
-                else:
-                    url = match
-                    num = None
-                url = self._normalize_url(url)
-                if url and url != current_url:
-                    # Verify it's a next page link
-                    if 'page' in url.lower() or (num and int(num) > 0):
-                        log("Wecima.sarl: Found next page: {}".format(url))
+        m = re.search(r'/page/(\d+)', current_url or "")
+        nxt = (int(m.group(1)) if m else 1) + 1
+        pag = re.search(r'<div[^>]*class="[^"]*pagination[^"]*"[^>]*>(.*?)</div>', html, re.S | re.I)
+        scopes = [pag.group(1), html] if pag else [html]
+
+        for scope in scopes:
+            for pat in (
+                r'<a[^>]+class="[^"]*\bnext\b[^"]*"[^>]+href="([^"]+)"',
+                r'<a[^>]+rel="next"[^>]+href="([^"]+)"',
+                r'<a[^>]+href="([^"]+)"[^>]+rel="next"',
+            ):
+                mm = re.search(pat, scope, re.I | re.S)
+                if mm:
+                    url = self._normalize_url(mm.group(1))
+                    if url and url != current_url:
                         return url
-        
-        # Fallback: Try to infer next page from current URL
-        if not current_url:
-            return ""
-        
-        # Check if current URL has a page number
-        page_match = re.search(r'/page/(\d+)/?', current_url)
-        if page_match:
-            current_page = int(page_match.group(1))
-            next_page = current_page + 1
-            # Construct the next page URL
-            new_url = re.sub(r'/page/\d+', '/page/{}'.format(next_page), current_url)
-            log("Wecima.sarl: Constructed next page from current URL: {}".format(new_url))
-            return new_url
-        else:
-            # No page number in URL, assume it's page 1
-            base_url = current_url.rstrip('/')
-            # Check if there is a query string
-            if '?' in base_url:
-                return base_url + '&page=2'
-            else:
-                return base_url + '/page/2/'
-        
+
+        scope = scopes[0]
+        for href, num in re.findall(r'<a[^>]+href="([^"]+)"[^>]*>\s*(\d+)\s*</a>', scope, re.I | re.S):
+            if int(num) == nxt:
+                url = self._normalize_url(href)
+                if url and url != current_url:
+                    return url
         return ""
 
     def _decode_wecima_url(self, encoded):

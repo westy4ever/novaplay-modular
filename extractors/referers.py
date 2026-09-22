@@ -88,10 +88,16 @@ def get_referer(url, default_self=True):
     """Referer for a URL: longest matching table key wins (so
     'web5106x.faselhdx.bid' hits the 'web5106x' entry, not 'faselhdx').
     None entries = self-referer. default_self=False returns "" instead."""
+    # [PATCH 78] urlparse(None) returns a bytes result instead of raising,
+    # which then blew up on `frag in host`
+    if isinstance(url, bytes):
+        url = url.decode("utf-8", "ignore")
+    elif not isinstance(url, str):
+        url = ""
     try:
         host = urlparse(url).netloc.lower()
     except Exception:
-        host = str(url or "").lower()
+        host = url.lower()
     best_key = ""
     best_val = ""
     for frag, ref in _REFERER_TABLE.items():

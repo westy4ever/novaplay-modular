@@ -97,6 +97,18 @@ class AkwamExtractor(BaseExtractor):
         
         return url
     
+    _NAV_PATH_RE = re.compile(r'^/?(?:movies|series|shows|mix|recent|category/[^/?]*)/?(?:\?.*)?$', re.I)
+
+    def _is_nav_link(self, href):
+        """[PATCH 75] section/listing links only — NOT /series/<id>/<slug> details."""
+        href = (href or "").strip()
+        if "#" in href or "/page/" in href or "/category/" in href:
+            return True
+        path = re.sub(r'^(?:https?:)?//[^/]+', '', href)
+        if not path.strip("/"):
+            return True
+        return bool(self._NAV_PATH_RE.match(path))
+
     def get_categories(self, mtype="movie"):
         """Return all available categories based on the new akwam.it layout."""
         base = self._get_base()
@@ -164,7 +176,7 @@ class AkwamExtractor(BaseExtractor):
             movie_url = link_match.group(1)
             
             # Filter out non-content links
-            if any(x in movie_url for x in ('/category/', '/page/', '/recent', '/movies', '/series', '/shows', '/mix', '#')):
+            if self._is_nav_link(movie_url):
                 continue
                 
             full_url = self._normalize_url(movie_url)
@@ -247,7 +259,7 @@ class AkwamExtractor(BaseExtractor):
                 continue
                 
             movie_url = link_match.group(1)
-            if any(x in movie_url for x in ('/category/', '/page/', '/recent', '/movies', '/series', '/shows', '/mix', '#')):
+            if self._is_nav_link(movie_url):
                 continue
                 
             full_url = self._normalize_url(movie_url)

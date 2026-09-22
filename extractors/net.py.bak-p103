@@ -344,19 +344,7 @@ def _encode_unicode_url(url):
         return url
 
 
-# [PATCH 103] URLs of these hosts appear on ordinary pages (analytics beacon, CDN libraries)
-_BENIGN_CF_URL_RE = re.compile(
-    r'https?://[^\s"\'<>]*(?:cloudflareinsights|cdnjs\.cloudflare)[^\s"\'<>]*', re.I)
-
-
 def _is_cloudflare_challenge(html):
-    """[PATCH 103] See _is_cloudflare_challenge_raw; benign Cloudflare-hosted URLs are ignored first."""
-    if html:
-        html = _BENIGN_CF_URL_RE.sub(" ", html)
-    return _is_cloudflare_challenge_raw(html)
-
-
-def _is_cloudflare_challenge_raw(html):
     if not html:
         return False
     html_lower = html.lower()

@@ -105,14 +105,13 @@ class ShaheedExtractor(BaseExtractor):
         final = (final_url or "").lower()
         if not text:
             return True
-        challenge_patterns = [
-            "just a moment", "cf-chl", "cf-turnstile",
-            "challenge", "cloudflare", "browser check",
-            "access denied", "blocked", "forbidden",
-            "captcha", "verify you are human",
-            "cf-browser-verification", "security check",
-        ]
-        if any(p in text for p in challenge_patterns):
+        # [PATCH 71] "cloudflare", "challenge", "captcha", "blocked" appear on normal
+        # pages (cdnjs.cloudflare.com, reCAPTCHA scripts, CSS class names)
+        hard = ("just a moment", "cf-chl", "cf-browser-verification",
+                "verify you are human", "enable javascript and cookies")
+        if any(p in text for p in hard):
+            return True
+        if len(text) < 20000 and any(p in text for p in ("cf-turnstile", "captcha", "access denied")):
             return True
         if any(m in final for m in self.BLOCKED_HOST_MARKERS):
             return True
@@ -177,7 +176,7 @@ class ShaheedExtractor(BaseExtractor):
                     if hash_val:
                         embed_url = "{}/embed-stream/{}".format(base_url.rstrip('/'), quote(hash_val))
                         # Get all qualities
-                        variants = extract_stream_all(embed_url)
+                        variants = []        # [PATCH 73] resolved lazily on play
                         if variants:
                             for stream_url, quality in variants:
                                 servers.append({
@@ -204,7 +203,7 @@ class ShaheedExtractor(BaseExtractor):
                             'adsco.re', 'intelligenceadx']
             if any(x in src.lower() for x in skip_domains):
                 continue
-            variants = extract_stream_all(src)
+            variants = []        # [PATCH 73]
             if variants:
                 for stream_url, quality in variants:
                     servers.append({

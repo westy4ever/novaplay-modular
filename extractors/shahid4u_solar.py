@@ -10,7 +10,10 @@ import sys
 import json
 import time
 import threading
-import requests
+try:
+    import requests
+except Exception:
+    requests = None      # [PATCH 74] a missing module used to break the whole extractors package
 from .base import BaseExtractor, fetch, log, urljoin
 
 if sys.version_info[0] == 3:
@@ -49,15 +52,17 @@ class Shahid4uSolarExtractor(BaseExtractor):
         self._resolved_base = None
         self._home_html = None
         self._home_last_fetch = 0
-        self._session = requests.Session()
-        self._session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Language": "ar,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-        })
+        self._session = None
+        if requests is not None:
+            self._session = requests.Session()
+            self._session.headers.update({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": "ar,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate",   # 'br' only decodes if brotli is installed
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            })
     
     def _host(self, url):
         try:
@@ -70,13 +75,9 @@ class Shahid4uSolarExtractor(BaseExtractor):
         final = (final_url or "").lower()
         if not text:
             return True
-        if "just a moment" in text and "cf-chl" in text:
+        if "just a moment" in text or "cf-chl" in text or "cf-browser-verification" in text:
             return True
-        if "cf-turnstile" in text:
-            return True
-        if "challenge" in text and "cloudflare" in text:
-            return True
-        if "access denied" in text or "blocked" in text:
+        if len(text) < 20000 and ("cf-turnstile" in text or "access denied" in text):
             return True
         if "alliance for creativity" in text:
             return True
@@ -144,6 +145,9 @@ class Shahid4uSolarExtractor(BaseExtractor):
         return self._resolved_base
     
     def _fetch_with_retry(self, url, referer=None, max_retries=3):
+        if self._session is None:                 # [PATCH 74] no requests → normal stack
+            _h, _f = fetch(url, referer=referer)
+            return (_h or ""), (_f or url)
         for attempt in range(max_retries):
             try:
                 headers = {}
@@ -435,7 +439,7 @@ class Shahid4uSolarExtractor(BaseExtractor):
                         name = "سيرفر"
                     
                     from .base import extract_stream_all
-                    variants = extract_stream_all(server_url)
+                    variants = []        # [PATCH 73] resolved lazily on play
                     if variants:
                         for stream_url, quality in variants:
                             servers.append({
@@ -466,7 +470,7 @@ class Shahid4uSolarExtractor(BaseExtractor):
                         continue
                     
                     from .base import extract_stream_all
-                    variants = extract_stream_all(src)
+                    variants = []        # [PATCH 73]
                     if variants:
                         for stream_url, quality in variants:
                             servers.append({
@@ -544,8 +548,11 @@ class Shahid4uSolarExtractor(BaseExtractor):
             return stream, None, referer
     
         try:
-            resp = self._session.get(url, headers={"Referer": referer}, timeout=10, allow_redirects=True)
-            if resp.status_code == 200:
+            if self._session is not None:
+                resp = self._session.get(url, headers={"Referer": referer}, timeout=10, allow_redirects=True)
+            else:
+                resp = None
+            if resp and resp.status_code == 200:
                 video_src = re.search(r'(?:src|data-src)=["\']([^"\']+\.(?:mp4|m3u8|webm)[^"\']*)["\']', resp.text, re.I)
                 if video_src:
                     return video_src.group(1), None, referer

@@ -52,7 +52,7 @@ class ImdbSuExtractor(BaseExtractor):
             page = int(page_match.group(1))
             url = url[:page_match.start()]
 
-        parts = url.split("_")
+        parts = url.split("_", 3)          # [PATCH 83] keep "top_rated" / "trending_week" whole
         if len(parts) < 4: return []
         media_type = parts[2]
         action = parts[3]

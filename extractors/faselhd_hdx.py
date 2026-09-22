@@ -92,10 +92,10 @@ class FaselhdHdxExtractor(BaseExtractor):
         if extra:
             hdrs.update(extra)
         
-        from .base import _BROWSER_PROXY_URL, _fetch_via_browser_proxy
-        if _BROWSER_PROXY_URL and ("video_player" in url or "player_token" in url):
+        from . import net as _net        # [PATCH 64] read the LIVE value, not an import-time copy
+        if _net._BROWSER_PROXY_URL and ("video_player" in url or "player_token" in url):
             log("faselhd_hdx: using external proxy for video_player page: {}".format(url[:80]))
-            proxy_html, proxy_final = _fetch_via_browser_proxy(url, referer=referer or self._get_base())
+            proxy_html, proxy_final = _net._fetch_via_browser_proxy(url, referer=referer or self._get_base())
             if proxy_html:
                 log("faselhd_hdx: proxy fetch successful ({} bytes)".format(len(proxy_html)))
                 return proxy_html, proxy_final or url

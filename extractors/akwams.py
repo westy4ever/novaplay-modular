@@ -478,13 +478,15 @@ class AkwamsExtractor(BaseExtractor):
         }
         
         # ── Extract metadata ──
+        raw_title = ""                                       # [PATCH 72]
         title_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S | re.I)
         if title_match:
-            result["title"] = self._clean_title(re.sub(r'<[^>]+>', '', title_match.group(1)).strip())
+            raw_title = re.sub(r'<[^>]+>', '', title_match.group(1)).strip()
         else:
             og_title = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html, re.I)
             if og_title:
-                result["title"] = self._clean_title(og_title.group(1))
+                raw_title = og_title.group(1)
+        result["title"] = self._clean_title(raw_title)
         
         poster_match = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html, re.I)
         if poster_match:
@@ -498,8 +500,8 @@ class AkwamsExtractor(BaseExtractor):
         if year_m:
             result["year"] = year_m.group(1)
         
-        is_series = ("مسلسل" in result["title"] or "/series" in url.lower() or "مسلسلات" in result["title"])
-        is_episode = "الحلقة" in result["title"] or "حلقة" in result["title"]
+        is_series = ("مسلسل" in raw_title or "/series" in url.lower())
+        is_episode = "الحلقة" in raw_title or "حلقة" in raw_title
         
         if is_episode:
             result["type"] = "episode"

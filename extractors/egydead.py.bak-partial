@@ -2,36 +2,22 @@
 """
 EgyDead extractor — WordPress site
 
-Canonical base: https://egydead.fyi/ (stable alias, redirects to the
-currently active mirror's homepage, e.g. https://tv10.egydead.live/h3/).
-
-Content pages on every mirror live at BARE paths (/category/...,
-/serie/..., /series-category/..., /season/..., /episode/...).  The
-rotating homepage prefix (h1, h2, h3, ...) applies ONLY to the homepage
-and MUST be stripped from the base — applying it to content URLs causes
-WordPress to fall back to the homepage for every category, making all
-listings appear identical.
+Canonical base: https://egydead.fyi/ (currently active domain)
+All remaining mirror domains redirect there. egydead.center (empty responses) and
+egydead.lat (DNS -> egydead.monster, unresolvable) have been removed
+from the probe list.
 
 Fixes applied in this revision:
-  * MAIN_URL is the stable alias https://egydead.fyi/.
-  * DOMAINS: egydead.fyi first (auto-redirects to the active mirror),
-    followed by the live tvN.egydead.live mirrors.
-  * _site_root() returns the bare origin (scheme://netloc/) — it no
-    longer keeps the rotating /hN/ prefix.
-  * _base_serves_deep_content() rejects landing domains that pass the
-    shallow check but return the same page for every deep URL.
-  * _full_url() percent-encodes non-ASCII bytes for ABSOLUTE URLs too.
-    EgyDead serves many posters with Arabic filenames
-    (…/فيلم-Sinners-2025-مترجم-217x280.jpg); the HTTP client used by
-    the plugin cannot put raw non-ASCII bytes in a request line.
-    Skipping encoding for absolute URLs was what caused Arabic-named
-    posters to fail in the grid while ASCII-named ones worked.
-  * _parse_movie_items() extracts the release/quality label
-    (CAM, HDTS, HD, WEB-DL, مدبلج, بالمصري, الاخيرة, …) into the item
-    dict as "label".  The UI does not read it yet — it is available for
-    a future badge widget.
+  * MAIN_URL updated to https://egydead.fyi/ (currently active domain)
+  * DOMAINS: reordered to probe eg.ydead.fyi first; removed dead domains
+    (egydead.center, egydead.lat, egydead.media, egydead.space, etc.)
+  * Added resolvers for: send.cm, vikingfile.com, streamwish.to, voe.sx,
+    byseragucu.com, vidhidevip.com
+  * Generic iframe resolution for download pages
+  * _site_root(): preserves the site's path prefix ("/h1/")
+  * Category URLs are built relative to the base so they resolve under /h1/
 
-Fixes carried over from previous revisions:
+Fixes carried over from previous revision:
   CRITICAL: _detect_quality_variants() was outdented to MODULE level and
             never bound to the class — every call raised AttributeError,
             breaking all direct .m3u8/.txt resolution. Now a real method.
@@ -136,26 +122,21 @@ _PROBE_HEADERS = {
 
 
 class EgyDeadExtractor(BaseExtractor):
-    """Extractor for EgyDead."""
+    """Extractor for EgyDead (canonical base: eg.ydead.fyi/)."""
 
-    # egydead.fyi is a stable alias that redirects to the current
-    # active mirror's homepage (e.g. tv10.egydead.live/h3/).
-    # Content pages on every mirror live at bare paths
-    # (/category/..., /serie/...), NOT under the rotating prefix.
+    # FIX: canonical base now uses the currently active domain
     MAIN_URL = "https://egydead.fyi/"
 
+    # FIX: reordered to probe the active domain first; removed dead domains
+    # (egydead.center, egydead.lat, egydead.media, egydead.space, etc.)
+    # to reduce probing time.
     DOMAINS = [
-        "https://egydead.fyi/",           # stable alias, redirects to active mirror
+        "https://egydead.fyi/",
+        "https://tv10.egydead.live/h1/",
         "https://tv10.egydead.live/",
         "https://tv9.egydead.live/",
         "https://tv8.egydead.live/",
         "https://tv7.egydead.live/",
-        "https://tv6.egydead.live/",
-        "https://tv5.egydead.live/",
-        "https://tv4.egydead.live/",
-        "https://tv3.egydead.live/",
-        "https://tv2.egydead.live/",
-        "https://tv1.egydead.live/",
         "https://tv.egydead.live/",
         "https://a46.egydead.live/",
         "https://www.egydead.live/",
@@ -223,59 +204,18 @@ class EgyDeadExtractor(BaseExtractor):
         )
 
     def _site_root(self, url):
-        """
-        Return the bare origin (scheme://netloc/) from a URL.
-
-        Content pages on EgyDead mirrors live at bare paths
-        (/category/..., /serie/..., /season/...), NOT under the rotating
-        homepage prefix (/h1/, /h2/, /h3/).  The prefix applies only to
-        the homepage and MUST be stripped so category and search URLs
-        resolve correctly.
-
-        Applying the prefix to content URLs causes WordPress to fall
-        back to the homepage for every category, making all listings
-        appear identical.
-        """
+        # FIX: preserve the site's path prefix. All EgyDead mirrors now
+        # redirect to https://egydead.fyi/ — the old version
+        # returned only scheme://netloc/ and silently dropped the "/h1/"
+        # prefix, producing a base whose category/search URLs 404.
+        # We keep only the FIRST path segment (a base is by definition
+        # the shallowest part), so deep redirects can't poison it.
         parts = urlparse(url)
+        path = (parts.path or "").strip("/")
+        if path:
+            first_seg = path.split("/")[0]
+            return "{}://{}/{}/".format(parts.scheme or "https", parts.netloc, first_seg)
         return "{}://{}/".format(parts.scheme or "https", parts.netloc)
-
-    def _base_serves_deep_content(self, base):
-        """
-        Confirm the candidate base actually serves listing pages, not
-        just a homepage/landing.
-
-        Some domains respond successfully to `/` but return the same
-        page for every deep URL — accepting them makes every category
-        collapse to the same items.
-        """
-        if not base:
-            return False
-
-        test_url = urljoin(base, "serie/")
-        try:
-            html, final = fetch(test_url, referer=base,
-                                extra_headers=_PROBE_HEADERS)
-        except Exception as e:
-            log("EgyDead: deep-content probe failed for {}: {}".format(base, e))
-            return False
-
-        if not html:
-            log("EgyDead: deep-content probe got empty body for {}".format(base))
-            return False
-        if self._is_blocked_page(html, final or ""):
-            log("EgyDead: deep-content probe blocked for {}".format(base))
-            return False
-
-        # A real /serie/ listing contains many movieItem <li> entries.
-        # A landing page does not.
-        n_items = html.count("movieItem")
-        if n_items < 10:
-            log("EgyDead: {} responded but only {} movieItem markers on "
-                "/serie/ — likely a landing, not a content mirror".format(
-                    base, n_items))
-            return False
-
-        return True
 
     def _get_base(self):
         """Get the base URL with caching and single-flight probing."""
@@ -331,30 +271,17 @@ class EgyDeadExtractor(BaseExtractor):
                     continue
 
                 if html and self._looks_like_egydead_page(html):
-                    # Strip any rotating homepage prefix (/h1/, /h2/,
-                    # /h3/, ...) — content pages are served at bare
-                    # paths on the same domain.
-                    candidate = self._site_root(final_url)
-
-                    # Deep-content probe: a landing domain passes the
-                    # shallow check but returns the same page for every
-                    # deep URL.  Reject it before locking it in.
-                    if not self._base_serves_deep_content(candidate):
-                        log("EgyDead: {} is not a content mirror — "
-                            "trying next domain".format(candidate))
-                        continue
-
-                    self._resolved_base = candidate
-                    self.main_url = candidate
+                    self._resolved_base = self._site_root(final_url)
+                    self.main_url = self._resolved_base
                     with _base_cache_lock:
-                        _base_cache["url"] = candidate
+                        _base_cache["url"] = self._resolved_base
                         _base_cache["resolved_at"] = now
                         _base_cache["probed_at"] = now
-                    log("EgyDead: selected base {}".format(candidate))
-                    return candidate
+                    log("EgyDead: selected base {}".format(self._resolved_base))
+                    return self._resolved_base
 
-            # Fallback: the stable alias.  All mirrors redirect through
-            # it anyway, so its origin is the safest guess we have.
+            # Fallback: the canonical /h1/ base (all mirrors redirect
+            # here anyway).
             self._resolved_base = self.MAIN_URL
             self.main_url = self._resolved_base
             with _base_cache_lock:
@@ -373,49 +300,40 @@ class EgyDeadExtractor(BaseExtractor):
 
     def _full_url(self, path):
         """
-        Resolve a relative or absolute URL against the base, then
-        percent-encode any non-ASCII bytes in the result.
-
-        The percent-encoding step MUST run for absolute URLs too:
-        EgyDead serves many posters with Arabic filenames
-        (…/فيلم-Sinners-2025-مترجم-217x280.jpg), and the HTTP client
-        used by the plugin cannot put raw non-ASCII bytes in a request
-        line.  Skipping encoding for absolute URLs was what caused
-        Arabic-named posters to fail in the grid while ASCII-named
-        ones worked.
+        Resolve a relative or absolute URL against the base.
+        FIXED: Better handling of various URL formats.
         """
         if not path:
             return ""
-
+        
         path = html_unescape(path.strip())
-
-        # Protocol-relative → https
+        
+        # Handle protocol-relative URLs
         if path.startswith("//"):
             path = "https:" + path
-
+            return path
+        
+        # Handle absolute URLs
         if path.startswith("http"):
-            full_url = path
-        else:
-            base = self._get_base()
-            full_url = urljoin(base, path)
-
-            # Collapse duplicate slashes in the path segment.
-            parsed = urlparse(full_url)
-            if "//" in parsed.path and parsed.path != "/":
-                cleaned_path = re.sub(r"/+", "/", parsed.path)
-                full_url = parsed._replace(path=cleaned_path).geturl()
-
-        # Percent-encode raw non-ASCII / URL-unsafe characters.  `safe`
-        # keeps the delimiters and any existing %XX escapes intact, so
-        # calling this twice is a no-op.
+            return path
+        
+        # Use urljoin which properly handles the base path
+        base = self._get_base()
+        full_url = urljoin(base, path)
+        
+        # Clean up double slashes in path
+        parsed = urlparse(full_url)
+        if '//' in parsed.path and parsed.path != '/':
+            cleaned_path = re.sub(r'/+', '/', parsed.path)
+            full_url = parsed._replace(path=cleaned_path).geturl()
+        
+        # Only re-quote when the URL actually contains raw URL-unsafe characters
         try:
-            if any(ord(c) > 127 for c in full_url) or any(
-                c in full_url for c in ' <>"\''
-            ):
-                full_url = quote(full_url, safe=":/?&=#+%")
+            if any(ord(c) > 127 for c in full_url) or any(c in full_url for c in ' <>"\''):
+                full_url = quote(full_url, safe=':/?&=#+%')
         except Exception:
             pass
-
+        
         return full_url
 
     def _pick_real_image(self, html_chunk):
@@ -559,19 +477,6 @@ class EgyDeadExtractor(BaseExtractor):
             cat_match = re.search(r'<span[^>]*class=["\'][^"\']*cat_name[^"\']*["\'][^>]*>(.*?)</span>', li, re.S | re.I)
             quality = self._strip_tags(cat_match.group(1)) if cat_match else ""
 
-            # Release/quality label (CAM, HDTS, HD, WEB-DL, مدبلج, بالمصري,
-            # الاخيرة, …).  Sits in a <span class="label"> next to cat_name.
-            # Not the same as `quality` (which is the site's category —
-            # افلام اجنبي etc.); this one tells the viewer what copy they
-            # are about to get.
-            label = ""
-            label_match = re.search(
-                r'<span[^>]*class=["\'][^"\']*\blabel\b[^"\']*["\'][^>]*>(.*?)</span>',
-                li, re.S | re.I
-            )
-            if label_match:
-                label = self._strip_tags(label_match.group(1)).strip()
-
             ep_num = ""
             ep_match = re.search(r'<span[^>]*class=["\'][^"\']*number_episode[^"\']*["\'][^>]*>.*?<em>(\d+)</em>', li, re.S | re.I)
             if ep_match:
@@ -599,7 +504,6 @@ class EgyDeadExtractor(BaseExtractor):
                     "url": url,
                     "poster": poster,
                     "plot": quality,
-                    "label": label,
                     "type": item_type,
                     "_action": "details",
                 })
@@ -706,7 +610,7 @@ class EgyDeadExtractor(BaseExtractor):
         FIXED: Properly handles ?page=N/ format with trailing slash.
         """
         next_href = ""
-
+        
         # Method 1: Look for "next" class (most common on EgyDead)
         next_match = re.search(r'<a[^>]*class="[^"]*next[^"]*"[^>]*href="([^"]+)"', html, re.I)
         if next_match:
@@ -720,12 +624,12 @@ class EgyDeadExtractor(BaseExtractor):
                     if href_m:
                         next_href = href_m.group(1)
                         break
-
+        
         if not next_href:
             return None
 
         raw_href = html_unescape(next_href.strip())
-
+        
         # Handle different URL formats
         if raw_href.startswith("http"):
             next_url = raw_href
@@ -734,6 +638,23 @@ class EgyDeadExtractor(BaseExtractor):
         else:
             # Handle relative URLs like "?page=2/"
             next_url = urljoin(current_url, raw_href)
+
+        # Ensure the next URL uses the resolved base
+        try:
+            parsed_next = urlparse(next_url)
+            parsed_base = urlparse(self._get_base())
+            
+            if parsed_next.netloc and parsed_base.netloc:
+                if parsed_next.netloc != parsed_base.netloc:
+                    # Keep the path from the next URL (which includes /h1/...)
+                    next_url = urljoin(
+                        "{}://{}".format(parsed_base.scheme, parsed_base.netloc),
+                        parsed_next.path
+                    )
+                    if parsed_next.query:
+                        next_url += "?" + parsed_next.query
+        except Exception as e:
+            log("EgyDead: Pagination URL rewrite error: {}".format(e))
 
         if next_url and next_url != current_url:
             return {
@@ -891,32 +812,6 @@ class EgyDeadExtractor(BaseExtractor):
                     pass
         return None
 
-    @staticmethod
-    def _streams_data(page):
-        """props.streams.data (a list) from an Inertia page dict, or None when it is not there."""
-        props = page.get("props") if isinstance(page, dict) else None
-        streams = props.get("streams") if isinstance(props, dict) else None
-        data = streams.get("data") if isinstance(streams, dict) else None
-        return data if isinstance(data, list) else None
-
-    def _inertia_partial(self, url, page, prop):
-        """[PATCH 100] Deferred prop: repeat the browser's partial-reload GET (headers copied from a real
-        capture) and return the parsed page. Needs the page's own `component` and `version`."""
-        hd = {
-            "X-Inertia": "true",
-            "X-Inertia-Version": str(page.get("version") or ""),
-            "X-Inertia-Partial-Data": prop,
-            "X-Inertia-Partial-Component": str(page.get("component") or ""),
-            "X-Inertia-Except-Once-Props": "video,config,ads",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "text/html, application/xhtml+xml",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-        }
-        body, _final = fetch(url, referer=url, extra_headers=hd)
-        return self._parse_inertia_page(body)
-
     def _megamax_groups(self, iframe_url):
         """[{"label","resolution","size","mirrors":[(driver, link), ...]}, ...] from the iframe page."""
         cands = [iframe_url]
@@ -925,20 +820,15 @@ class EgyDeadExtractor(BaseExtractor):
             cands.append("https://eg.megamax.cam" + m.group(0))
         for cand in cands:
             try:
-                html, final = self._fetch(cand, referer=self._get_base())
+                html, _final = self._fetch(cand, referer=self._get_base())
             except Exception as e:
                 log("EgyDead: MegaMax fetch failed {}: {}".format(cand, e))
                 continue
             page = self._parse_inertia_page(html)
-            data = self._streams_data(page)
-            if data is None and isinstance(page, dict) and page.get("component"):
-                try:
-                    data = self._streams_data(self._inertia_partial(final or cand, page, "streams"))
-                    log("EgyDead: MegaMax deferred streams via partial reload: {}".format(
-                        "ok" if data is not None else "not returned"))
-                except Exception as e:
-                    log("EgyDead: MegaMax partial reload failed: {}".format(e))
-            if data is None:
+            props = page.get("props") if isinstance(page, dict) else None
+            streams = props.get("streams") if isinstance(props, dict) else None
+            data = streams.get("data") if isinstance(streams, dict) else None
+            if not isinstance(data, list):
                 continue
             groups = []
             for g in data:
@@ -1017,15 +907,15 @@ class EgyDeadExtractor(BaseExtractor):
         """Get categories for the site. FIXED: Proper URL construction."""
         self._get_base()  # warm/resolves the base-domain cache
 
-        # FIX: Use _full_url() which properly handles the base origin.
-        # Content pages live at bare paths on the mirror.
+        # FIX: Use _full_url() which properly handles the /h1/ prefix
+        # All URLs are relative to the base
         if mtype == "movie":
             return [
                 {"title": "🎬 English Movies",        "url": self._full_url("category/english-movies/"),      "type": "category", "_action": "category"},
                 {"title": "🇪🇬 Arabic Movies",          "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/"),       "type": "category", "_action": "category"},
                 {"title": "🌏 Asian Movies",           "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/"),     "type": "category", "_action": "category"},
                 {"title": "🇹🇷 Turkish Movies",         "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/"),      "type": "category", "_action": "category"},
-                {"title": "🇮🇳 Indian Movies",          "url": self._full_url("category/hindi-movies/"),     "type": "category", "_action": "category"},
+                {"title": "🇮🇳 Indian Movies",          "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a%d8%a9/"),       "type": "category", "_action": "category"},
                 {"title": "🎭 Cartoon Movies",         "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/"),      "type": "category", "_action": "category"},
                 {"title": "🎌 Anime Movies",           "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/"),       "type": "category", "_action": "category"},
                 {"title": "📽️ Documentary Movies",    "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%88%d8%ab%d8%a7%d8%a6%d9%82%d9%8a%d8%a9/"),    "type": "category", "_action": "category"},
@@ -1053,11 +943,11 @@ class EgyDeadExtractor(BaseExtractor):
         FIXED: Properly handles ?page=N/ format with trailing slash.
         """
         fetch_url = url
-
+        
         if page and page > 1:
             parsed = urlparse(fetch_url)
             query = parsed.query
-
+            
             # Check if page parameter already exists
             if 'page=' in query:
                 # Replace existing page parameter
@@ -1078,7 +968,7 @@ class EgyDeadExtractor(BaseExtractor):
 
         log("EgyDead: Fetching category page: {}".format(fetch_url))
         html, final_url = self._fetch(fetch_url)
-
+        
         if not html:
             log("EgyDead: get_category_items failed: {}".format(fetch_url))
             return []
@@ -1101,13 +991,13 @@ class EgyDeadExtractor(BaseExtractor):
         """
         base = self._get_base().rstrip("/")
         search_url = f"{base}/?s={quote_plus(query)}"
-
+        
         if page > 1:
             search_url += f"&page={page}/"
-
+        
         log("EgyDead: Searching: {}".format(search_url))
         html, final_url = self._fetch(search_url)
-
+        
         if not html:
             log("EgyDead: search failed for '{}'".format(query))
             return []
@@ -1140,7 +1030,8 @@ class EgyDeadExtractor(BaseExtractor):
             log("EgyDead: get_page failed: {}".format(url))
             return result
 
-        # NOTE: "/episode/..." detection works on the bare path.
+        # NOTE: "/h1/episode/..." still contains "/episode/", so the
+        # type detection below keeps working with the prefixed base.
         url_low = url.lower()
 
         if "/episode/" in url_low:

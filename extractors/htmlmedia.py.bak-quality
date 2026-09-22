@@ -155,24 +155,10 @@ def find_m3u8_all(html):
     return result
 
 
-def _quality_probe_text(url):
-    """[PATCH 94] What quality labelling may look at: the lowercased URL PATH only.
-    Not the host, query, #fragment or |piped headers: '?title=hd1080', a token
-    containing '4k' or 'a_h/', or a Referer with '/1080/' in it used to change
-    the label."""
-    try:
-        base = _correct_stream_url((url or "").split("|", 1)[0])
-        return urlparse(base).path.lower()
-    except Exception:
-        return ""
-
-
 def _label_quality_variant(url):
     if not url:
         return None
-    lower = _quality_probe_text(url)
-    if not lower:
-        return None
+    lower = _correct_stream_url(url).lower()
     # pinned urlset-style suffix: "..._h/segment.ts" — NOT a substring test
     m = re.search(r'[0-9a-z]_([lnhox])(?=/)', lower)
     if m:
@@ -185,12 +171,11 @@ def _label_quality_variant(url):
     # '_' and a digit (e.g. "movie_the_hunt_1080.mp4" was silently
     # skipped). Explicit non-alnum lookaround catches both '_' and '-'
     # separators as well as string start/end.
-    m = re.search(r'(?<![a-z0-9])(2160|1080|720|480|360|240)p?(?![a-z0-9])', lower)
+    m = re.search(r'(?<![a-z0-9])(2160|1080|720|480|360|240)(?![a-z0-9])', lower)
     if m:
         return m.group(1) + "p"
-    m = re.search(r'(?<![a-z0-9])(4k|fhd)(?![a-z0-9])', lower)
-    if m:
-        return "2160p" if m.group(1) == "4k" else "1080p"
+    if "fhd" in lower or "4k" in lower:
+        return "2160p" if "4k" in lower else "1080p"
     return None
 
 

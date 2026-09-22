@@ -312,9 +312,8 @@ class ArablionzExtractor(BaseExtractor):
             re.search(r'<meta[^>]+property="og:title"[^>]+content=["\']([^"\']+)["\']', html, re.I) or
             re.search(r'<title>(.*?)</title>', html, re.S | re.I)
         )
-        raw_title = title_m.group(1) if title_m else ""     # [PATCH 72]
         if title_m:
-            result["title"] = self._clean_title(raw_title)
+            result["title"] = self._clean_title(title_m.group(1))
 
         # Poster
         # NOTE: arablionz.live renders the poster as a CSS background-image
@@ -341,7 +340,7 @@ class ArablionzExtractor(BaseExtractor):
             result["plot"] = re.sub(r'<[^>]+>', ' ', plot_m.group(1)).strip()
 
         # Series check
-        is_series = "/series/" in (final_url or url) or "مسلسل" in raw_title
+        is_series = "/series/" in (final_url or url) or "مسلسل" in result["title"] or "مسلسلات" in result["title"]
         if is_series:
             result["type"]  = "series"
             result["items"] = self._extract_episodes(html, final_url or url)

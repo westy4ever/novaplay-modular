@@ -67,6 +67,11 @@ class VidsrcExtractor(BaseExtractor):
         if len(parts) < 3: return []
         media_type = parts[1]
         action = parts[2]
+        # [PATCH 83] rejoin multi-word actions (same fix as yts PATCH 45/47)
+        if action in ("top", "on"):
+            _full = "_".join(parts[2:])
+            if _full in ("top_rated", "on_the_air"):
+                action = _full
         tmdb_media_type = "tv" if media_type == "series" else "movie"
         item_type = "series" if media_type == "series" else "movie"
 

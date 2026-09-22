@@ -206,67 +206,11 @@ def resolve_mixdrop(url):
     return None
 
 
-def _voe_rot13(text):
-    out = []
-    for c in text:
-        o = ord(c)
-        if 65 <= o <= 90:
-            o = (o - 65 + 13) % 26 + 65
-        elif 97 <= o <= 122:
-            o = (o - 97 + 13) % 26 + 97
-        out.append(chr(o))
-    return "".join(out)
-
-
-def _voe_unscramble(enc):
-    """[PATCH 102] Steps 1-5 of Voe's payload scheme; returns the base64 text of the JSON."""
-    s = _voe_rot13(enc)
-    for tok in ("@$", "^^", "~@", "%?", "*~", "!!", "#&"):
-        s = s.replace(tok, "")
-    raw = base64.b64decode(s + "=" * (-len(s) % 4))
-    return "".join(chr((b - 3) % 256) for b in bytearray(raw))[::-1]
-
-
-def _voe_decode_payload(enc):
-    """Voe's obfuscated payload string -> dict, or None."""
-    try:
-        b64 = _voe_unscramble(enc)
-        data = json.loads(base64.b64decode(b64 + "=" * (-len(b64) % 4)).decode("utf-8", "replace"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
-
-
-def _voe_payload_stream(html):
-    """Stream URL from the page's <script type="application/json"> payload(s), or None. HLS preferred."""
-    for m in re.finditer(r'<script[^>]*type=["\']application/json["\'][^>]*>(.*?)</script>', html or "", re.S | re.I):
-        try:
-            val = json.loads(m.group(1).strip())
-        except Exception:
-            continue
-        for cand in (val if isinstance(val, list) else [val]):
-            if isinstance(cand, str) and len(cand) > 20:
-                data = _voe_decode_payload(cand)
-                if not data:
-                    continue
-                for key in ("source", "hls", "direct_access_url", "mp4"):
-                    u = str(data.get(key) or "").strip()
-                    if u.startswith("http"):
-                        return u
-    return None
-
-
 def resolve_voe(url):
     try:
         html, final = fetch(url, referer="https://voe.sx/")
         if not html:
             return None
-
-        # [PATCH 102] obfuscated JSON payload (when the page itself is the player page)
-        _pl = _voe_payload_stream(html)
-        if _pl:
-            _p = urlparse(final or url)
-            return "{}|Referer={}://{}/".format(_pl, _p.scheme or "https", _p.netloc)
 
         for pat in [
             r"'hls'\s*:\s*'([^']+)'",
@@ -322,10 +266,6 @@ def resolve_voe(url):
             log("resolve_voe: Following JS redirect to {}".format(js_redirect[:100]))
             h2, final2 = fetch(js_redirect, referer="https://voe.sx/")
             if h2:
-                _pl = _voe_payload_stream(h2)      # [PATCH 102] the real player page
-                if _pl:
-                    _p = urlparse(final2 or js_redirect)
-                    return "{}|Referer={}://{}/".format(_pl, _p.scheme or "https", _p.netloc)
                 cloud_match = re.search(r'(https?://[^\s"\']+\.cloudwindow-route\.com[^\s"\']+\.m3u8[^\s"\']*)', h2, re.I)
                 if cloud_match:
                     stream_url = cloud_match.group(1).replace("\\/", "/")
