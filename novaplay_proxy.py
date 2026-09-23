@@ -397,13 +397,39 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             _bump("requests")
 
             upstream = _urlreq.Request(stream_url, headers=headers)
+            range_start, range_end, emulated_range = None, None, False
             try:
                 resp = _urlreq.urlopen(upstream, timeout=30)
             except urllib.error.HTTPError as http_err:
-                resp = http_err  # relay the upstream error body through
-                _bump("upstream_errors")
-                _log("Proxy: upstream HTTP {} for {}".format(
-                    getattr(http_err, "code", "?"), stream_url[:100]))
+                # [PATCH 105] some CDNs 403 any Range request while a plain GET works fine
+                # (confirmed on mxcontent.net). Retry once without Range and emulate the
+                # requested slice locally instead of giving up on this candidate.
+                m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip()) if range_hdr else None
+                if http_err.code == 403 and m:
+                    range_start = int(m.group(1))
+                    range_end = int(m.group(2)) if m.group(2) else None
+                    retry_headers = dict(headers)
+                    retry_headers.pop("Range", None)
+                    _log("Proxy: {} 403'd a Range request, retrying without Range ({})".format(
+                        stream_url[:90], range_hdr))
+                    try:
+                        resp = _urlreq.urlopen(_urlreq.Request(stream_url, headers=retry_headers), timeout=30)
+                        emulated_range = True
+                    except urllib.error.HTTPError as http_err2:
+                        resp = http_err2
+                        _bump("upstream_errors")
+                        _log("Proxy: range-stripped retry also failed: HTTP {}".format(
+                            getattr(http_err2, "code", "?")))
+                    except Exception as e:
+                        _bump("upstream_errors")
+                        _log("Proxy: range-stripped retry failed: {}".format(e))
+                        self._safe_send_error(502, str(e))
+                        return
+                else:
+                    resp = http_err
+                    _bump("upstream_errors")
+                    _log("Proxy: upstream HTTP {} for {}".format(
+                        getattr(http_err, "code", "?"), stream_url[:100]))
             except Exception as e:
                 _bump("upstream_errors")
                 _log("Proxy: upstream connection error: {}".format(e))
@@ -411,7 +437,10 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             try:
-                self._relay(method, resp, stream_url, headers, bool(range_hdr))
+                self._relay(method, resp, stream_url, headers,
+                            bool(range_hdr) and not emulated_range,
+                            range_start=range_start if emulated_range else None,
+                            range_end=range_end if emulated_range else None)
             finally:
                 try:
                     resp.close()
@@ -422,7 +451,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             _log("Proxy FATAL: {}".format(e))
             self._safe_send_error(500, str(e))
 
-    def _relay(self, method, resp, stream_url, headers, has_range):
+    def _relay(self, method, resp, stream_url, headers, has_range, range_start=None, range_end=None):
         global _PROXY_LAST_BYTES
         try:
             status = resp.getcode() or 200
@@ -495,6 +524,58 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             if method == "GET":
                 self.wfile.write(body)
                 _PROXY_LAST_BYTES += len(body)
+            return
+
+        # [PATCH 105] emulated Range: the upstream response is a full 200 body starting
+        # at byte 0 (Range was stripped after a 403); skip to range_start locally and
+        # re-frame the response as a proper 206 with a correct Content-Range, so the
+        # player still sees a valid ranged response.
+        if range_start is not None:
+            try:
+                total = int(resp_hdrs.get("content-length", "0") or "0")
+            except (TypeError, ValueError):
+                total = 0
+            end = range_end if (range_end is not None and (not total or range_end < total)) else (total - 1 if total else None)
+            remaining_to_skip = range_start
+            try:
+                while remaining_to_skip > 0:
+                    chunk = resp.read(min(65536, remaining_to_skip))
+                    if not chunk:
+                        break
+                    remaining_to_skip -= len(chunk)
+            except Exception as _e:
+                _log("Proxy: range emulation skip failed: {}".format(_e))
+                self._safe_send_error(502, "Range emulation failed")
+                return
+            self.send_response(206)
+            for key in ("content-type", "last-modified", "etag"):
+                if key in resp_hdrs:
+                    self.send_header(key.title(), resp_hdrs[key])
+            self.send_header("Accept-Ranges", "bytes")
+            if total:
+                self.send_header("Content-Range", "bytes {}-{}/{}".format(
+                    range_start, end if end is not None else total - 1, total))
+                self.send_header("Content-Length", str((end - range_start + 1) if end is not None else (total - range_start)))
+            self.end_headers()
+            if method == "HEAD":
+                return
+            sent = 0
+            budget = (end - range_start + 1) if end is not None else None
+            try:
+                while budget is None or sent < budget:
+                    want = 65536 if budget is None else min(65536, budget - sent)
+                    chunk = resp.read(want)
+                    if not chunk:
+                        break
+                    sent += len(chunk)
+                    _PROXY_LAST_BYTES += len(chunk)
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+            except Exception as _e:
+                try:
+                    _log("Proxy: relay aborted: {}".format(_e))
+                except Exception:
+                    pass
             return
 
         self.send_response(status)

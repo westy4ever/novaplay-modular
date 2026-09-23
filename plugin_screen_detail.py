@@ -407,10 +407,11 @@ class AdvancedArabicPlayerDetail(Screen):
         self["title"].setText(_wrap_ui_text(current_title, width=30, max_lines=2, fallback="بدون عنوان"))
 
         meta = []
-        if data.get("year"):   meta.append(data["year"])
-        if data.get("rating"): meta.append("{}/10".format(data["rating"]))
-        if data.get("type"):   meta.append(_TYPE_LABELS.get(data["type"], "عنصر"))
-        if data.get("genres"): meta.append(data["genres"])
+        if data.get("year"):    meta.append(data["year"])
+        if data.get("rating"):  meta.append("{}/10".format(data["rating"]))
+        if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "عنصر"))
+        if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
+        if data.get("genres"):  meta.append(data["genres"])
         self["meta"].setText(_wrap_ui_text("   ".join(meta), width=58, max_lines=2))
         self["badge"].setText("{}  •  {}".format(_site_label(self._site), _TYPE_LABELS.get(data.get("type"), "عنصر")))
         facts = [
@@ -437,6 +438,12 @@ class AdvancedArabicPlayerDetail(Screen):
             counts.append("السيرفرات: {}".format(len([s for s in data.get("servers", []) if s.get("url")])))
         if data.get("year"):
             counts.append("السنة: {}".format(data.get("year")))
+        if data.get("country"):                                       # [PATCH 111]
+            counts.append("البلد: {}".format(data.get("country")))
+        if data.get("runtime"):
+            counts.append("المدة: {}".format(data.get("runtime")))
+        if data.get("channel"):
+            counts.append("القناة: {}".format(data.get("channel")))
         self["source"].setText(_wrap_ui_text("المصدر: {}  |  {}".format(_site_label(self._site), "  |  ".join(counts)), width=58, max_lines=2))
         if has_episodes:
             plot_label = "قصة المسلسل"

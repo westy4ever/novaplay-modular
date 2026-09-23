@@ -221,6 +221,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cratingBadge%d" % i] = Label("")
             # [PATCH 53] carousel year badge — red box, top-left
             self["cyearBadge%d" % i] = Label("")
+            self["clabel%d" % i] = Label("")               # [PATCH 112]
             self["cresumeMark%d" % i] = Label("")
 
         # ── Continue-watching strip ──
@@ -345,6 +346,9 @@ class AdvancedArabicPlayerHome(Screen):
             # [PATCH 53] year badge: top-left, red box (matches grid)
             _yw = 58 if is_big else 52
             self._moveResize('cyearBadge%d' % widget_id, x + 12, y + 22, _yw, 28)
+            # [PATCH 112] label badge: bottom strip, stacked just above cresumeMark
+            _lh = 26 if is_big else 22
+            self._moveResize('clabel%d' % widget_id, x + 10, y + h - 34 - _lh - 2, w - 20, _lh)
             self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
             if logical_slot == self.carousel_center:
                 focus_extra = 7
@@ -408,6 +412,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cfavMark%d" % i].hide()
             self["cratingBadge%d" % i].hide()
             self["cyearBadge%d" % i].hide()
+            self["clabel%d" % i].hide()
             self["cresumeMark%d" % i].hide()
         self["poster_grid"].hide()
         for i in range(POSTER_GRID_ROWS):
@@ -451,6 +456,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cfavMark%d" % i].hide()
             self["cratingBadge%d" % i].hide()
             self["cyearBadge%d" % i].hide()
+            self["clabel%d" % i].hide()
             self["cresumeMark%d" % i].hide()
         self["poster_grid"].hide()
         for i in range(POSTER_GRID_ROWS):
@@ -501,6 +507,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cfavMark%d" % widget_id].hide()
             self["cratingBadge%d" % widget_id].hide()
             self["cyearBadge%d" % widget_id].hide()
+            self["clabel%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
             return
         item = self._items[pos]
@@ -509,6 +516,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposterImg%d" % widget_id].hide()
             self["cratingBadge%d" % widget_id].hide()
             self["cyearBadge%d" % widget_id].hide()
+            self["clabel%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
             self["cposter%d" % widget_id].setText("الصفحة التالية")
@@ -517,6 +525,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposterImg%d" % widget_id].hide()
             self["cratingBadge%d" % widget_id].hide()
             self["cyearBadge%d" % widget_id].hide()
+            self["clabel%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
             self["cposter%d" % widget_id].setText("الصفحة السابقة")
@@ -560,6 +569,13 @@ class AdvancedArabicPlayerHome(Screen):
             self["cyearBadge%d" % widget_id].show()
         else:
             self["cyearBadge%d" % widget_id].hide()
+        # [PATCH 112] release/quality label (HD/CAM/WEB-DL/مدبلج/...)
+        _lb = str(item.get("label") or "").strip()
+        if _lb:
+            self["clabel%d" % widget_id].setText(_lb)
+            self["clabel%d" % widget_id].show()
+        else:
+            self["clabel%d" % widget_id].hide()
         # v4.5: watched badge — reuse the resumeMark widget
         _watched = False
         try:
@@ -773,6 +789,15 @@ class AdvancedArabicPlayerHome(Screen):
                     rb.show()
                 else:
                     rb.hide()
+
+                # release/quality label (bottom strip, gold/black) [PATCH 106]
+                # e.g. EgyDead's HD / CAM / WEB-DL / مدبلج / بالمصري
+                _lb = str(item.get("label") or "").strip()
+                if _lb and _in_grid:
+                    badge.setText(_lb)
+                    badge.show()
+                else:
+                    badge.hide()
 
                 # progress bar (bottom edge): gold fill, width = progress
                 bar = self["pbar_%d_%d" % (r, c)]
@@ -1355,6 +1380,7 @@ class AdvancedArabicPlayerHome(Screen):
                 self["cfavMark%d" % i].hide()
                 self["cratingBadge%d" % i].hide()
                 self["cyearBadge%d" % i].hide()
+                self["clabel%d" % i].hide()
                 self["cresumeMark%d" % i].hide()
             for i in range(POSTER_GRID_ROWS):
                 for _c in range(POSTER_GRID_COLS):

@@ -33,7 +33,7 @@ FINGERPRINTS = [
     ("novaplay_thread.py", "callback crashed", "dispatcher crash logging"),
     ("novaplay_subtitles.py", "returned no downloadable file", "JSON-as-SRT guard"),
     ("novaplay_subtitles.py", "def _dirCb(self, value=None)", "folder-callback tolerance"),
-    ("novaplay_subtitles.py", "path=None)", "font-callback tolerance"),
+    ("plugin_screen_player.py", "path=None)", "font-callback tolerance"),
     ("extractors/registry.py", "_EXTRACTOR_INSTANCES", "extractor singletons"),
     ("novaplay_substudio.py", "def parse_srt", "studio parser"),
 ]
