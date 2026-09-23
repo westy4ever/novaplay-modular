@@ -1320,6 +1320,31 @@ def resolve_byselapuix(url):
         return None
 
 
+def resolve_azrak_mycima(url):
+    """
+    [PATCH 121] azrak.mycima.cv's download-preparation page. Confirmed against a real capture:
+    the page's own JS polls "?check_status=1" every second until it succeeds, then navigates
+    to "?start_download=1" for the real file. Real network log ground truth: both requests
+    returned HTTP 200 in a real successful session. This mirrors that exact sequence, with a
+    bounded number of retries rather than polling forever.
+    """
+    try:
+        base_url = url.split("?")[0]
+        check_url = base_url + "?check_status=1"
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            html, final_url = fetch(check_url, referer=url)
+            if html:
+                log("azrak.mycima: check_status ready after {} attempt(s)".format(attempt + 1))
+                return base_url + "?start_download=1"
+            time.sleep(1)
+        log("azrak.mycima: check_status never became ready after {} attempts".format(max_attempts))
+        return None
+    except Exception as e:
+        log("azrak.mycima: error: {}".format(e))
+        return None
+
+
 def resolve_dhcplay(url):
     return resolve_doodstream(url)
 
@@ -2153,6 +2178,8 @@ HOST_RESOLVERS = {
     "byselapuix.com":  resolve_byselapuix,
     "dhcplay":         resolve_dhcplay,
     "dhcplay.com":     resolve_dhcplay,
+    "mycima.cv":       resolve_azrak_mycima,   # [PATCH 121]
+    "azrak.mycima.cv": resolve_azrak_mycima,
     "sprintcdn":       resolve_sprintcdn,
     "sprintcdn.com":   resolve_sprintcdn,
     "aurorafieldnetwork": resolve_aurorafieldnetwork,
@@ -2254,20 +2281,31 @@ class Unbaser(object):
 
 
 def _extract_packer_blocks(html):
+    """
+    Find every P.A.C.K.E.R. eval(function(p,a,c,k,e,d){...}(...)) call and return
+    each one as decodable text. [PATCH 104] Previously this searched for a literal
+    closing tail (".split('|')))") that assumed no fill-arguments between
+    .split('|') and the closing parens. Real packer output commonly adds ",0,{}"
+    (or other variants) there, so that exact string never matched and unpacking
+    silently produced nothing -- confirmed on a real page where the marker was
+    present but the tail search still found 0 blocks. decode_packer() parses
+    p/a/c/k structurally and ignores everything after the k-string, so a generous
+    fixed-size window from the marker onward is simpler and correct regardless of
+    the tail's exact shape.
+    """
     blocks = []
     marker = "eval(function(p,a,c,k,e,d){"
-    tail   = ".split('|')))"
+    WINDOW = 60000  # far more than any real packed JS body + token dictionary needs
+    html = html or ""
     pos = 0
     while True:
-        start = (html or "").find(marker, pos)
+        start = html.find(marker, pos)
         if start == -1:
             break
-        end = (html or "").find(tail, start)
-        if end == -1:
-            break
-        blocks.append(html[start : end + len(tail)])
-        pos = end + len(tail)
+        blocks.append(html[start:start + WINDOW])
+        pos = start + len(marker)
     return blocks
+
 
 
 def decode_packer(packed):

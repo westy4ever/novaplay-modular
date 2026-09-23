@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Wecima.sarl extractor - wecima.sarl
+Wecima.style extractor - wecima.style (formerly wecima.sarl)
 Inherits from BaseExtractor.
 Different from wecima.cx - uses different HTML structure and URL patterns.
 
@@ -20,6 +20,7 @@ link, or the numbered link matching current_page+1.
 import re
 import sys
 import base64
+import zlib
 import json
 import urllib.parse
 from .base import BaseExtractor, fetch, log, urljoin
@@ -35,12 +36,21 @@ else:
 
 
 class WecimaSarlExtractor(BaseExtractor):
-    """Extractor for Wecima.sarl - wecima.sarl"""
+    """Extractor for Wecima.style - wecima.style (formerly wecima.sarl)"""
 
     DOMAINS = [
-        "https://wecima.sarl/",
+        "https://wecima.style/",      # primary domain
+        "https://wecima.rent/",       # redirects to wecima.style
+        "https://wecima.sarl/",       # old domain (now redirects)
+        "https://wecima.bid/",        # old domain (now redirects)
     ]
-    VALID_HOST_MARKERS = ("wecima.sarl", "akhbarworld.online", "pinecrestdesignstudio.shop")
+    VALID_HOST_MARKERS = (
+        "wecima.style",
+        "wecima.rent",
+        "wecima.sarl",
+        "wecima.bid",
+        "akhbarworld.online",
+    )
     BLOCKED_HOST_MARKERS = ("alliance4creativity.com",)
 
     # Hosts that never host downloadable media - filtered from every
@@ -118,7 +128,10 @@ class WecimaSarlExtractor(BaseExtractor):
     def _looks_like_wecima_page(self, html):
         text = html or ""
         return (
-            "wecima.sarl" in text.lower()
+            "wecima.style" in text.lower()
+            or "wecima.rent" in text.lower()
+            or "wecima.sarl" in text.lower()
+            or "wecima.bid" in text.lower()
             or "Wecima" in text
             or "وى سيما" in text
             or "ماى سيما" in text
@@ -138,21 +151,21 @@ class WecimaSarlExtractor(BaseExtractor):
         if self._resolved_base:
             return self._resolved_base
         for domain in self.DOMAINS:
-            log("Wecima.sarl: probing {}".format(domain))
+            log("Wecima.style: probing {}".format(domain))
             html, final_url = fetch(domain, referer=domain)
             final_url = final_url or domain
             if self._is_blocked_page(html, final_url):
-                log("Wecima.sarl: blocked {}".format(final_url))
+                log("Wecima.style: blocked {}".format(final_url))
                 continue
             if html and self._looks_like_wecima_page(html):
                 self._resolved_base = self._site_root(final_url)
                 self.main_url = self._resolved_base
                 self._home_html_cache = html
-                log("Wecima.sarl: selected base {}".format(self._resolved_base))
+                log("Wecima.style: selected base {}".format(self._resolved_base))
                 return self._resolved_base
         self._resolved_base = self.DOMAINS[0]
         self.main_url = self._resolved_base
-        log("Wecima.sarl: fallback base {}".format(self.main_url))
+        log("Wecima.style: fallback base {}".format(self.main_url))
         return self.main_url
 
     def _normalize_url(self, url):
@@ -200,18 +213,18 @@ class WecimaSarlExtractor(BaseExtractor):
 
     def _fetch_live(self, url, referer=None):
         for candidate in self._candidate_urls(url):
-            log("Wecima.sarl: fetching {}".format(candidate))
+            log("Wecima.style: fetching {}".format(candidate))
             html, final_url = fetch(candidate, referer=referer or self._get_base())
             final_url = final_url or candidate
             if self._is_blocked_page(html, final_url):
-                log("Wecima.sarl: blocked {}".format(final_url))
+                log("Wecima.style: blocked {}".format(final_url))
                 continue
             if html and self._looks_like_wecima_page(html):
-                log("Wecima.sarl: success {}".format(final_url))
+                log("Wecima.style: success {}".format(final_url))
                 return html, final_url
             if html:
-                log("Wecima.sarl: page shape mismatch {}".format(final_url))
-        log("Wecima.sarl: fetch failed for {}".format(url))
+                log("Wecima.style: page shape mismatch {}".format(final_url))
+        log("Wecima.style: fetch failed for {}".format(url))
         return "", ""
 
     def _clean_html(self, text):
@@ -254,7 +267,7 @@ class WecimaSarlExtractor(BaseExtractor):
 
     def _extract_cards_sarl(self, html):
         """
-        Extract content cards from wecima.sarl.
+        Extract content cards from wecima.style.
         Based on the HTML snapshot, items use the GridItem structure.
         """
         cards = []
@@ -268,7 +281,7 @@ class WecimaSarlExtractor(BaseExtractor):
         grid_items = re.findall(grid_item_pattern, html, re.S | re.I)
         
         if not grid_items:
-            log("Wecima.sarl: No GridItem blocks found with primary pattern. Trying fallback.")
+            log("Wecima.style: No GridItem blocks found with primary pattern. Trying fallback.")
             # Fallback: Directly find links with titles in any GridItem context
             fallback_pattern = r'<div[^>]*class="[^"]*GridItem[^"]*"[^>]*>.*?<a[^>]+href="([^"]+)"[^>]*>.*?<strong[^>]*>(.*?)</strong>.*?</div>'
             fallback_matches = re.findall(fallback_pattern, html, re.S | re.I)
@@ -313,7 +326,7 @@ class WecimaSarlExtractor(BaseExtractor):
                     "type": item_type,
                     "_action": "details",
                 })
-            log("Wecima.sarl: extracted {} cards from fallback".format(len(cards)))
+            log("Wecima.style: extracted {} cards from fallback".format(len(cards)))
             return cards
         
         # Process each GridItem block
@@ -370,7 +383,7 @@ class WecimaSarlExtractor(BaseExtractor):
                 "_action": "details",
             })
         
-        log("Wecima.sarl: extracted {} cards".format(len(cards)))
+        log("Wecima.style: extracted {} cards".format(len(cards)))
         return cards
 
     def _extract_next_page_sarl(self, html, current_url):
@@ -402,9 +415,48 @@ class WecimaSarlExtractor(BaseExtractor):
                     return url
         return ""
 
+    def _decode_secure_stream(self, payload):
+        """
+        [PATCH 120] Decodes wecima.style's "?secure_stream=<payload>.<hex-sig>" download links.
+        <payload> is URL-safe base64 wrapping zlib-compressed data. The trailing ADLER32
+        checksum does not verify (confirmed: every wbits variant fails with the same
+        checksum-specific error, never a structural one -- consistent with all the real data
+        decompressing correctly and only the non-standard trailer failing verification).
+        Decompressing byte-by-byte and keeping everything produced before that failure point
+        reliably recovers the complete real payload.
+        """
+        if not payload:
+            return None
+        try:
+            b64 = payload.split(".")[0].replace("-", "+").replace("_", "/")
+            b64 += "=" * ((-len(b64)) % 4)
+            raw = base64.b64decode(b64)
+        except Exception as e:
+            log("Wecima.style: secure_stream base64 decode failed: {}".format(str(e)[:60]))
+            return None
+
+        d = zlib.decompressobj()
+        out = b""
+        for byte_val in raw:
+            chunk = bytes((byte_val,)) if sys.version_info[0] == 3 else chr(byte_val)
+            try:
+                out += d.decompress(chunk)
+            except zlib.error:
+                break
+
+        try:
+            text = out.decode("utf-8", "replace")
+        except Exception:
+            text = None
+        if text and (text.startswith("http://") or text.startswith("https://")):
+            log("Wecima.style: secure_stream decoded: {}".format(text[:80]))
+            return text
+        log("Wecima.style: secure_stream decode produced no usable URL")
+        return None
+
     def _decode_wecima_url(self, encoded):
         """
-        Decode base64 encoded URLs from wecima.sarl.
+        Decode base64 encoded URLs from wecima.style.
         Based on snapshot: ?my_player=JMrLYcoO or ?mycimafsd=...
 
         FIX (parity with wecima.py): adds percent-encoding normalization of
@@ -415,11 +467,20 @@ class WecimaSarlExtractor(BaseExtractor):
         """
         if not encoded:
             return None
-        
+
+        # [PATCH 120] a "?secure_stream=" gateway link needs its hidden payload decoded BEFORE
+        # the early-return below, which would otherwise hand back the raw gateway URL unchanged
+        # (it already starts with "https://") and never look at what is actually encoded inside it.
+        secure_m = re.search(r'[?&]secure_stream=([^&]+)', encoded)
+        if secure_m:
+            decoded = self._decode_secure_stream(secure_m.group(1))
+            if decoded:
+                return decoded
+
         if encoded.startswith('http://') or encoded.startswith('https://'):
             return encoded
             
-        log("Wecima.sarl: decoding: {}".format(repr(encoded[:80])))
+        log("Wecima.style: decoding: {}".format(repr(encoded[:80])))
 
         # Try different base64 decoding approaches
         cleaned = encoded.strip().replace('+', '').replace(' ', '')
@@ -435,10 +496,10 @@ class WecimaSarlExtractor(BaseExtractor):
             decoded_url = decoded_bytes.decode('utf-8', errors='replace')
             decoded_url = decoded_url.replace('\\u0026', '&').replace('\\/', '/')
             if decoded_url.startswith('http://') or decoded_url.startswith('https://'):
-                log("Wecima.sarl: decode success (prefix scheme): {}".format(decoded_url[:80]))
+                log("Wecima.style: decode success (prefix scheme): {}".format(decoded_url[:80]))
                 return decoded_url
         except Exception as e:
-            log("Wecima.sarl: prefix-scheme decode failed: {}".format(str(e)[:50]))
+            log("Wecima.style: prefix-scheme decode failed: {}".format(str(e)[:50]))
 
         # Try plain base64
         try:
@@ -463,33 +524,41 @@ class WecimaSarlExtractor(BaseExtractor):
             # like "httpscdn..." -> "https://cdn..." (same as wecima.py).
             decoded_url = quote(decoded_url, safe=':/?&=#+')
             
+            # [PATCH 118] the old http-branch below checked startswith('http') without also
+            # excluding an already-correct "https://" URL -- "https://x" starts with the
+            # substring "http" AND does not start with the exact string "http://" (it starts
+            # with "https://"), so that branch fired on URLs that needed no repair at all,
+            # turning "https://fastvip.space/e/" into "http://s://fastvip.space/e/". Checking
+            # https:// first and excluding it from the http:// branch fixes this for both cases.
             if decoded_url.startswith('//'):
                 decoded_url = 'https:' + decoded_url
-            elif decoded_url.startswith('https') and not decoded_url.startswith('https://'):
+            elif decoded_url.startswith('https://') or decoded_url.startswith('http://'):
+                pass  # already well-formed, nothing to repair
+            elif decoded_url.startswith('https') :
                 decoded_url = 'https://' + decoded_url[5:]
-            elif decoded_url.startswith('http') and not decoded_url.startswith('http://'):
+            elif decoded_url.startswith('http'):
                 decoded_url = 'http://' + decoded_url[4:]
                 
             if decoded_url and ('http://' in decoded_url or 'https://' in decoded_url):
-                log("Wecima.sarl: decode success (plain b64): {}".format(decoded_url[:80]))
+                log("Wecima.style: decode success (plain b64): {}".format(decoded_url[:80]))
                 return decoded_url
         except Exception as e:
-            log("Wecima.sarl: plain-b64 decode failed: {}".format(str(e)[:50]))
+            log("Wecima.style: plain-b64 decode failed: {}".format(str(e)[:50]))
 
         # Try URL pattern extraction
         url_pattern = r'[a-zA-Z0-9\-]+\.(?:com|net|org|tv|cx|bid|site|click|show|video|rent|date|live|rip|top|xyz|ps|shop)(?:/[a-zA-Z0-9\-_/]+)?'
         match = re.search(url_pattern, encoded)
         if match:
             url = "https://" + match.group(0)
-            log("Wecima.sarl: extracted URL pattern: {}".format(url))
+            log("Wecima.style: extracted URL pattern: {}".format(url))
             return url
 
-        log("Wecima.sarl: decode failed entirely for: {}".format(repr(encoded[:80])))
+        log("Wecima.style: decode failed entirely for: {}".format(repr(encoded[:80])))
         return None
 
     def _extract_servers(self, html):
         """
-        Extract STREAMING server URLs from the wecima.sarl detail page.
+        Extract STREAMING server URLs from the wecima.style detail page.
 
         FIX: the old version also tried to parse 'Download--Wecima--Single'
         here using a fabricated '<resolution></resolution>' tag regex that
@@ -501,7 +570,7 @@ class WecimaSarlExtractor(BaseExtractor):
         servers = []
         seen = set()
         if not html:
-            log("Wecima.sarl: empty HTML in _extract_servers")
+            log("Wecima.style: empty HTML in _extract_servers")
             return []
 
         # Primary: watch list - <ul id="watch"> with
@@ -532,16 +601,16 @@ class WecimaSarlExtractor(BaseExtractor):
                     "url": decoded_url,
                     "type": "direct"
                 })
-                log("Wecima.sarl: Found server '{}' -> {}".format(server_name, decoded_url[:60]))
+                log("Wecima.style: Found server '{}' -> {}".format(server_name, decoded_url[:60]))
 
         # Fallback deep scan (mirrors wecima.py): look for data-url /
         # data-link embed attributes anywhere on the page. NOTE: data-href
         # is deliberately NOT scanned here - it belongs to the download
         # section and is handled by _extract_download_links().
         if not servers:
-            log("Wecima.sarl: watch list not found, running deep scan fallback...")
+            log("Wecima.style: watch list not found, running deep scan fallback...")
             skip_markers = self._NON_MEDIA_HOSTS + (
-                "wecima.", "akhbarworld.online", "pinecrestdesignstudio.shop",
+                "wecima.", "akhbarworld.online",
             ) + self.BLOCKED_HOST_MARKERS
             fallback_items = re.findall(r'(?:data-url|data-link)="([^"]+)"', html, re.I)
             for encoded_url in fallback_items:
@@ -558,12 +627,12 @@ class WecimaSarlExtractor(BaseExtractor):
                     "url": decoded_url,
                     "type": "direct"
                 })
-                log("Wecima.sarl: Found fallback server -> {}".format(decoded_url[:60]))
+                log("Wecima.style: Found fallback server -> {}".format(decoded_url[:60]))
 
         if not servers:
-            log("Wecima.sarl: No servers found in HTML")
+            log("Wecima.style: No servers found in HTML")
         else:
-            log("Wecima.sarl: Successfully extracted {} servers".format(len(servers)))
+            log("Wecima.style: Successfully extracted {} servers".format(len(servers)))
         return servers
 
     def _extract_download_links(self, html):
@@ -593,7 +662,7 @@ class WecimaSarlExtractor(BaseExtractor):
               ...
             </ul>
           </div>
-        wecima.sarl uses custom <singlesection> wrappers elsewhere on the
+        wecima.style uses custom <singlesection> wrappers elsewhere on the
         page, so several block shapes are accepted. data-href values use
         the exact same obfuscated-base64 scheme as the watch list's
         data-watch, so _decode_wecima_url handles them as-is.
@@ -609,7 +678,7 @@ class WecimaSarlExtractor(BaseExtractor):
             r'class=["\'][^"\']*Download--Wecima--Single[^"\']*["\'][^>]*>(.*?)</ul>',
             # Generic download list
             r'<ul[^>]*class=["\'][^"\']*List--Download[^"\']*["\'][^>]*>(.*?)</ul>',
-            # wecima.sarl custom singlesection/section/div wrapper
+            # wecima.style custom singlesection/section/div wrapper
             r'<(?:singlesection|section|div)[^>]*class=["\'][^"\']*Download[^"\']*["\'][^>]*>(.*?)</(?:singlesection|section|div)>',
         ):
             m = re.search(pat, html, re.S | re.I)
@@ -628,7 +697,7 @@ class WecimaSarlExtractor(BaseExtractor):
             # No recognizable section: deep-scan the whole page for
             # data-href/data-url attributes ONLY (plain href is far too
             # noisy page-wide, and data-watch belongs to the watch list).
-            log("Wecima.sarl: no download section found, deep-scanning data-href items")
+            log("Wecima.style: no download section found, deep-scanning data-href items")
             item_iter = re.finditer(
                 r'<(?:li|a|div)[^>]*?(?:data-href|data-url)=["\']([^"\']+)["\'][^>]*>(.*?)</(?:li|a|div)>',
                 html, re.S | re.I
@@ -678,11 +747,11 @@ class WecimaSarlExtractor(BaseExtractor):
                 "url": url,
             })
 
-        log("Wecima.sarl: extracted {} download link(s)".format(len(downloads)))
+        log("Wecima.style: extracted {} download link(s)".format(len(downloads)))
         return downloads
 
     def _extract_episodes_from_list(self, html):
-        """Extract episodes from wecima.sarl detail page."""
+        """Extract episodes from wecima.style detail page."""
         episodes = []
         seen = set()
         
@@ -732,7 +801,7 @@ class WecimaSarlExtractor(BaseExtractor):
                         "_action": "details",
                     })
         
-        log("Wecima.sarl: extracted {} episodes".format(len(episodes)))
+        log("Wecima.style: extracted {} episodes".format(len(episodes)))
         return episodes
 
     def _parse_json_ld(self, html):
@@ -830,7 +899,7 @@ class WecimaSarlExtractor(BaseExtractor):
 
     def get_categories(self, mtype="movie"):
         """
-        Get categories from wecima.sarl.
+        Get categories from wecima.style.
         Based on the HTML snapshot navigation menu.
         """
         categories = [
@@ -968,7 +1037,7 @@ class WecimaSarlExtractor(BaseExtractor):
             url = url.rstrip('/') + '/page/{}/'.format(page)
         html, final_url = self._fetch_live(url, referer=base)
         if self._is_blocked_page(html, final_url):
-            log("Wecima.sarl: category blocked {}".format(url))
+            log("Wecima.style: category blocked {}".format(url))
             return []
         items = self._extract_cards_sarl(html)
         next_page = self._extract_next_page_sarl(html, final_url or url)
@@ -996,7 +1065,7 @@ class WecimaSarlExtractor(BaseExtractor):
             items = self._extract_cards_sarl(html)
             if items:
                 break
-        log("Wecima.sarl: search '{}' -> {} items".format(query, len(items)))
+        log("Wecima.style: search '{}' -> {} items".format(query, len(items)))
         if not items:
             return []
         next_page = self._extract_next_page_sarl(html, final_url)
@@ -1013,7 +1082,7 @@ class WecimaSarlExtractor(BaseExtractor):
         base = self._get_base()
         html, final_url = self._fetch_live(url, referer=base)
         if self._is_blocked_page(html, final_url) or not html:
-            log("Wecima.sarl: detail failed {}".format(url))
+            log("Wecima.style: detail failed {}".format(url))
             return {"title": "Error", "servers": [], "items": [], "downloads": [], "type": m_type or "movie"}
         
         title = self._detail_title(html)
@@ -1035,7 +1104,7 @@ class WecimaSarlExtractor(BaseExtractor):
         if not servers:
             episodes = self._extract_episodes_from_list(html)
         
-        log("Wecima.sarl: detail {} -> servers={}, episodes={}, downloads={}".format(
+        log("Wecima.style: detail {} -> servers={}, episodes={}, downloads={}".format(
             url, len(servers), len(episodes), len(downloads)))
         
         # Determine type
@@ -1062,5 +1131,5 @@ class WecimaSarlExtractor(BaseExtractor):
         from .base import extract_stream as base_extract_stream
         # Add referer if missing
         if "|" not in url and url.startswith("http"):
-            url += "|Referer=https://wecima.sarl/"
+            url += "|Referer=https://wecima.style/"
         return base_extract_stream(url)

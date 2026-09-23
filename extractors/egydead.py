@@ -589,6 +589,16 @@ class EgyDeadExtractor(BaseExtractor):
             else:
                 item_type = "movie"
 
+            # year: extract from the title into its own field (feeds the grid's red
+            # badge, same as topcinema) and strip it from the caption text -- EgyDead
+            # titles arrive as "Movie Name 2026" the same way topcinema's do. [PATCH 107]
+            year = ""
+            ym = re.search(r'\b(19\d{2}|20\d{2})\b', title)
+            if ym:
+                year = ym.group(1)
+                title = re.sub(r'\s*\b' + year + r'\b\s*', ' ', title)
+                title = re.sub(r'\s{2,}', ' ', title).strip(' -|')
+
             display_title = title
             if ep_num and item_type == "episode":
                 display_title = "{} - حلقة {}".format(title, ep_num)
@@ -600,6 +610,7 @@ class EgyDeadExtractor(BaseExtractor):
                     "poster": poster,
                     "plot": quality,
                     "label": label,
+                    "year": year,
                     "type": item_type,
                     "_action": "details",
                 })
@@ -786,6 +797,50 @@ class EgyDeadExtractor(BaseExtractor):
             year = year_match.group(1)
 
         return title, poster, plot, year
+
+    def _parse_info_box(self, html):
+        """
+        [PATCH 110] The page's info box ("القسم/النوع/الجوده/اللغه/البلد/السنه/القناة/مده العرض"),
+        confirmed against a real capture: <div class="LeftBox"><ul><li><span>LABEL : </span>
+        <a>VALUE</a>...</li>...</ul></div>. Returns a dict with whichever of these keys the
+        page actually has: category, genres (comma-joined string), quality, language, country,
+        year, channel, runtime.
+        """
+        info = {}
+        if not html:
+            return info
+        box_m = re.search(r'<div[^>]*class=["\'][^"\']*LeftBox[^"\']*["\'][^>]*>(.*?)</ul>', html, re.S | re.I)
+        if not box_m:
+            return info
+        box_html = box_m.group(1)
+
+        label_map = {
+            "القسم": "category",
+            "النوع": "genres",
+            "الجوده": "quality",
+            "اللغه": "language",
+            "البلد": "country",
+            "السنه": "year",
+            "القناه": "channel",
+            "مده العرض": "runtime",
+        }
+
+        for li in re.finditer(r'<li\b[^>]*>(.*?)</li>', box_html, re.S | re.I):
+            li_html = li.group(1)
+            span_m = re.search(r'<span[^>]*>(.*?)</span>', li_html, re.S | re.I)
+            if not span_m:
+                continue
+            label = self._strip_tags(span_m.group(1)).strip().rstrip(":：").strip()
+            key = label_map.get(label)
+            if not key:
+                continue
+            values = [self._strip_tags(v).strip() for v in re.findall(r'<a[^>]*>(.*?)</a>', li_html, re.S | re.I)]
+            values = [v for v in values if v]
+            if not values:
+                continue
+            info[key] = ", ".join(values) if key == "genres" else values[0]
+
+        return info
 
     def _extract_watch_servers(self, html, page_url):
         servers = []
@@ -996,6 +1051,54 @@ class EgyDeadExtractor(BaseExtractor):
                                 "_dl": {"resolution": q, "size": size_txt, "quality": dname, "url": link}})
         return servers
 
+    def _parse_download_servers(self, html):
+        """
+        [PATCH 109] The site's own download-servers list (a "downloadMaster" block),
+        completely separate from the watch-server list. EgyDead's own CSS has a typo in
+        this class name: "donwload-servers-list", confirmed against a real page capture --
+        matched here exactly as the site actually writes it, not the "correct" spelling.
+        """
+        downloads = []
+        if not html:
+            return downloads
+        block_m = re.search(
+            r'<ul[^>]*class=["\'][^"\']*donwload-servers-list[^"\']*["\'][^>]*>(.*?)</ul>',
+            html, re.S | re.I)
+        if not block_m:
+            return downloads
+
+        for li in re.finditer(r'<li\b[^>]*>(.*?)</li>', block_m.group(1), re.S | re.I):
+            li_html = li.group(1)
+
+            link_m = re.search(
+                r'class=["\'][^"\']*ser-link[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
+                li_html, re.I)
+            if not link_m:
+                continue
+            url = html_unescape(link_m.group(1).strip())
+            if url.startswith("//"):
+                url = "https:" + url
+            elif not url.startswith("http"):
+                url = self._full_url(url)
+
+            name_m = re.search(
+                r'class=["\'][^"\']*ser-name[^"\']*["\'][^>]*>(.*?)</span>',
+                li_html, re.S | re.I)
+            name = self._strip_tags(name_m.group(1)).strip() if name_m else "Server"
+
+            quality_m = re.search(
+                r'class=["\'][^"\']*server-info[^"\']*["\'][^>]*>.*?<em>(.*?)</em>',
+                li_html, re.S | re.I)
+            quality = self._strip_tags(quality_m.group(1)).strip() if quality_m else ""
+
+            downloads.append({
+                "resolution": quality,
+                "size": "",
+                "quality": name,
+                "url": url,
+            })
+        return downloads
+
     def _pull_downloads(self, servers):
         out = []
         for s in servers or []:
@@ -1150,6 +1253,12 @@ class EgyDeadExtractor(BaseExtractor):
             result["poster"] = poster
             result["plot"] = plot
             result["year"] = year
+            info = self._parse_info_box(html)         # [PATCH 110]
+            if info.get("year"):
+                result["year"] = info["year"]
+            for _k in ("genres", "country", "quality", "language", "channel", "runtime", "category"):
+                if info.get(_k):
+                    result[_k] = info[_k]
             result["type"] = "episode"
 
             servers = self._extract_watch_servers(html, final_url or url)
@@ -1160,7 +1269,10 @@ class EgyDeadExtractor(BaseExtractor):
                     servers = self._extract_watch_servers(post_html, post_final_url or url)
 
             result["servers"] = servers
-            result["downloads"] = self._pull_downloads(servers)   # [PATCH 99]
+            # [PATCH 109] the site's own download list takes priority; fall back to the
+            # MegaMax-mirror reuse (PATCH 99) only when this page has no download list.
+            real_downloads = self._parse_download_servers(html)
+            result["downloads"] = real_downloads if real_downloads else self._pull_downloads(servers)
             log("EgyDead: episode {} → {} servers".format(title, len(servers)))
             return result
 
@@ -1171,11 +1283,32 @@ class EgyDeadExtractor(BaseExtractor):
             result["poster"] = poster
             result["plot"] = plot
             result["year"] = year
+            info = self._parse_info_box(html)         # [PATCH 110]
+            if info.get("year"):
+                result["year"] = info["year"]
+            for _k in ("genres", "country", "quality", "language", "channel", "runtime", "category"):
+                if info.get(_k):
+                    result[_k] = info[_k]
             result["type"] = "season"
 
             episodes = self._parse_episode_list(html)
-            result["items"] = episodes
-            log("EgyDead: season {} → {} episodes".format(title, len(episodes)))
+
+            # [PATCH 108] sibling seasons of the SAME series -- a season page carries the
+            # exact same "seasons-list" block a series page does; reuse the already-proven
+            # parser instead of only reading it on series pages.
+            siblings = []
+            try:
+                for s in self._parse_season_list(html):
+                    if s.get("url") and s.get("url") != url:
+                        s = dict(s)
+                        s["title"] = "🎬 " + (s.get("title") or "")
+                        siblings.append(s)
+            except Exception as e:
+                log("EgyDead: sibling-season parse failed: {}".format(e))
+
+            result["items"] = episodes + siblings
+            log("EgyDead: season {} → {} episodes, {} other season(s)".format(
+                title, len(episodes), len(siblings)))
             return result
 
         if "/serie/" in url_low or "/series/" in url_low:
@@ -1185,6 +1318,12 @@ class EgyDeadExtractor(BaseExtractor):
             result["poster"] = poster
             result["plot"] = plot
             result["year"] = year
+            info = self._parse_info_box(html)         # [PATCH 110]
+            if info.get("year"):
+                result["year"] = info["year"]
+            for _k in ("genres", "country", "quality", "language", "channel", "runtime", "category"):
+                if info.get(_k):
+                    result[_k] = info[_k]
             result["type"] = "series"
 
             seasons = self._parse_season_list(html)
@@ -1198,6 +1337,12 @@ class EgyDeadExtractor(BaseExtractor):
         result["poster"] = poster
         result["plot"] = plot
         result["year"] = year
+        info = self._parse_info_box(html)         # [PATCH 110]
+        if info.get("year"):
+            result["year"] = info["year"]
+        for _k in ("genres", "country", "quality", "language", "channel", "runtime", "category"):
+            if info.get(_k):
+                result[_k] = info[_k]
         result["type"] = "movie"
 
         servers = self._extract_watch_servers(html, final_url or url)
@@ -1208,7 +1353,10 @@ class EgyDeadExtractor(BaseExtractor):
                 servers = self._extract_watch_servers(post_html, post_final_url or url)
 
         result["servers"] = servers
-        result["downloads"] = self._pull_downloads(servers)   # [PATCH 99]
+        # [PATCH 109] the site's own download list takes priority; fall back to the
+        # MegaMax-mirror reuse (PATCH 99) only when this page has no download list.
+        real_downloads = self._parse_download_servers(html)
+        result["downloads"] = real_downloads if real_downloads else self._pull_downloads(servers)
         log("EgyDead: movie {} → {} servers".format(title, len(servers)))
         return result
 

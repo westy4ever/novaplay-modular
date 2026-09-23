@@ -26,10 +26,9 @@ class WecimaExtractor(BaseExtractor):
     DOMAINS = [
         "https://wecima.click/",
         "https://wecima.cx/",
-        "https://wecima.bid/",
-        "https://www.wecima.site/",
+        "https://wecima.ac/",
     ]
-    VALID_HOST_MARKERS = ("wecima.click", "wecima.cx", "wecima.bid", "wecima.site")
+    VALID_HOST_MARKERS = ("wecima.click", "wecima.cx", "wecima.ac")
     BLOCKED_HOST_MARKERS = ("alliance4creativity.com",)
 
     # FIX: Use the actual English-slug URLs the site uses (confirmed via network log).
@@ -271,11 +270,49 @@ class WecimaExtractor(BaseExtractor):
             if not title:
                 continue
             
+            # [PATCH 114] real cards embed the year in the title text (e.g. "The Mother's
+            # Monster 2026"), not a dedicated <span class="year"> -- that span does not exist
+            # in the current markup, confirmed against real captures.
             year = ""
-            year_match = re.search(r'<span[^>]+class="year"[^>]*>\(?\s*(\d{4})\s*\)?</span>', block, re.I)
-            if year_match:
-                year = year_match.group(1)
-            
+            year_in_title = re.search(r'\b(19\d{2}|20\d{2})\b', title)
+            if year_in_title:
+                year = year_in_title.group(1)
+
+            # [PATCH 114] rating/quality/genre spans, confirmed real (Wecima-Card__*).
+            rating = ""
+            rating_m = re.search(r'class="Wecima-Card__rating">([^<]+)<', block)
+            if rating_m:
+                rating = rating_m.group(1).strip()
+
+            quality = ""
+            quality_m = re.search(r'class="Wecima-Card__quality">([^<]+)<', block)
+            if quality_m:
+                quality = quality_m.group(1).strip()
+
+            genres = ""
+            genre_m = re.search(r'class="Wecima-Card__genre">([^<]+)<', block)
+            if genre_m:
+                genres = genre_m.group(1).strip()
+
+            # [PATCH 114] richer schema.org/VideoObject microdata, present on category-listing
+            # pages (not the homepage carousel) -- full description and ISO-8601 duration.
+            plot_meta = ""
+            desc_m = re.search(r'<meta itemprop="description" content="([^"]+)"', block)
+            if desc_m:
+                plot_meta = html_unescape(desc_m.group(1)).strip()
+
+            runtime = ""
+            dur_m = re.search(r'<meta itemprop="duration" content="PT(?:(\d+)H)?(?:(\d+)M)?"', block)
+            if dur_m:
+                hh, mm = dur_m.group(1), dur_m.group(2)
+                parts = []
+                if hh:
+                    parts.append("{}h".format(hh))
+                if mm:
+                    parts.append("{}m".format(mm))
+                if parts:
+                    runtime = " ".join(parts)
+
             poster = ""
             # FIX: Check multiple lazy-loading attributes and both quote styles.
             # The old regex only checked data-src/src with double quotes and missed
@@ -302,14 +339,25 @@ class WecimaExtractor(BaseExtractor):
                 poster = ""
             
             seen.add(url)
-            cards.append({
+            item = {
                 "title": title,
                 "url": url,
                 "poster": self._normalize_url(poster) if poster else "",
-                "plot": year,
+                "plot": plot_meta or year,  # [PATCH 114] real description when present, else the old year fallback
                 "type": self._guess_type(title, url),
                 "_action": "details",
-            })
+            }
+            if year:
+                item["year"] = year
+            if rating:
+                item["rating"] = rating
+            if quality:
+                item["quality"] = quality
+            if genres:
+                item["genres"] = genres
+            if runtime:
+                item["runtime"] = runtime
+            cards.append(item)
         
         log("Wecima: extracted {} cards".format(len(cards)))
         return cards

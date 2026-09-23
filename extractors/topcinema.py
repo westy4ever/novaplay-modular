@@ -23,6 +23,7 @@ class TopCinemaExtractor(BaseExtractor):
     """Extractor for TopCinema - topcinemaa.top"""
     
     DOMAINS = [
+        "https://topcinema.io/",          # [PATCH C] primary
         "https://topcinemaa.com/",
         "https://topcinemaa.top/",
         "https://topcinma.com/",
@@ -154,6 +155,10 @@ class TopCinemaExtractor(BaseExtractor):
         m = re.search(r'(?<!\d)(\d+)(?!\d)', title)
         return int(m.group(1)) if m else 9999
     
+    # ------------------------------------------------------------------
+    # [PATCH A] _extract_blocks — data-src-first poster, ribbon + quality,
+    #           number/Collection badge, genres.
+    # ------------------------------------------------------------------
     def _extract_blocks(self, html):
         items = []
         pattern = r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*title=["\']([^"\']+)["\'][^>]*>(.*?)</a>'
@@ -165,21 +170,91 @@ class TopCinemaExtractor(BaseExtractor):
             if re.search(r'/(?:category|search|page|tag|author)/', href, re.I):
                 continue
     
-            img_match = re.search(r'<img[^>]+(?:data-src|src)=["\']([^"\']+)["\']', inner, re.I)
-            if not img_match:
+            # [PATCH A.1] poster: prefer data-src (lazy) over src (placeholder)
+            poster = ""
+            ds_m = re.search(r'<img[^>]+data-src=["\']([^"\']+)["\']', inner, re.I)
+            if ds_m:
+                poster = ds_m.group(1)
+            else:
+                ss_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', inner, re.I)
+                if ss_m:
+                    poster = ss_m.group(1)
+            if not poster or poster.startswith('data:') or 'placeholder' in poster.lower():
                 continue
-            poster = img_match.group(1)
 
-            # [PATCH 46] IMDb rating — <li class="imdbRating"><i ...></i> 7</li>
+            # [PATCH 46] IMDb rating
             rating = ""
             rating_m = re.search(r'class=["\']imdbRating["\'][^>]*>.*?<i[^>]*>.*?</i>\s*([\d.]+)', inner, re.I | re.S)
             if not rating_m:
                 rating_m = re.search(r'class=["\']imdbRating["\'][^>]*>\s*([\d.]+)', inner, re.I)
             if rating_m:
                 rating = rating_m.group(1)
-    
-            if not poster or poster.startswith('data:') or 'placeholder' in poster.lower():
-                continue
+
+            # [PATCH A.2] ribbon — quality tag or status badge ("الاخيرة")
+            ribbon = ""
+            ribbon_m = re.search(r'class=["\']ribbon["\'][^>]*>(.*?)</div>', inner, re.I | re.S)
+            if ribbon_m:
+                ribbon = re.sub(r'<[^>]+>', ' ', ribbon_m.group(1))
+                ribbon = html_unescape(ribbon)
+                ribbon = re.sub(r'\s{2,}', ' ', ribbon).strip()
+
+            # [PATCH A.3] quality from <ul class="liList">
+            list_quality = ""
+            ul_m = re.search(r'<ul[^>]+class=["\'][^"\']*\bliList\b[^"\']*["\'][^>]*>(.*?)</ul>',
+                             inner, re.I | re.S)
+            if ul_m:
+                for li_cls, li_inner in re.findall(
+                    r'<li[^>]*class=["\']([^"\']*)["\'][^>]*>(.*?)</li>',
+                    ul_m.group(1), re.I | re.S
+                ):
+                    if "imdbrating" in (li_cls or "").lower():
+                        continue
+                    li_text = re.sub(r'<[^>]+>', ' ', li_inner)
+                    li_text = html_unescape(li_text)
+                    li_text = re.sub(r'\s{2,}', ' ', li_text).strip()
+                    if not li_text:
+                        continue
+                    if re.search(r'\d{3,4}p|WEB[\s\-]?DL|WEBRip|WEBSCR|BluRay|BRRip|HDTV|HDTS|HDTC|HDCAM|HDRip|HC[\s\-]?WEB|CAM|TS\b',
+                                 li_text, re.I):
+                        list_quality = li_text
+                        break
+
+            is_quality_ribbon = bool(re.search(
+                r'\d{3,4}p|BluRay|WEB|HDTS|HDTC|HDCAM|HDTV|HDRip|HC[\s\-]?WEB|BRRip|WEBRip',
+                ribbon, re.I
+            ))
+            quality_label = ribbon if is_quality_ribbon else (list_quality or ribbon)
+            status_label = "" if is_quality_ribbon else ribbon
+
+            # [PATCH A.4] number / number Collection badge
+            number_label = ""
+            num_m = re.search(
+                r'<div[^>]+class=["\'][^"\']*\bnumber\b[^"\']*["\'][^>]*>(.*?)</div>',
+                inner, re.I | re.S
+            )
+            if num_m:
+                number_label = re.sub(r'<[^>]+>', ' ', num_m.group(1))
+                number_label = html_unescape(number_label)
+                number_label = re.sub(r'\s{2,}', ' ', number_label).strip()
+
+            # [PATCH A.5] genres
+            genres = []
+            if ul_m:
+                for li_cls, li_inner in re.findall(
+                    r'<li[^>]*class=["\']([^"\']*)["\'][^>]*>(.*?)</li>',
+                    ul_m.group(1), re.I | re.S
+                ):
+                    if "imdbrating" in (li_cls or "").lower():
+                        continue
+                    li_text = re.sub(r'<[^>]+>', ' ', li_inner)
+                    li_text = html_unescape(li_text)
+                    li_text = re.sub(r'\s{2,}', ' ', li_text).strip()
+                    if not li_text:
+                        continue
+                    if re.search(r'\d{3,4}p|WEB[\s\-]?DL|WEBRip|WEBSCR|BluRay|BRRip|HDTV|HDTS|HDTC|HDCAM|HDRip|HC[\s\-]?WEB|CAM|TS\b',
+                                 li_text, re.I):
+                        continue
+                    genres.append(li_text)
     
             link = self._normalize_url(href)
             poster = self._normalize_url(poster)
@@ -195,9 +270,7 @@ class TopCinemaExtractor(BaseExtractor):
     
             title = self._clean_title(title)
 
-            # [PATCH 52] year: extract from the title into its own field
-            # (feeds the red badge) and strip it from the caption text —
-            # topcinema titles arrive as "Movie Name 2026"
+            # [PATCH 52] year extraction
             year = ""
             ym = re.search(r'\b(19\d{2}|20\d{2})\b', title)
             if ym:
@@ -212,21 +285,43 @@ class TopCinemaExtractor(BaseExtractor):
                 "type": item_type,
                 "year": year,
                 "rating": rating,
+                "quality": quality_label,
+                "status": status_label,
+                "number": number_label,
+                "genres": genres,
                 "_action": "details"
             })
         return items
     
+    # ------------------------------------------------------------------
+    # [PATCH B/C] get_categories — full site map. /home1/ is a landing
+    #             entry only.
+    # ------------------------------------------------------------------
     def get_categories(self, mtype="movie"):
         base = self._get_base()
         return [
+            {"title": "🏠 الرئيسية",     "url": base + "home1/",  "type": "category", "_action": "category"},
             {"title": "🎬 المضاف حديثا", "url": base + "recent/", "type": "category", "_action": "category"},
+
             {"title": "🎬 أفلام أجنبية", "url": base + "category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A-8/", "type": "category", "_action": "category"},
-            {"title": "🎬 أفلام أنمي", "url": base + "category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D9%86%D9%85%D9%8A-2/", "type": "category", "_action": "category"},
-            {"title": "🎬 أفلام أسيوية", "url": base + "category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%B3%D9%8A%D9%88%D9%8A/", "type": "category", "_action": "category"},
-            {"title": "🎬 أفلام نتفليكس", "url": base + "netflix-movies/", "type": "category", "_action": "category"},
+            {"title": "🎬 أفلام أنمي",   "url": base + "category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D9%86%D9%85%D9%8A-2/",     "type": "category", "_action": "category"},
+            {"title": "🎬 أفلام أسيوية", "url": base + "category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%B3%D9%8A%D9%88%D9%8A/",  "type": "category", "_action": "category"},
+            {"title": "🎬 أفلام نتفليكس", "url": base + "netflix-movies/",   "type": "category", "_action": "category"},
+            {"title": "🎞️ سلاسل الأفلام", "url": base + "movies-collections/", "type": "category", "_action": "category"},
+            {"title": "⭐ أفلام الأعلى تقييما IMDB", "url": base + "top-rating-imdb/", "type": "category", "_action": "category"},
+
             {"title": "📺 مسلسلات أجنبية", "url": base + "category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/", "type": "category", "_action": "category"},
             {"title": "📺 مسلسلات أسيوية", "url": base + "category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%B3%D9%8A%D9%88%D9%8A%D8%A9/", "type": "category", "_action": "category"},
-            {"title": "📺 مسلسلات أنمي", "url": base + "category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D9%86%D9%85%D9%8A/", "type": "category", "_action": "category"},
+            {"title": "📺 مسلسلات أنمي",   "url": base + "category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D9%86%D9%85%D9%8A/",   "type": "category", "_action": "category"},
+            {"title": "⭐ مسلسلات الأعلى تقييما IMDB", "url": base + "top-rating-imdb-series/", "type": "category", "_action": "category"},
+
+            {"title": "📺 مسلسلات نتفليكس أجنبي", "url": base + "netflix-series/?cat=7", "type": "category", "_action": "category"},
+            {"title": "📺 مسلسلات نتفليكس أنمي",  "url": base + "netflix-series/?cat=8", "type": "category", "_action": "category"},
+            {"title": "📺 مسلسلات نتفليكس آسيوي", "url": base + "netflix-series/?cat=9", "type": "category", "_action": "category"},
+
+            {"title": "📦 مسلسلات أجنبي كاملة",  "url": base + "full-packs/?cat=7", "type": "category", "_action": "category"},
+            {"title": "📦 مسلسلات أنمي كاملة",   "url": base + "full-packs/?cat=8", "type": "category", "_action": "category"},
+            {"title": "📦 مسلسلات آسيوية كاملة", "url": base + "full-packs/?cat=9", "type": "category", "_action": "category"},
         ]
     
     def get_category_items(self, url, page=1):
@@ -238,13 +333,6 @@ class TopCinemaExtractor(BaseExtractor):
         items = self._extract_blocks(html)
     
         next_url = None
-        # NOTE: topcinema's own pagination <a> tags carry neither rel="next"
-        # nor class="next", and the "»" glyph is emitted as the HTML entity
-        # &raquo; (not the literal unicode character) — so all of those used
-        # to fail silently. The <link rel="next"> tag in <head> is the most
-        # reliable source when present; the &raquo;-aware anchor pattern is
-        # the fallback that matches topcinema's actual pagination markup:
-        # <div class="paginate"><ul class="page-numbers">...<li><a href="...">&raquo;</a></li>
         m = re.search(r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
         if not m:
             m = re.search(r'<a[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
@@ -276,6 +364,17 @@ class TopCinemaExtractor(BaseExtractor):
         title_m = re.search(r'<title>(.*?)</title>', html, re.I | re.S)
         raw_title = title_m.group(1) if title_m else "Unknown Title"
         title = self._clean_title(raw_title)
+
+        # [PATCH D.1] prefer the visible <h1 class="post-title"> when present
+        h1_m = re.search(
+            r'<h1[^>]+class=["\'][^"\']*\bpost-title\b[^"\']*["\'][^>]*>(.*?)</h1>',
+            html, re.S | re.I
+        )
+        if h1_m:
+            h1_text = re.sub(r'<[^>]+>', ' ', h1_m.group(1)).strip()
+            h1_text = re.sub(r'\s{2,}', ' ', h1_text)
+            if h1_text:
+                title = self._clean_title(h1_text)
     
         poster_m = re.search(r'property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
         poster = self._normalize_url(poster_m.group(1)) if poster_m else ""
@@ -288,6 +387,42 @@ class TopCinemaExtractor(BaseExtractor):
     
         plot_m = re.search(r'class=["\']description["\'][^>]*>(.*?)</', html, re.S | re.I)
         plot = self._clean_title(re.sub(r'<[^>]+>', '', plot_m.group(1))) if plot_m else ""
+
+        # [PATCH D.2] assemblies pages carry the plot in <div class="story"><p>…
+        if not plot:
+            story_m = re.search(
+                r'<div[^>]+class=["\'][^"\']*\bstory\b[^"\']*["\'][^>]*>(.*?)</div>',
+                html, re.S | re.I
+            )
+            if story_m:
+                plot = self._clean_title(re.sub(r'<[^>]+>', ' ', story_m.group(1)))
+
+        # [PATCH D.3] /assemblies/ URLs are "movie collection" hubs:
+        #   /assemblies/{slug}/       → hub with poster + plot + full grid
+        #   /assemblies/{slug}/list/  → bare grid of the same movies
+        # Both render each movie as a .Small--Box card (on the hub inside
+        # <section class="allseasonss">). Reuse _extract_blocks so every
+        # card becomes an item the UI can open as a details page.
+        if "/assemblies/" in (final_url or url):
+            ass_items = []
+            ass_m = re.search(
+                r'<section[^>]+class=["\'][^"\']*allseasonss[^"\']*["\'][^>]*>(.*?)</section>',
+                html, re.S | re.I
+            )
+            if ass_m:
+                ass_items = self._extract_blocks(ass_m.group(1))
+            if not ass_items:
+                # /list/ page has no .allseasonss — cards are at top level
+                ass_items = self._extract_blocks(html)
+            return {
+                "url": final_url,
+                "title": title,
+                "plot": plot,
+                "poster": poster,
+                "servers": [],
+                "items": ass_items,
+                "type": "series"
+            }
     
         servers = []
         episodes = []
@@ -360,12 +495,6 @@ class TopCinemaExtractor(BaseExtractor):
             clean_name = self._clean_title(name or "").strip()
             if not clean_name:
                 continue
-            # [PATCH 39] the watch page embeds "[label] <gap> ServerName"
-            # in the list items, and the old "توب سينما " prefix made every
-            # name Arabic-leading → RTL right-align + BiDi reordering →
-            # the bracket ended up visually displaced (the "large gap").
-            # Strip brackets, collapse whitespace, use the bare English
-            # server name — left-aligned, no BiDi, no gap.
             clean_name = re.sub(r'\[[^\]]*\]', ' ', clean_name)
             clean_name = re.sub(r'\s{2,}', ' ', clean_name).strip(' -–|')
             if not clean_name:
@@ -536,7 +665,7 @@ class TopCinemaExtractor(BaseExtractor):
                             extra_headers={"X-Requested-With": "XMLHttpRequest"},
                             post_data=postdata)
     
-            ifr_m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html or "")   # [PATCH 82] fetch can return None
+            ifr_m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html or "")   # [PATCH 82]
             if ifr_m:
                 v_url = self._normalize_url(ifr_m.group(1))
                 log("TopCinema: Found iframe '{}'".format(v_url))
@@ -556,14 +685,11 @@ class TopCinemaExtractor(BaseExtractor):
                 elif resolved:
                     final_stream = resolved
                 if final_stream:
-                    # [PATCH 82] the chain returns (stream, HOSTNAME); a bare hostname is not a
-                    # Referer. Known CDNs use the referers table, unknown ones the embed origin.
                     final_referer = (get_referer(final_stream, default_self=False)
                                      or ("https://{}/".format(chain_domain) if chain_domain else self._get_base()))
                     variants = _variants_for(final_stream)
                     quality = self._quality_from_url(final_stream)
                     return final_stream, quality, final_referer, variants
-                # chain found nothing: try the host resolvers on the embed URL itself
                 try:
                     from .base import extract_stream as _base_extract
                     r = _base_extract(v_url)
@@ -574,12 +700,9 @@ class TopCinemaExtractor(BaseExtractor):
                     log("TopCinema: host-resolver fallback failed: {}".format(e))
                 log("TopCinema: no stream from embed {}".format(v_url))
                 return None, "", self._get_base(), []
-            # [PATCH 98] the AJAX reply had no <iframe>: report a clean failure (Detail shows
-            # "try another server") instead of falling off the end and returning None
             log("TopCinema: no iframe in the server reply for {}".format(ajax_url))
             return None, "", self._get_base(), []
 
-        # [PATCH 98] not a topcinema_server URL (direct link): let the generic resolvers handle it
         from .base import extract_stream as _generic_extract
         return _generic_extract(url)
 
