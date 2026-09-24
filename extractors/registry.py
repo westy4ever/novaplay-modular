@@ -36,6 +36,7 @@ from .base import log as _reg_log
 
 from .egydead import EgyDeadExtractor
 from .egydead_coupons import EgyDeadCouponsExtractor
+from .egybest import EgyBestExtractor
 from .akwam import AkwamExtractor
 from .akwams import AkwamsExtractor
 from .arabseed import ArabseedExtractor
@@ -51,6 +52,9 @@ from .yts import YTSExtractor
 from .torrentio import TorrentioExtractor
 from .vidsrc import VidsrcExtractor
 from .imdbsu import ImdbSuExtractor
+from .mywecima import MyWecimaExtractor
+from .alooytv import AlooyTvExtractor
+from .aflaam import AflaamExtractor
 
 # Site registry: maps site names to extractor classes.
 # "short" (optional) = the compact tagline shown on the home grid;
@@ -58,6 +62,7 @@ from .imdbsu import ImdbSuExtractor
 _SITE_REGISTRY = {
     "egydead":         {"class": EgyDeadExtractor, "title": "EgyDead", "tagline": "واجهة حديثة وبوسترات ومكتبة متجددة", "short": "واجهة حديثة وبوسترات"},
     "egydead_coupons": {"class": EgyDeadCouponsExtractor, "title": "EgyDead Coupons", "tagline": "النسخة العربية - تصنيفات وأقسام مترجمة", "short": "النسخة العربية - تصنيفات مترجمة"},
+    "egybest":         {"class": EgyBestExtractor, "title": "EgyBest", "tagline": "ايجي بست - أفلام ومسلسلات مترجمة", "short": "ايجي بست - كل المحتوى"},
     "akwam":           {"class": AkwamExtractor, "title": "Akwam (Classic)", "tagline": "موقع اكوام الكلاسيكي - افلام ومسلسلات عربية واجنبية", "short": "موقع اكوام الكلاسيكي"},
     "akwams":          {"class": AkwamsExtractor, "title": "Akwams (Modern)", "tagline": "موقع اكوام الحديث - واجهة سريعة ومحتوى محدث", "short": "موقع اكوام الحديث"},
     "arabseed":        {"class": ArabseedExtractor, "title": "Arabseed", "tagline": "تصنيفات عربية وأجنبية وحلقات مرتبة", "short": "تصنيفات مرتبة"},
@@ -73,17 +78,26 @@ _SITE_REGISTRY = {
     "torrentio":       {"class": TorrentioExtractor, "title": "Torrentio", "tagline": "أفلام ومسلسلات Magnet (TorrServer)", "short": "أفلام ومسلسلات Magnet عبر TorrServer"},
     "vidsrc":          {"class": VidsrcExtractor, "title": "Vidsrc", "tagline": "Movies & TV Shows in HD", "short": "أفلام ومسلسلات أجنبية بجودة عالية"},
     "imdb_su":         {"class": ImdbSuExtractor, "title": "IMDB.su", "tagline": "أفلام ومسلسلات شاهد مباشر"},
+    "mywecima":        {"class": MyWecimaExtractor, "title": "MyWecima", "tagline": "ماي سيما — أفلام ومسلسلات مترجمة بجودة عالية", "short": "أفلام ومسلسلات مترجمة"},
+    "alooytv":         {"class": AlooyTvExtractor, "title": "AlooyTV", "tagline": "الوي تي في - أفلام ومسلسلات مترجمة", "short": "الوي تي في - أفلام ومسلسلات"},
+    "aflaam":          {"class": AflaamExtractor, "title": "Aflaam", "tagline": "افلام — مشاهدة وتحميل الأفلام والمسلسلات", "short": "افلام — أفلام ومسلسلات"},
 }
 
-_SEARCH_SITE_ORDER = ("egydead", "egydead_coupons", "akwam", "akwams", "arabseed", "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx", "shaheed", "shahid4u", "arablionz", "yts", "torrentio", "vidsrc", "imdb_su")
+# Aggregated-search priority.
+_SEARCH_SITE_ORDER = (
+    "egydead", "egydead_coupons", "egybest", "akwam", "akwams", "arabseed",
+    "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx",
+    "shaheed", "shahid4u", "arablionz", "mywecima", "alooytv", "aflaam",
+    "yts", "torrentio", "vidsrc", "imdb_su",
+)
 
 # Home-grid tile order — matches plugin.py's current home list EXACTLY,
 # and deliberately separate from _SEARCH_SITE_ORDER (see module docstring).
 _HOME_SITE_ORDER = (
-    "egydead", "egydead_coupons", "akwam", "akwams", "arabseed",
+    "egydead", "egydead_coupons", "egybest", "akwam", "akwams", "arabseed",
     "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
-    "fasel", "faselhdx", "arablionz", "yts", "torrentio", "vidsrc",
-    "imdb_su",
+    "fasel", "faselhdx", "arablionz", "mywecima", "alooytv", "aflaam",
+    "yts", "torrentio", "vidsrc", "imdb_su",
 )
 
 # ─── Extractor singletons ────────────────────────────────────────────────────
@@ -129,7 +143,8 @@ def get_site_names():
 
 def get_site_metadata(site_name):
     entry = _SITE_REGISTRY.get(site_name)
-    if entry: return {"title": entry.get("title", site_name), "tagline": entry.get("tagline", "")}
+    if entry:
+        return {"title": entry.get("title", site_name), "tagline": entry.get("tagline", "")}
     return {"title": site_name, "tagline": ""}
 
 

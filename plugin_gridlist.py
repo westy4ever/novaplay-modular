@@ -397,20 +397,22 @@ class TextListGrid(_BaseCardGrid):
         return row
 
 
-# --- Poster grid (design: 8x2, posters 210x330 @1080p; cols auto-fit) ---
-POSTER_W = sc(210)
-POSTER_H = sc(330)
+# --- Poster grid (design: 7x2, posters 240x360 = exact 2:3 @1080p) ---
+POSTER_W = sc(240)                       # was sc(210) — wider, matches 2:3 with 360
+POSTER_H = sc(360)                       # keeps the taller poster
+POSTER_ZOOM_HEADROOM = sc(16)            # gap the 8% zoom grows into
 POSTER_CAPTION_LINE_H = max(14, sc(24))
-POSTER_CAPTION_LINES = 3
+POSTER_CAPTION_LINES = 2
 POSTER_CAPTION_H = POSTER_CAPTION_LINE_H * POSTER_CAPTION_LINES
-POSTER_CELL_MARGIN_H = max(4, sc(10))
+POSTER_CELL_MARGIN_H = max(4, sc(10))    # 7 cols × 260 = 1820, fits 1840 widget
 POSTER_CELL_MARGIN_V = max(4, sc(4))
-POSTER_CELL_W = POSTER_W + 2 * POSTER_CELL_MARGIN_H
-POSTER_CELL_H = POSTER_H + POSTER_CAPTION_H + 2 * POSTER_CELL_MARGIN_V
+POSTER_CELL_W = POSTER_W + 2 * POSTER_CELL_MARGIN_H     # = 260
+POSTER_CELL_H = (POSTER_H + POSTER_ZOOM_HEADROOM
+                 + POSTER_CAPTION_H + 2 * POSTER_CELL_MARGIN_V)   # = 432
 
-POSTER_GRID_COLS = max(4, (SCREEN_W - sc(80)) // POSTER_CELL_W)
+POSTER_GRID_COLS = max(4, (SCREEN_W - sc(80)) // POSTER_CELL_W)   # = 7
 POSTER_GRID_ROWS = 2
-POSTER_WRAP_CHARS = max(12, int(16 * _SCALE))
+POSTER_WRAP_CHARS = max(12, int(18 * _SCALE))    # was 16 — wider tile fits more chars
 
 class PosterCardGrid(_BaseCardGrid):
     def __init__(self):
@@ -443,7 +445,11 @@ class PosterCardGrid(_BaseCardGrid):
             else:
                 caption = title
 
-            cap_y = cy + POSTER_H + 2
+            # [PATCH 108] Caption sits below the poster PLUS the zoom
+            # headroom — so the 8% pop-up of the poster (and its overlay
+            # badges/strip/bar, which all ride the zoom) can never reach
+            # the caption. Was cy + POSTER_H + 2 (which overlapped by ~11 px).
+            cap_y = cy + POSTER_H + POSTER_ZOOM_HEADROOM
 
             row.append(MultiContentEntryText(pos=(cx, cap_y), size=(POSTER_W, POSTER_CAPTION_H), font=0, text="", color=0, backcolor="#000000", flags=0))
             wrapped = _wrap_ui_text(caption, width=POSTER_WRAP_CHARS, max_lines=POSTER_CAPTION_LINES, fallback=caption)
@@ -463,28 +469,38 @@ def build_poster_pixmap_widgets_xml(x0, y0, name_prefix="poster"):
     return "".join(parts)
 
 # --- Per-cell overlay labels (z=4, above the poster pixmaps z=3) ----------
-POSTER_BADGE_H = max(16, sc(26))
+POSTER_BADGE_H = max(20, sc(34))   # taller bottom strip — was sc(26)
+POSTER_BADGE_INSET = sc(6)         # how far in from the poster's edges the top badges sit
+POSTER_YEAR_W, POSTER_YEAR_H  = sc(78), sc(30)   # was sc(60) × sc(24)
+POSTER_RATE_W, POSTER_RATE_H  = sc(86), sc(30)   # was sc(70) × sc(24)
+POSTER_BADGE_FONT = max(14, sc(20))              # was sc(15)
 
 
 def build_poster_badge_widgets_xml(x0, y0, name_prefix="pbadge"):
     parts = []
-    _f = max(11, sc(17))
-    _cr = max(3, sc(6))
+    _f = POSTER_BADGE_FONT
+    _cr = max(4, sc(8))
+    _pad = POSTER_BADGE_INSET
     for r in range(POSTER_GRID_ROWS):
         for c in range(POSTER_GRID_COLS):
             px = x0 + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
             py = y0 + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
+            # Bottom gold bar — full width, anchored to the poster's bottom edge.
+            # The runtime (see plugin_screen_home._updatePosterPixmaps) re-sizes
+            # and re-positions this on every redraw/zoom, so the skin values here
+            # are only the unzoomed defaults.
             parts.append('\n\t\t<widget name="%s_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="%d" />'
                          % (name_prefix, r, c, px, py + POSTER_H - POSTER_BADGE_H, POSTER_W, POSTER_BADGE_H, _f, _cr))
-            # year badge (top-left): red box, white text — compact (52)
-            parts.append('\n\t\t<widget name="pyear_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#C0392B" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#F0F6FC" halign="center" valign="center" cornerRadius="%d" />'
-                         % (r, c, px + sc(4), py + sc(4), sc(60), sc(24), max(12, sc(15)), max(2, sc(4))))
-            # rating badge (top-right): black box, gold star+number (52)
-            parts.append('\n\t\t<widget name="prat_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#000000" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#FFD740" halign="center" valign="center" cornerRadius="%d" />'
-                         % (r, c, px + POSTER_W - sc(74), py + sc(4), sc(70), sc(24), max(12, sc(15)), max(2, sc(4))))
-            # progress bar (bottom edge) — gold fill; width scales (52)
+            # Progress bar — thin gold line stacked immediately above the bottom bar.
+            # Initial width is 0; the runtime sizes it to the watch percentage.
             parts.append('\n\t\t<widget name="pbar_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" cornerRadius="2" />'
-                         % (r, c, px, py + POSTER_H - POSTER_BADGE_H - sc(10), POSTER_W, sc(8)))
+                         % (r, c, px, py + POSTER_H - POSTER_BADGE_H - sc(12), 0, sc(10)))
+            # Year badge (top-left) — enlarged to fit the wider 240-px poster.
+            parts.append('\n\t\t<widget name="pyear_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#C0392B" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#F0F6FC" halign="center" valign="center" cornerRadius="%d" />'
+                         % (r, c, px + _pad, py + _pad, POSTER_YEAR_W, POSTER_YEAR_H, _f, _cr))
+            # Rating badge (top-right) — enlarged, symmetric with the year badge.
+            parts.append('\n\t\t<widget name="prat_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#000000" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#FFD740" halign="center" valign="center" cornerRadius="%d" />'
+                         % (r, c, px + POSTER_W - POSTER_RATE_W - _pad, py + _pad, POSTER_RATE_W, POSTER_RATE_H, _f, _cr))
     return "".join(parts)
 
 

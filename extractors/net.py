@@ -436,7 +436,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None):
                     cf_headers = {
                         "User-Agent": UA,
                         "Accept-Language": "ar,en-US,en;q=0.9",
-                        "Accept-Encoding": "gzip, deflate, br",
+                        "Accept-Encoding": ACCEPT_ENCODING,
                         "Connection": "keep-alive",
                         "Upgrade-Insecure-Requests": "1",
                     }
@@ -584,6 +584,11 @@ def fetch(url, referer=None, extra_headers=None, post_data=None):
                     return None, final_url
 
                 html = _decode_response_body(raw, info)
+
+                if not use_cffi and _CURL_CFFI_OK and info.get("Content-Encoding", "").lower() == "br" and brotli is None:
+                    log("Brotli response but no brotli module available, switching to curl_cffi for native decompression")
+                    use_cffi = True
+                    continue
 
                 if not use_cffi and _CURL_CFFI_OK and _is_cloudflare_challenge(html):
                     log("Cloudflare challenge detected in urllib response, switching to curl_cffi")

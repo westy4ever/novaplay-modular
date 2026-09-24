@@ -66,7 +66,9 @@ from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     _CAROUSEL_GEOMETRY,
     CONT_SLOTS, CONT_W, CONT_H, CONT_GAP, CONT_X0, CONT_Y,
     POSTER_CELL_W, POSTER_CELL_H, POSTER_CELL_MARGIN_H,
-    POSTER_CELL_MARGIN_V, POSTER_BADGE_H, sc)
+    POSTER_CELL_MARGIN_V, POSTER_BADGE_H,
+    POSTER_YEAR_W, POSTER_YEAR_H, POSTER_RATE_W, POSTER_RATE_H,
+    sc)
 import plugin_imagecache
 import plugin_health
 from plugin_assets import placeholder_for_item
@@ -111,7 +113,7 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
         <widget name="home_grid" position="20,425" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
-        <widget name="poster_grid" position="40,90" size="1840,820" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        <widget name="poster_grid" position="50,90" size="1820,864" scrollbarMode="showNever" transparent="1" zPosition="3" />
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {poster_grid_pics}
         {poster_badge_xml}
@@ -131,7 +133,7 @@ class AdvancedArabicPlayerHome(Screen):
     _HOME_GRID_X = 20
     _HOME_GRID_Y = 425          # [PATCH 63] was 440 — moved up 15px after
                                 # the strip moved down to y=110, 30px gap
-    _POSTER_GRID_X = 40
+    _POSTER_GRID_X = 50          # 1840 - 7×260 = 20, half = 10 → centers the 7-col block
     _POSTER_GRID_Y = 90
     carousel_slots = 7
     carousel_center = 3
@@ -648,6 +650,10 @@ class AdvancedArabicPlayerHome(Screen):
         # (z=5). The old in-listbox bar was at z=3, same as the poster
         # pixmaps, so the 8% zoom on the selected cell painted over it —
         # which is why it only showed while a poster was still loading.
+        #
+        # [PATCH 108] Selection bar now hugs the ZOOMED poster's right
+        # edge and spans the zoomed height, so it pairs visually with
+        # the enlarged card instead of clinging to the un-zoomed box.
         try:
             _g = self["poster_grid"]
             if (self._display_mode == "poster" and self._layout_style == "grid"
@@ -655,11 +661,15 @@ class AdvancedArabicPlayerHome(Screen):
                 _sel_i = _g.currentIndex - _g._getPageStart()
                 _sr = _sel_i // _g.cols
                 _scol = _sel_i % _g.cols
-                _sx = (self._POSTER_GRID_X + _scol * POSTER_CELL_W
-                       + POSTER_CELL_MARGIN_H + POSTER_W + 2)
-                _sy = (self._POSTER_GRID_Y + _sr * POSTER_CELL_H
-                       + POSTER_CELL_MARGIN_V)
-                self._moveResize("pgridSel", _sx, _sy, 6, POSTER_H)
+                _sx_base = (self._POSTER_GRID_X + _scol * POSTER_CELL_W
+                            + POSTER_CELL_MARGIN_H)
+                _sy_base = (self._POSTER_GRID_Y + _sr * POSTER_CELL_H
+                            + POSTER_CELL_MARGIN_V)
+                _zw_s = int(POSTER_W * 1.08)
+                _zh_s = int(POSTER_H * 1.08)
+                _zx_s = _sx_base - (_zw_s - POSTER_W) // 2
+                _zy_s = _sy_base - (_zh_s - POSTER_H) // 2
+                self._moveResize("pgridSel", _zx_s + _zw_s + 2, _zy_s, 6, _zh_s)
                 self["pgridSel"].show()
             else:
                 self["pgridSel"].hide()
@@ -684,6 +694,31 @@ class AdvancedArabicPlayerHome(Screen):
                     # [PATCH 61] clear the memo so the next paint isn't skipped
                     self._last_poster_painted.pop((r, c), None)
                     continue
+
+                # ── [PATCH 108] compute the zoomed box ONCE — reused for
+                # the poster pixmap AND every overlay (year / rating /
+                # bottom strip / progress bar). They all move together,
+                # so the whole card reads as one unit under the 8% pop.
+                _base_x = (self._POSTER_GRID_X + c * POSTER_CELL_W
+                           + POSTER_CELL_MARGIN_H)
+                _base_y = (self._POSTER_GRID_Y + r * POSTER_CELL_H
+                           + POSTER_CELL_MARGIN_V)
+                try:
+                    _g = self["poster_grid"]
+                    _idx = _g._getPageStart() + r * _g.cols + c
+                    _is_sel = (_idx == _g.currentIndex)
+                except Exception:
+                    _is_sel = False
+                if _is_sel:
+                    _zw = int(POSTER_W * 1.08)
+                    _zh = int(POSTER_H * 1.08)
+                    _zx = _base_x - (_zw - POSTER_W) // 2
+                    _zy = _base_y - (_zh - POSTER_H) // 2
+                else:
+                    _zw, _zh = POSTER_W, POSTER_H
+                    _zx, _zy = _base_x, _base_y
+
+                # ── Poster pixmap ────────────────────────────────────────
                 url = item.get("poster") or ""
                 path = ""
                 if url:
@@ -709,28 +744,8 @@ class AdvancedArabicPlayerHome(Screen):
                             widget.instance.setPixmapFromFile(path)
                             self._last_poster_painted[(r, c)] = path
                         widget.show()
-                        # [PATCH 51a] selected-poster zoom: the highlighted
-                        # card's image grows ~8% and re-centers on its cell.
-                        # The else-branch restores normal size when deselected.
-                        try:
-                            _g = self["poster_grid"]
-                            _idx = _g._getPageStart() + r * _g.cols + c
-                            _is_sel = (_idx == _g.currentIndex)
-                            if _is_sel:
-                                _zw, _zh = int(POSTER_W * 1.08), int(POSTER_H * 1.08)
-                                _zx = (self._POSTER_GRID_X + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
-                                       + (POSTER_W - _zw) // 2)
-                                _zy = (self._POSTER_GRID_Y + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
-                                       + (POSTER_H - _zh) // 2)
-                                widget.instance.move(ePoint(_zx, _zy))
-                                widget.instance.resize(eSize(_zw, _zh))
-                            else:
-                                _zx = self._POSTER_GRID_X + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
-                                _zy = self._POSTER_GRID_Y + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
-                                widget.instance.move(ePoint(_zx, _zy))
-                                widget.instance.resize(eSize(POSTER_W, POSTER_H))
-                        except Exception:
-                            pass
+                        widget.instance.move(ePoint(_zx, _zy))
+                        widget.instance.resize(eSize(_zw, _zh))
                     except Exception:
                         widget.hide()
                 else:
@@ -742,12 +757,15 @@ class AdvancedArabicPlayerHome(Screen):
                                 widget.instance.setPixmapFromFile(ph)
                                 self._last_poster_painted[(r, c)] = ph
                             widget.show()
+                            widget.instance.move(ePoint(_zx, _zy))
+                            widget.instance.resize(eSize(_zw, _zh))
                         except Exception:
                             widget.hide()
                     else:
                         widget.hide()
                     if url:
                         plugin_imagecache.requestImageAsync(url, target_size=(POSTER_W, POSTER_H))
+
                 # [PATCH 48/49] stash watch-state on the item so
                 # PosterCardGrid can draw state without re-querying
                 try:
@@ -762,22 +780,41 @@ class AdvancedArabicPlayerHome(Screen):
                     item["_watch_pos"] = int(_get_saved_position(item.get("url", "")) or 0)
                 except Exception:
                     pass
-                # [PATCH 49/52] paint the overlay badges — all ABOVE the
-                # poster pixmaps (z=4), compact sizes
+
+                # ── [PATCH 108] overlays ride the zoom ───────────────────
                 _in_grid = (self._display_mode == "poster" and self._layout_style == "grid")
                 _watched = bool(item.get("_is_watched"))
                 saved_pos = int(item.get("_watch_pos") or 0)
+                _pad = sc(6)
 
-                # year (top-left, red — compact)
+                # Zoom-aware positions — everything derives from
+                # (_zx, _zy, _zw, _zh) so overlays track the poster exactly.
+                _yb_x = _zx + _pad
+                _yb_y = _zy + _pad
+                _rb_x = _zx + _zw - POSTER_RATE_W - _pad
+                _rb_y = _zy + _pad
+                _bot_x = _zx
+                _bot_y = _zy + _zh - POSTER_BADGE_H
+                _bot_w = _zw
+                _bar_x = _zx + sc(4)
+                _bar_y = _zy + _zh - POSTER_BADGE_H - sc(12)
+                _bar_max_w = _zw - sc(8)
+
+                # year (top-left, red) — enlarged, follows zoom
                 yb = self["pyear_%d_%d" % (r, c)]
                 _yr = str(item.get("year") or "")[:4]
                 if _yr and _in_grid:
                     yb.setText(_yr)
+                    try:
+                        yb.instance.move(ePoint(_yb_x, _yb_y))
+                        yb.instance.resize(eSize(POSTER_YEAR_W, POSTER_YEAR_H))
+                    except Exception:
+                        pass
                     yb.show()
                 else:
                     yb.hide()
 
-                # rating (top-right, black/gold — compact, with star)
+                # rating (top-right, black/gold) — enlarged, follows zoom
                 rb = self["prat_%d_%d" % (r, c)]
                 _rt = str(item.get("rating") or "").strip()
                 try:
@@ -786,52 +823,55 @@ class AdvancedArabicPlayerHome(Screen):
                     _rtv = 0.0
                 if _rtv > 0 and _in_grid:
                     rb.setText(u"★ " + _rt[:3])
+                    try:
+                        rb.instance.move(ePoint(_rb_x, _rb_y))
+                        rb.instance.resize(eSize(POSTER_RATE_W, POSTER_RATE_H))
+                    except Exception:
+                        pass
                     rb.show()
                 else:
                     rb.hide()
 
-                # release/quality label (bottom strip, gold/black) [PATCH 106]
-                # e.g. EgyDead's HD / CAM / WEB-DL / مدبلج / بالمصري
+                # bottom gold strip (release label / ✓شاهدته / متابعة H:MM:SS)
                 _lb = str(item.get("label") or "").strip()
                 if _lb and _in_grid:
                     badge.setText(_lb)
-                    badge.show()
-                else:
-                    badge.hide()
-
-                # progress bar (bottom edge): gold fill, width = progress
-                bar = self["pbar_%d_%d" % (r, c)]
-                if (not _watched) and saved_pos > 30 and _in_grid:
-                    try:
-                        inst = bar.instance
-                        if inst is not None:
-                            base_x = (self._POSTER_GRID_X + c * POSTER_CELL_W
-                                      + POSTER_CELL_MARGIN_H)
-                            base_y = (self._POSTER_GRID_Y + r * POSTER_CELL_H
-                                      + POSTER_CELL_MARGIN_V + POSTER_H
-                                      - POSTER_BADGE_H - 10)
-                            _pct = item.get("_watch_pct") or (35 if saved_pos > 600 else 20)
-                            _w = max(12, (POSTER_W * min(100, max(10, int(_pct)))) // 100)
-                            inst.move(ePoint(base_x, base_y))
-                            inst.resize(eSize(_w, 8))
-                        bar.show()
-                    except Exception:
-                        bar.hide()
-                else:
-                    bar.hide()
-
-                # bottom gold bar (resume/✓)
-                if _watched and _in_grid:
+                elif _watched and _in_grid:
                     badge.setText(u"✓ شاهدته")
-                    badge.show()
                 elif saved_pos > 30 and _in_grid:
                     mm, ss = divmod(saved_pos, 60)
                     hh, mm = divmod(mm, 60)
                     tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
                     badge.setText("متابعة " + tstr)
+                else:
+                    badge.hide()
+
+                if _in_grid and (_lb or _watched or saved_pos > 30):
+                    try:
+                        badge.instance.move(ePoint(_bot_x, _bot_y))
+                        badge.instance.resize(eSize(_bot_w, POSTER_BADGE_H))
+                    except Exception:
+                        pass
                     badge.show()
                 else:
                     badge.hide()
+
+                # progress bar — thin gold line just above the bottom strip
+                bar = self["pbar_%d_%d" % (r, c)]
+                if (not _watched) and saved_pos > 30 and _in_grid:
+                    try:
+                        inst = bar.instance
+                        if inst is not None:
+                            _pct = item.get("_watch_pct") or (35 if saved_pos > 600 else 20)
+                            _pct = min(100, max(10, int(_pct)))
+                            _w = max(sc(12), (_bar_max_w * _pct) // 100)
+                            inst.move(ePoint(_bar_x, _bar_y))
+                            inst.resize(eSize(_w, sc(10)))
+                        bar.show()
+                    except Exception:
+                        bar.hide()
+                else:
+                    bar.hide()
 
     def _updateBackdrop(self, skip_tmdb=False):
         if self._display_mode != "poster" or self._layout_style != "carousel":
@@ -1122,17 +1162,25 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _applyContinueLayout(self, zoom_index=None):
         """Position all continue-strip posters. zoom_index=None means
-        'no selection' (all at base size)."""
+        'no selection' (all at base size). Each item's time badge is
+        repositioned to sit at the bottom edge of that item's poster —
+        under zoom, the badge follows the poster's grown box so the
+        strip behaves exactly like the poster grid."""
         for i in range(CONT_SLOTS):
             base_x = CONT_X0 + i * (CONT_W + CONT_GAP)
             if i == zoom_index:
                 zw = int(CONT_W * 1.08)
                 zh = int(CONT_H * 1.08)
-                zx = base_x + (CONT_W - zw) // 2
-                zy = CONT_Y + (CONT_H - zh) // 2
+                zx = base_x - (zw - CONT_W) // 2
+                zy = CONT_Y - (zh - CONT_H) // 2
                 self._moveResize("cont%d" % i, zx, zy, zw, zh)
+                # Time badge follows the zoomed box (bottom edge of the poster)
+                self._moveResize("contbadge%d" % i, zx, zy + zh - sc(28),
+                                 zw, sc(28))
             else:
                 self._moveResize("cont%d" % i, base_x, CONT_Y, CONT_W, CONT_H)
+                self._moveResize("contbadge%d" % i, base_x, CONT_Y + CONT_H - sc(28),
+                                 CONT_W, sc(28))
 
     def _resetContinueZoom(self):
         """Drop the zoom — call whenever we leave the continue row zone."""
@@ -1146,10 +1194,15 @@ class AdvancedArabicPlayerHome(Screen):
             return
         # Zoom the selected poster (matches poster-grid 8% pop)
         self._applyContinueLayout(self._cont_index)
-        # Right-edge cyan bar (6px) — same signal as the poster grid
+        # Right-edge cyan bar (6px) — same signal as the poster grid,
+        # scaled to the zoomed poster's height so it hugs the full card
         bar_w = 6
+        zw = int(CONT_W * 1.08)
+        zh = int(CONT_H * 1.08)
         base_x = CONT_X0 + self._cont_index * (CONT_W + CONT_GAP)
-        self._moveResize("contSel", base_x + CONT_W + 2, CONT_Y, bar_w, CONT_H)
+        zx = base_x - (zw - CONT_W) // 2
+        zy = CONT_Y - (zh - CONT_H) // 2
+        self._moveResize("contSel", zx + zw + 2, zy, bar_w, zh)
         self["contSel"].show()
         self._updateContinueLabel()
 

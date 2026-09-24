@@ -644,10 +644,52 @@ class TopCinemaExtractor(BaseExtractor):
             "plot": plot,
             "poster": poster,
             "servers": servers,
+            "downloads": self._extract_download_links(html),   # [PATCH T1]
             "items": episodes,
             "type": item_type
         }
     
+    def _extract_download_links(self, html):
+        """
+        [PATCH T1] topcinema's real download-servers list. Confirmed against a real capture:
+        <ul class="download-items"><li><a class="downloadsLink" href="URL">
+        <div class="text"><span>NAME</span><p>QUALITY</p></div></a></li>...</ul>
+        """
+        downloads = []
+        if not html:
+            return downloads
+        block_m = re.search(
+            r'<ul[^>]*class="[^"]*download-items[^"]*"[^>]*>(.*?)</ul>',
+            html, re.S | re.I)
+        if not block_m:
+            return downloads
+        for li in re.finditer(r'<li\b[^>]*>(.*?)</li>', block_m.group(1), re.S | re.I):
+            li_html = li.group(1)
+            # the real markup has href="..." BEFORE class="downloadsLink", not after --
+            # confirmed directly against a real capture. Matching the whole <a> tag first and
+            # checking for both attributes within it, in either order, is robust to this
+            # instead of assuming one specific attribute order.
+            a_m = re.search(r'<a\b[^>]*>', li_html, re.S | re.I)
+            if not a_m or "downloadsLink" not in a_m.group(0):
+                continue
+            link_m = re.search(r'href="([^"]+)"', a_m.group(0), re.I)
+            if not link_m:
+                continue
+            url = link_m.group(1).strip()
+            if not url:
+                continue
+            name_m = re.search(r'<span>([^<]+)</span>', li_html, re.I)
+            name = self._clean_title(name_m.group(1)).strip() if name_m else "Server"
+            quality_m = re.search(r'<p>([^<]*)</p>', li_html, re.I)
+            quality = quality_m.group(1).strip() if quality_m else ""
+            downloads.append({
+                "resolution": quality,
+                "size": "",
+                "quality": name,
+                "url": url,
+            })
+        return downloads
+
     def extract_stream(self, url):
         log("TopCinema: resolving {}".format(url))
         if url.startswith("topcinema_server|"):

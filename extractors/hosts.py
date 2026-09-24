@@ -25,7 +25,7 @@ import json
 import time
 import base64
 import random
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, parse_qs
 
 from .net import fetch, log, UA
 from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
@@ -39,17 +39,58 @@ from .htmlmedia import _quality_probe_text  # [PATCH 94]
 
 # ─── Video Host Resolvers ─────────────────────────────────────────────────────
 
+def _evaluate_streamtape_assignment(prefix, computed, chain_text):
+    """
+    [PATCH T2] Replicates one document.getElementById(ID).innerHTML = PREFIX +
+    (COMPUTED).substring(N).substring(M)...; assignment exactly as the real page's own JS
+    would evaluate it.
+    """
+    s = computed
+    for n in re.findall(r'\.substring\((\d+)\)', chain_text):
+        s = s[int(n):]
+    return prefix + s
+
+
 def resolve_streamtape(url):
+    """
+    [PATCH T2] Confirmed against a real captured streamtape.cc page: the real link is built
+    via several decoy document.getElementById(...).innerHTML = PREFIX + (STR).substring(N)...
+    assignments, only some of which decode to the real "get_video" URL -- the others are
+    deliberately wrong, and which element id gets the real value varies. Every assignment
+    found is evaluated the same way the page's own JS would, and only candidates that decode
+    to a real get_video URL are kept, rather than trusting a single fixed element id.
+    """
     try:
         html, _ = fetch(url, referer="https://streamtape.com/")
         if not html:
             return None
+
+        assignment_pattern = re.compile(
+            r"document\.getElementById\(['\"]\w+['\"]\)\.innerHTML\s*=\s*"
+            r"(['\"])(.*?)\1\s*\+\s*"
+            r"(?:['\"]{2}\s*\+\s*)?"
+            r"\(\s*(['\"])(.*?)\3\s*\)"
+            r"((?:\.substring\(\d+\))+)"
+        )
+        for m in assignment_pattern.finditer(html):
+            _, prefix, _, computed, chain_text = m.groups()
+            candidate = _evaluate_streamtape_assignment(prefix, computed, chain_text)
+            _p = urlparse(candidate); _qs = parse_qs(_p.query)
+            if _p.path == "/get_video" and all(_k in _qs for _k in ("id", "expires", "ip", "token")):
+                link = candidate
+                if link.startswith("//"):
+                    link = "https:" + link
+                elif not link.startswith("http"):
+                    link = "https://streamtape.com" + link
+                return link
+
+        # fall back to the older, simpler patterns in case a page variant still uses them
         m = re.search(r"robotlink\)\.innerHTML\s*=\s*'([^']+)'\s*\+\s*'([^']+)'", html)
         if m:
             link = m.group(1) + m.group(2)
             if not link.startswith("http"):
                 link = "https:" + link
-            return link.replace("//streamtape.com", "https://streamtape.com")
+            return link
         m = re.search(r"robotlink\)\.innerHTML\s*=\s*['\"]([^'\"]+)['\"]", html)
         if m:
             link = m.group(1)
@@ -1345,6 +1386,35 @@ def resolve_azrak_mycima(url):
         return None
 
 
+def resolve_egybest_download_gateway(url):
+    """
+    [PATCH E3] egybest's "/download/?url=BASE64" gateway page. Confirmed against a real
+    capture: the real link sits in a data-url attribute as plain base64, present in the raw
+    HTML from the first load regardless of the page's own 10-second UI countdown. Checked
+    narrowly against the /download/ + url= shape so this never claims an unrelated
+    egybests.live URL.
+    """
+    if "/download/" not in url or "url=" not in url:
+        return None
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        m = re.search(r'id=["\']btn["\'][^>]*data-url=["\']([^"\']+)["\']', html, re.I)
+        if not m:
+            m = re.search(r'data-url=["\']([^"\']+)["\'][^>]*class=["\'][^"\']*download-btn', html, re.I)
+        if not m:
+            return None
+        payload = m.group(1)
+        pad = (-len(payload)) % 4
+        decoded = base64.b64decode(payload + "=" * pad).decode("utf-8")
+        if decoded.startswith("http://") or decoded.startswith("https://"):
+            return decoded
+        return None
+    except Exception:
+        return None
+
+
 def resolve_dhcplay(url):
     return resolve_doodstream(url)
 
@@ -2126,10 +2196,14 @@ HOST_RESOLVERS = {
     "govid":       resolve_govid,
     "upstream":    resolve_upstream,
     "mixdrop":     resolve_mixdrop,
+    "mxdrop":      resolve_mixdrop,   # [PATCH M2] confirmed against a real mxdrop.top capture
+    "mxdrop.top":  resolve_mixdrop,
     "miixdrop":    resolve_mixdrop,
     "miixdrop.top": resolve_mixdrop,
     "voe":         resolve_voe,
     "streamruby":  resolve_streamruby,
+    "stmruby":     resolve_streamruby,   # [PATCH M1] confirmed via exact filecode match
+    "stmruby.com": resolve_streamruby,
     "hgcloud":     resolve_hgcloud,
     "masukestin":  resolve_masukestin,
     "masukestin.com": resolve_masukestin,
@@ -2180,6 +2254,9 @@ HOST_RESOLVERS = {
     "dhcplay.com":     resolve_dhcplay,
     "mycima.cv":       resolve_azrak_mycima,   # [PATCH 121]
     "azrak.mycima.cv": resolve_azrak_mycima,
+    "cybervynx":       resolve_hanerix_style,  # [PATCH E2] unverified against real markup -- see docstring
+    "cybervynx.com":   resolve_hanerix_style,
+    "egybests.live":   resolve_egybest_download_gateway,  # [PATCH E3]
     "sprintcdn":       resolve_sprintcdn,
     "sprintcdn.com":   resolve_sprintcdn,
     "aurorafieldnetwork": resolve_aurorafieldnetwork,
