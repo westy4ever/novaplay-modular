@@ -5,33 +5,13 @@ Advanced Arabic Player - State / persistence
 Config, favorites, history and saved-playback-position storage.
 
 Adds (this revision):
-  * [A1] _save_search_query() / _get_recent_searches() — persisting
-    the last 20 search queries; merged into _library_search_suggestions
-    as the highest-priority suggestion source.
-  * [B1] _clear_continue_item() — zeros an item's resume position so
-    the home screen's Continue-Watching strip drops it immediately.
-
-Changes in this revision (PATCH 50 — settings persistence fix):
-  * _KEY_NAMES trimmed to the three real API keys. browser_proxy and
-    torrserver_url were members, which made _save_state() STRIP them
-    from the state file on every write — a proxy or TorrServer URL set
-    through the Settings screen survived only until restart (the
-    "Browser proxy set to: DISABLED" fingerprint in every boot log).
-    They are connection settings, not credentials owned by api_keys.conf.
-
-Changes in the previous revision (PATCH 18 — threshold unification):
-  * _continue_items() filter aligned to >30s (was >60s).
-
-Changes in the previous revision (Continue-Watching support):
-  * NEW _continue_items(limit): the Continue-Watching row query.
-  * _save_position() now stamps item["_pos_ts"] = now on every
-    in-memory update.
-  * _upsert_library_item() preserves _pos_ts.
-
-NOTE: This does NOT include the live in-memory position tracker
-(_GLOBAL_POS_TIMER / _global_pos_tick / _start_pos_tracker /
-_stop_pos_tracker) or the local proxy hit counters. Those live in
-novaplay_tracker.py.
+  * [UX-16] _clear_all_continue() — wipe the whole continue-watching list.
+  * [UX-5]  _hide_site() / _unhide_site() / _hidden_sites() /
+            _is_site_hidden() — persistent per-site hide for the
+            home grid (config key "hidden_sites").
+  * [UX-9/15] _entry_from_item() stamps `_ts` (int epoch). _save_position()
+            keeps `_ts` in sync with `_pos_ts`.
+  * [UX-24] _upsert_library_item() preserves `_ts` when merging.
 """
 
 import os
@@ -55,11 +35,13 @@ _POS_DISK_LAST = {"url": "", "sec": 0}
 
 _KEYS_FILE = os.path.join(os.path.dirname(__file__), "api_keys.conf")
 _KEY_NAMES = ("tmdb_api_key", "subsource_api_key", "opensubtitles_api_key",
-              "opensubtitles_user", "opensubtitles_pass")     # [PATCH 91]
+              "opensubtitles_user", "opensubtitles_pass")
 
 
 def _state_path():
-    for candidate in ("/etc/enigma2/advanced_arabic_player_state.json", os.path.join(PLUGIN_PATH, "advanced_arabic_player_state.json"), "/tmp/advanced_arabic_player_state.json"):
+    for candidate in ("/etc/enigma2/advanced_arabic_player_state.json",
+                      os.path.join(PLUGIN_PATH, "advanced_arabic_player_state.json"),
+                      "/tmp/advanced_arabic_player_state.json"):
         try:
             parent = os.path.dirname(candidate)
             if parent and os.path.isdir(parent) and os.access(parent, os.W_OK):
@@ -80,6 +62,7 @@ def _default_state():
         "favorites": [],
         "history": [],
         "search_history": [],
+        "hidden_sites": [],
     }
 
 
@@ -128,6 +111,7 @@ def _load_state():
                     _log("State recovered from .bak")
             except Exception:
                 pass
+        state.setdefault("hidden_sites", [])
         _STATE_CACHE = state
         _load_api_keys_file(state)
         return _STATE_CACHE
@@ -138,7 +122,7 @@ def _save_state(state=None):
     with _STATE_LOCK:
         _STATE_CACHE = state or _STATE_CACHE or _default_state()
         path = _state_path()
-        tmp  = path + ".tmp"
+        tmp = path + ".tmp"
         _out = dict(_STATE_CACHE)
         _cfg = dict(_out.get("config") or {})
         for _k in _KEY_NAMES:
@@ -157,8 +141,10 @@ def _save_state(state=None):
                 pass
         except Exception as e:
             _log("State save error: {}".format(e))
-            try: os.remove(tmp)
-            except Exception: pass
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
 
 
 def _get_config(key, default=""):
@@ -171,9 +157,6 @@ def _get_config(key, default=""):
 
 
 def _write_api_key_to_file(key, value):
-    """[PATCH 79] api_keys.conf owns the credential keys (_save_state strips them
-    from the state file), so a key entered in Settings must be written HERE or
-    it is lost on restart. Preserves comments and other lines; atomic; 0600."""
     try:
         value = str(value or "").replace("\r", "").replace("\n", "").strip()
         lines = []
@@ -213,7 +196,7 @@ def _set_config(key, value):
         state = _load_state()
         state.setdefault("config", {})[key] = value
         if key in _KEY_NAMES:
-            _write_api_key_to_file(key, value)      # [PATCH 79]
+            _write_api_key_to_file(key, value)
         _save_state(state)
 
 
@@ -230,6 +213,7 @@ def _entry_from_item(item, site, m_type, extra=None):
         "_site": item.get("_site", site),
         "_m_type": item.get("_m_type", m_type),
         "_saved_at": int(time.time()),
+        "_ts": int(time.time()),
     }
     if extra:
         entry.update(extra)
@@ -240,12 +224,14 @@ def _upsert_library_item(bucket, entry, limit=100):
     with _STATE_LOCK:
         state = _load_state()
         items = state.setdefault(bucket, [])
-        key   = entry.get("url")
+        key = entry.get("url")
         if not entry.get("last_position_sec"):
             for _old in items:
                 if _old.get("url") == key and _old.get("last_position_sec"):
                     entry["last_position_sec"] = _old["last_position_sec"]
                     entry["_pos_ts"] = _old.get("_pos_ts") or 0
+                    if not entry.get("_ts"):
+                        entry["_ts"] = _old.get("_ts") or 0
                     break
         items = [i for i in items if i.get("url") != key]
         items.insert(0, entry)
@@ -290,13 +276,6 @@ def _get_saved_position(url):
 
 
 def _save_position(url, seconds, force=False):
-    """Record playback position.
-
-    Memory is updated on every call; the on-disk state file is rewritten
-    only when forced, or >= _POS_DISK_MIN_DELTA seconds of NEW progress,
-    or the position jumped backward by > 30s. Paused playback writes
-    nothing at all.
-    """
     seconds = int(seconds or 0)
     if 0 < seconds < 30:
         _log("_save_position: skipping {}s (< 30s threshold)".format(seconds))
@@ -309,7 +288,9 @@ def _save_position(url, seconds, force=False):
                     return
                 old_pos = int(item.get("last_position_sec") or 0)
                 item["last_position_sec"] = seconds
-                item["_pos_ts"] = int(time.time())
+                _now = int(time.time())
+                item["_pos_ts"] = _now
+                item["_ts"] = _now
                 last = _POS_DISK_LAST
                 if last.get("url") != url:
                     last["url"] = url
@@ -322,9 +303,7 @@ def _save_position(url, seconds, force=False):
                 return
 
 
-# ── [B1] Continue-Watching removal ────────────────────────────────────
 def _clear_continue_item(url):
-    """Zero an item's resume position so it drops off the Continue strip."""
     if not url:
         return
     with _STATE_LOCK:
@@ -337,10 +316,57 @@ def _clear_continue_item(url):
                 return
 
 
-# ── [A1] Search history ──────────────────────────────────────────────
+def _clear_all_continue():
+    with _STATE_LOCK:
+        state = _load_state()
+        count = 0
+        for item in (state.get("history") or []):
+            if int(item.get("last_position_sec") or 0) > 0:
+                item["last_position_sec"] = 0
+                item["_pos_ts"] = 0
+                count += 1
+        if count:
+            _save_state(state)
+        return count
+
+
+def _hidden_sites():
+    return list(_load_state().get("hidden_sites") or [])
+
+
+def _is_site_hidden(site_key):
+    if not site_key:
+        return False
+    return site_key in (_load_state().get("hidden_sites") or [])
+
+
+def _hide_site(site_key):
+    if not site_key:
+        return False
+    with _STATE_LOCK:
+        state = _load_state()
+        rows = state.setdefault("hidden_sites", [])
+        if site_key in rows:
+            return False
+        rows.append(site_key)
+        _save_state(state)
+        return True
+
+
+def _unhide_site(site_key):
+    if not site_key:
+        return False
+    with _STATE_LOCK:
+        state = _load_state()
+        rows = state.get("hidden_sites") or []
+        if site_key not in rows:
+            return False
+        state["hidden_sites"] = [s for s in rows if s != site_key]
+        _save_state(state)
+        return True
+
+
 def _save_search_query(query):
-    """Record a submitted search query. Most-recent-first, deduped
-    case-insensitively, capped at 20."""
     q = re.sub(r"\s+", " ", (query or "")).strip()
     if len(q) < 2:
         return
@@ -365,7 +391,6 @@ def _library_search_suggestions(query="", current_site="", limit=8):
     rows = []
     seen = set()
 
-    # [A1] Recent searches — highest priority (-1 source rank)
     for r in _get_recent_searches(10):
         nr = _normalize_query(r)
         if not nr or nr in seen:
@@ -422,9 +447,6 @@ def _library_search_suggestions(query="", current_site="", limit=8):
 
 
 def _continue_items(limit=7):
-    """Continue-Watching row: most-recently-watched history entries
-    that still have a resumable position (>30s, dedup by url, sorted
-    by watch recency)."""
     rows = []
     for item in (_load_state().get("history") or []):
         pos = int(item.get("last_position_sec") or 0)
