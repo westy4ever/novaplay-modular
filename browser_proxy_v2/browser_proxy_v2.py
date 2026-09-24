@@ -148,11 +148,17 @@ def _proxy_fetch(url, referer, challenge_budget_s):
     for attempt in (1, 2):
         entry = _get_context(domain_key)
         page = entry["page"]
-        if referer:
-            try:
-                page.set_extra_http_headers({'Referer': referer})
-            except Exception:
-                pass
+        # [PATCH BP1] contexts/pages persist per-domain across separate /fetch calls
+        # (intentional -- that's what makes solved-challenge cookie reuse fast). But
+        # set_extra_http_headers() merges into the page's existing header set rather
+        # than replacing it, so skipping this call when referer is falsy left a stale
+        # Referer from an earlier, unrelated request active on the same page -- confirmed
+        # empirically against a real headless browser. Explicitly clearing with an empty
+        # dict when there's no referer for THIS call removes it correctly.
+        try:
+            page.set_extra_http_headers({'Referer': referer} if referer else {})
+        except Exception:
+            pass
         try:
             t0 = time.time()
             try:

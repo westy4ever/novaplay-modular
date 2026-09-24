@@ -134,6 +134,13 @@ class AflaamExtractor(BaseExtractor):
         "googleplay.com",
     )
 
+    # [PATCH A2] account/UI path segments on the site's own domain that the generic
+    # data-* attribute scan can pick up (confirmed: data-src="https://aflaam.com/login"
+    # on the header's login icon) -- these are never real streaming servers.
+    _NON_MEDIA_PATHS = (
+        "/login", "/logout", "/register", "/favorite", "/signup",
+    )
+
     # Known host fragments that only appear on watch/download pages.
     _MEDIA_HOST_MARKERS = (
         "streamwish", "filemoon", "dood", "playmogo", "vidhide", "voe",
@@ -695,6 +702,8 @@ class AflaamExtractor(BaseExtractor):
             return
         if any(x in url.lower() for x in self._NON_MEDIA_HOSTS):
             return
+        if any(x in url.lower() for x in self._NON_MEDIA_PATHS):   # [PATCH A2]
+            return
         low_path = url.lower().split("?", 1)[0]
         if low_path.endswith((".jpg", ".jpeg", ".png", ".gif",
                               ".webp", ".svg", ".css", ".js", ".ico")):
@@ -751,6 +760,14 @@ class AflaamExtractor(BaseExtractor):
         seen = set()
         if not html:
             return servers
+
+        # [PATCH A1] real /watch/<vid>/<movie>/<slug> links -- highest confidence,
+        # confirmed against a real capture. Sits right next to the /download/ link
+        # that already works, using the same href-based matching.
+        for m in re.finditer(
+                r'<a[^>]+href=["\']([^"\']*/watch/[^"\']+)["\']',
+                html, re.I):
+            self._add_server(servers, seen, self._full_url(m.group(1)))
 
         # (1) iframes — highest confidence
         for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']',
@@ -935,14 +952,21 @@ class AflaamExtractor(BaseExtractor):
                 ep_url = self._full_url(m.group(1))
                 if not ep_url or ep_url == (final_url or url) or ep_url in seen_eps:
                     continue
+                # [PATCH A3] the /episode/, /series/, or /download/ URL pattern that
+                # gates entry to this loop already reliably identifies a real episode
+                # link -- confirmed against a real capture that the visible anchor text
+                # never actually contains "حلقة"/"Episode" (it's just a bare number plus
+                # the English title), so requiring that text rejected every real episode.
+                seen_eps.add(ep_url)
+                num_m = re.search(r'<span[^>]*>\s*(\d+)\s*</span>', m.group(2))
+                ep_num = num_m.group(1) if num_m else ""
                 ep_text = re.sub(r"<[^>]+>", " ", m.group(2)).strip()
                 ep_text = re.sub(r"\s+", " ", ep_text)
-                if "حلقة" not in ep_text and "Episode" not in ep_text \
-                        and "/download/" not in ep_url:
-                    continue
-                seen_eps.add(ep_url)
+                if ep_num and ep_text.startswith(ep_num):
+                    ep_text = ep_text[len(ep_num):].strip()
+                title = "{}. {}".format(ep_num, ep_text) if ep_num and ep_text else (ep_text or "حلقة")
                 episodes.append({
-                    "title": ep_text or "حلقة",
+                    "title": title,
                     "url": ep_url,
                     "type": "episode",
                     "_action": "details",
@@ -1034,6 +1058,18 @@ class AflaamExtractor(BaseExtractor):
                 real = _correct_stream_url(real)
                 quality = self._quality_from_filename(real)
                 log("Aflaam: revealed download URL → {}".format(real[:100]))
+                return real, quality, self._get_base(), []
+
+        # [PATCH A1] /watch/ page URL -> the same reveal logic works here too,
+        # confirmed against a real capture: the page's own JSON-LD contentUrl
+        # is a direct .mp4/.m3u8 literal, which _resolve_download_page's
+        # generic Pattern 3 already finds correctly.
+        if "/watch/" in low:
+            real = self._resolve_download_page(clean)
+            if real:
+                real = _correct_stream_url(real)
+                quality = self._quality_from_filename(real)
+                log("Aflaam: revealed watch-page stream → {}".format(real[:100]))
                 return real, quality, self._get_base(), []
 
         # Direct media URL → pass through

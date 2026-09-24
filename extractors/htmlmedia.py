@@ -7,6 +7,7 @@ Depends only on net.log — deliberately does NOT import net.fetch
 
 import re
 import threading
+from html import unescape as html_unescape  # [PATCH H2]
 from urllib.parse import urljoin, urlparse
 
 from .net import log
@@ -377,6 +378,7 @@ def extract_iframes(html, base_url=""):
     iframes = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.I)
     result = []
     for src in iframes:
+        src = html_unescape(src)  # [PATCH H2] &amp; etc. in the raw attribute -> real chars
         if src.startswith("//"):
             src = "https:" + src
         elif src.startswith("/") and base_url:

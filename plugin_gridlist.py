@@ -3,39 +3,32 @@
 Advanced Arabic Player - Custom grid widgets (resolution-aware)
 ================================================================
 
-[PATCH 63] continue strip pushed down y=95 → y=110 so the strip no
-  longer crowds its "متابعة المشاهدة" label; home grid anchor also
-  moved y=410 → y=425 in plugin_screen_home.py to keep a 30px gap.
-[PATCH 62] shrunken continue strip (220x330 → 190x285, gap 16 → 20) and
-  home site grid (313x260 → 290x230) so the taller dual-calendar top
-  bar fits without crowding.
-[PATCH 61] navigation performance: plugin_screen_home now memoizes
-  pixmap paths so setPixmapFromFile only runs when the path actually
-  changed (was re-decoding on every arrow key and every poll tick —
-  the size bump in 59/60 made that visible).
-[PATCH 60] continue-strip ratio was wrong (240:280 ≈ 0.857, near
-  square, while posters are 2:3 ≈ 0.667) — resizeCover was squashing
-  every poster. Strip is now a proper 2:3 (190x285 after PATCH 62).
-[PATCH 59] home site grid 4x2 → 6x2 (narrower tiles); continue strip
-  6 @ 240x280 (was 180x200).
-[PATCH 58] poster-grid selection bar hoisted out of the listbox into
-  a dedicated widget (skin-side pgridSel at z=5).
-[PATCH 57] continue-strip selection mirrors the poster grid:
-  thin right-edge cyan bar + 8% zoom.
-[PATCH 56] right-edge cyan selection bar on the poster grid.
-[PATCH 54] strip badge z=8 + carousel progress bar.
-[PATCH 53] carousel year badge + star in rating; grid frame removed.
-[PATCH 46-R2/49/52] overlay badges at z=4, compact sizes.
-[PATCH 48] in-poster watch-progress state rides the item dict.
-[PATCH 15+16] bigger 3-line captions.
-[PATCH 14] TextListGrid (vertical category list).
-[PATCH 28] RTL rows for Arabic titles.
-[PATCH 34] separator rows.
-[PATCH 13] continue-strip per-poster time badges.
+FINAL SET (12 features kept from the UX batch):
+  [UX-24] MemoizedPixmapCache — one pixmap cache, no ad-hoc dicts.
+  [UX-23] Carousel widget_map is identity (index math on the fly).
+  [UX-20] Visited-tile surface dimming via item["_visited"].
+  [UX-19] Pulsing blocked-site health dot (self.pulse_on).
+  [UX-12] _BaseCardGrid.wrap_nav = True — arrows wrap within a row.
+  [UX-09] Freshness dot on home tiles (24h watch activity).
+  [UX-04] (empty-strip hint lives in the screen module)
+  [UX-03] (hero backdrop lives in the screen module)
+  [UX-02] Continue-strip per-card watch-progress track + fill.
+  [UX-01] (cold-open focus lives in the screen module)
+  [UX-10] (paging hint lives in the screen module)
+  [UX-17] (status timeout lives in the screen module)
 
-Resolution-aware geometry: every constant derived from 1920x1080 by
-_SCALE. scale_skin_xml() scales any skin string. resolve_icon_path()
-with aliases + default.png fallback.
+Removed since the draft batch: theme system, section labels, unused
+grid constants. No behaviour change for the 12 features above.
+
+Legacy patches still in force:
+  [PATCH 64] Continue strip horizontally centered + title centered.
+  [PATCH 62/63] shrunken continue strip (190x285), home grid (290x230).
+  [PATCH 58] poster-grid selection bar dedicated widget (z=5).
+  [PATCH 54/57] strip badge z=8 + right-edge cyan selection bar.
+  [PATCH 53] carousel year badge + star in rating; grid frame removed.
+  [PATCH 49/52] overlay badges at z=4, compact sizes.
+  [PATCH 48] in-poster watch-progress state rides the item dict.
+  [PATCH 28] RTL rows for Arabic titles.
 """
 
 import os
@@ -47,7 +40,6 @@ from enigma import (eListboxPythonMultiContent, eListbox, gFont,
                     RT_HALIGN_CENTER, RT_HALIGN_LEFT, RT_HALIGN_RIGHT,
                     RT_VALIGN_CENTER)
 
-# Import state to check for saved resume positions
 from plugin_state import _get_saved_position
 
 PLUGIN_PATH = os.path.dirname(__file__)
@@ -59,7 +51,7 @@ try:
     SCREEN_W, SCREEN_H = int(_dsize.width()), int(_dsize.height())
 except Exception:
     SCREEN_W, SCREEN_H = 1920, 1080
-if SCREEN_W < 400:  # defensive: desktop not ready at import time
+if SCREEN_W < 400:
     SCREEN_W, SCREEN_H = 1920, 1080
 
 _SCALE = max(0.5, min(2.0, SCREEN_W / 1920.0))
@@ -76,11 +68,6 @@ _SKIN_SCALE_ATTRS = ("position", "size", "cornerRadius", "itemHeight")
 
 
 def scale_skin_xml(xml):
-    """Scale a skin string's geometry to the current screen.
-    Scales numbers inside position="…", size="…", cornerRadius="…",
-    itemHeight="…" attributes, and the size in font="Name;NN".
-    zPosition / transparency / colors are left untouched. At _SCALE==1.0
-    the string is returned unchanged."""
     if _SCALE == 1.0:
         return xml
 
@@ -99,18 +86,26 @@ def scale_skin_xml(xml):
     return re.sub(r'(\w+)=("|\')([^"\']*)\2', _scale_attr, xml)
 
 
+# ─── Fixed color palette (single theme) ────────────────────────────────────
 _G_CLR = {
-    "surface2": "#1C2333", "border": "#30363D", "cyan": "#00E5FF",
-    "text": "#F0F6FC", "text2": "#8B949E", "gold": "#FFD740", "badge_bg": "#000000",
+    "surface2":    "#1C2333",
+    "surface_dim": "#161B22",   # [UX-20] dim surface for visited tiles
+    "border":      "#30363D",
+    "cyan":        "#00E5FF",
+    "text":        "#F0F6FC",
+    "text2":       "#8B949E",
+    "gold":        "#FFD740",
+    "badge_bg":    "#000000",
 }
 
-# ─── Per-site health dot colors (home grid) ────────────────────────────────
+# ─── Per-site health dot colors ────────────────────────────────────────────
 _HEALTH_DOT_COLORS = {"ok": "#39D98A", "down": "#F85149", "blocked": "#FFD740"}
+# [UX-19] dim variant used when the pulse is in its "off" phase
+_HEALTH_DOT_DIM  = {"blocked": "#4A3A00"}
+
 
 # ─── Icon resolution ────────────────────────────────────────────────────────
-_ICON_ALIASES = {
-    "wecima_sarl": "wecima",
-}
+_ICON_ALIASES = {"wecima_sarl": "wecima"}
 
 
 def resolve_icon_path(item, plugin_path=PLUGIN_PATH):
@@ -134,6 +129,62 @@ def resolve_icon_path(item, plugin_path=PLUGIN_PATH):
     return icon_path
 
 
+# ─── [UX-24] Unified pixmap-path memoization ───────────────────────────────
+class MemoizedPixmapCache(object):
+    """One place to remember which path was last decoded into which
+    widget, so setPixmapFromFile only runs when the path actually changes.
+    Replaces the ad-hoc _last_cont_painted / _last_icon_painted /
+    _last_poster_painted dicts from PATCH 61."""
+    __slots__ = ("_paths",)
+
+    def __init__(self):
+        self._paths = {}
+
+    def set(self, widget, key, path):
+        # [PATCH G2] cache update moved inside the `inst is not None` branch -- previously
+        # it ran unconditionally, so a widget whose .instance was still None (possible before
+        # the screen's GUI is fully built) would get marked as cached without the pixmap ever
+        # actually being painted, permanently skipping it on every later call with that path.
+        if self._paths.get(key) == path:
+            return False
+        try:
+            inst = getattr(widget, "instance", None)
+            if inst is not None:
+                inst.setPixmapFromFile(path)
+                self._paths[key] = path
+                return True
+        except Exception:
+            return False
+        return False
+
+    def setScaled(self, widget, key, path, scale=1):
+        # [PATCH G2] see set() above -- same fix.
+        if self._paths.get(key) == path:
+            return False
+        try:
+            inst = getattr(widget, "instance", None)
+            if inst is not None:
+                try:
+                    inst.setScale(scale)
+                except Exception:
+                    pass
+                inst.setPixmapFromFile(path)
+                self._paths[key] = path
+                return True
+        except Exception:
+            return False
+        return False
+
+    def forget(self, key):
+        self._paths.pop(key, None)
+
+    def clear(self):
+        self._paths.clear()
+
+    def get(self, key):
+        return self._paths.get(key)
+
+
 def build_pixmap_widgets_xml(x0, y0, cols, rows, cell_w, cell_h, margin, border_w, icon_pad_top, icon_w, icon_h, name_prefix="pic"):
     parts = []
     for r in range(rows):
@@ -147,6 +198,7 @@ def build_pixmap_widgets_xml(x0, y0, cols, rows, cell_w, cell_h, margin, border_
 # --- Shared Engine ---
 class _BaseCardGrid(GUIComponent):
     GUI_WIDGET = eListbox
+
     def __init__(self, cols, rows, cell_w, cell_h, font_size=24):
         GUIComponent.__init__(self)
         self.cols, self.rows, self.cell_w, self.cell_h = cols, rows, cell_w, cell_h
@@ -162,13 +214,20 @@ class _BaseCardGrid(GUIComponent):
         self.currentIndex = 0
         self.totalItems = 0
         self.onSelectionChanged = None
+        # [UX-12] wrap-around arrow navigation within a row
+        self.wrap_nav = True
 
     def _updatePageInfo(self):
         self.totalPages = max(1, (self.totalItems + self.itemsPerPage - 1) // self.itemsPerPage)
-        if self.currentPage >= self.totalPages: self.currentPage = max(0, self.totalPages - 1)
+        if self.currentPage >= self.totalPages:
+            self.currentPage = max(0, self.totalPages - 1)
 
-    def _getPageStart(self): return self.currentPage * self.itemsPerPage
-    def _getPageEnd(self): return min(self._getPageStart() + self.itemsPerPage, self.totalItems)
+    def _getPageStart(self):
+        return self.currentPage * self.itemsPerPage
+
+    def _getPageEnd(self):
+        return min(self._getPageStart() + self.itemsPerPage, self.totalItems)
+
     def _getMaxRow(self):
         n = self._getPageEnd() - self._getPageStart()
         return 0 if n == 0 else (n - 1) // self.cols
@@ -180,7 +239,8 @@ class _BaseCardGrid(GUIComponent):
 
     def _updateIndex(self):
         if self.totalItems == 0:
-            self.currentIndex = self.currentRow = self.currentCol = 0; return
+            self.currentIndex = self.currentRow = self.currentCol = 0
+            return
         self.currentIndex = self.currentPage * self.itemsPerPage + self.currentRow * self.cols + self.currentCol
         if self.currentIndex >= self.totalItems:
             self.currentIndex = max(0, self.totalItems - 1)
@@ -189,35 +249,59 @@ class _BaseCardGrid(GUIComponent):
             self.currentCol = (self.currentIndex % self.itemsPerPage) % self.cols
 
     def _notify(self):
-        if self.onSelectionChanged: self.onSelectionChanged()
+        if self.onSelectionChanged:
+            self.onSelectionChanged()
 
     def moveUp(self):
-        if self.currentRow > 0: self.currentRow -= 1
+        if self.currentRow > 0:
+            self.currentRow -= 1
         elif self.currentPage > 0:
-            self.currentPage -= 1; self.currentRow = self._getMaxRow()
+            self.currentPage -= 1
+            self.currentRow = self._getMaxRow()
             self.currentCol = min(self.currentCol, self._getMaxCol(self.currentRow))
         self._updateIndex(); self._redraw(); self._notify()
 
     def moveDown(self):
         mr = self._getMaxRow()
         if self.currentRow < mr:
-            self.currentRow += 1; self.currentCol = min(self.currentCol, self._getMaxCol(self.currentRow))
+            self.currentRow += 1
+            self.currentCol = min(self.currentCol, self._getMaxCol(self.currentRow))
         elif self.currentPage < self.totalPages - 1:
-            self.currentPage += 1; self.currentRow = 0; self.currentCol = min(self.currentCol, self._getMaxCol(0))
+            self.currentPage += 1
+            self.currentRow = 0
+            self.currentCol = min(self.currentCol, self._getMaxCol(0))
         self._updateIndex(); self._redraw(); self._notify()
 
     def moveLeft(self):
-        if self.currentCol > 0: self.currentCol -= 1
+        # [UX-12 / PATCH G1] page-change now takes priority over wrap: wrap_nav was checked
+        # before the currentPage>0 branch, which made cross-page Left/Right navigation
+        # unreachable whenever wrap_nav is on (the default) -- pressing Left at column 0
+        # always wrapped within the same page instead of moving to the previous page's last
+        # column when one existed. Wrap-within-row is now only the fallback for the first
+        # page, matching the feature's own "wraps within the row" description there.
+        if self.currentCol > 0:
+            self.currentCol -= 1
         elif self.currentPage > 0:
-            self.currentPage -= 1; self.currentRow = min(self.currentRow, self._getMaxRow())
+            self.currentPage -= 1
+            self.currentRow = min(self.currentRow, self._getMaxRow())
             self.currentCol = self._getMaxCol(self.currentRow)
+        elif self.wrap_nav:
+            mc = self._getMaxCol(self.currentRow)
+            if mc >= 0:
+                self.currentCol = mc
         self._updateIndex(); self._redraw(); self._notify()
 
     def moveRight(self):
+        # [UX-12 / PATCH G1] page-change now takes priority over wrap (see moveLeft).
         mc = self._getMaxCol(self.currentRow)
-        if self.currentCol < mc: self.currentCol += 1
+        if self.currentCol < mc:
+            self.currentCol += 1
         elif self.currentPage < self.totalPages - 1:
-            self.currentPage += 1; self.currentRow = min(self.currentRow, self._getMaxRow())
+            self.currentPage += 1
+            self.currentRow = min(self.currentRow, self._getMaxRow())
+            self.currentCol = 0
+        elif self.wrap_nav:
+            # [UX-12] wrap back to col 0 -- only when there's no next page to advance to
             self.currentCol = 0
         self._updateIndex(); self._redraw(); self._notify()
 
@@ -229,27 +313,34 @@ class _BaseCardGrid(GUIComponent):
         self._updateIndex(); self._redraw(); self._notify()
 
     def getCurrent(self):
-        if self._items and 0 <= self.currentIndex < len(self._items): return self._items[self.currentIndex]
+        if self._items and 0 <= self.currentIndex < len(self._items):
+            return self._items[self.currentIndex]
         return None
 
-    def getPageInfo(self): return self.currentPage + 1, self.totalPages
+    def getPageInfo(self):
+        return self.currentPage + 1, self.totalPages
+
     def getPageItems(self):
         s = self._getPageStart(); e = self._getPageEnd()
-        return [((i - s) // self.cols, (i - s) % self.cols, self._items[i]) for i in range(s, e)]
+        return [((i - s) // self.cols, (i - s) % self.cols, self._items[i])
+                for i in range(s, e)]
 
-    def _buildRow(self, row_idx): raise NotImplementedError
+    def _buildRow(self, row_idx):
+        raise NotImplementedError
 
     def _redraw(self):
         n = self._getPageEnd() - self._getPageStart()
         num_rows = max(1, (n + self.cols - 1) // self.cols) if self.totalItems > 0 else 0
         num_rows = max(1, num_rows)
         entries = [self._buildRow(r) for r in range(num_rows)]
-        while len(entries) < self.rows: entries.append([None])
+        while len(entries) < self.rows:
+            entries.append([None])
         self.l.setList(entries)
         if self.instance:
             try: self.instance.setSelectionEnable(False)
             except: pass
-            if self.currentRow < len(entries): self.instance.moveSelectionTo(self.currentRow)
+            if self.currentRow < len(entries):
+                self.instance.moveSelectionTo(self.currentRow)
 
     def postWidgetCreate(self, instance):
         instance.setContent(self.l)
@@ -259,32 +350,38 @@ class _BaseCardGrid(GUIComponent):
         try: instance.setScrollbarMode(eListbox.showOnDemand)
         except: instance.setScrollbarMode(1)
 
-    def preWidgetDelete(self, instance): instance.setContent(None)
+    def preWidgetDelete(self, instance):
+        instance.setContent(None)
 
 
-# --- Home site-menu grid (design: 6x2 cells of 290x230 @1080p) ---
-# [PATCH 62] shrunken from 313x260 → 290x230 to visually balance the
-# shrunken continue strip below.
-HOME_GRID_COLS = 6
+# --- Home site-menu grid ---
+# [PATCH G3] 7 columns (was 6), 260px tiles (was 290px): 7*260=1820px of content inside
+# the 1880px-wide home_grid widget, leaving a clean 60px total / 30px-per-side gap instead
+# of the old 6*290=1740px arrangement's lopsided 140px sitting entirely on the right.
+HOME_GRID_COLS = 7
 HOME_GRID_ROWS = 2
-HOME_CELL_W = sc(290)
+HOME_CELL_W = sc(260)
 HOME_CELL_H = sc(230)
+HOME_GRID_WIDTH = sc(1880)   # [PATCH G3] matches the home_grid widget's own skin width
+HOME_CENTER_OFFSET_X = max(0, (HOME_GRID_WIDTH - HOME_GRID_COLS * HOME_CELL_W) // 2)  # [PATCH G3]
 HOME_CELL_MARGIN = sc(12)
 HOME_BORDER_W = max(2, sc(4))
 HOME_CELL_INNER_W = HOME_CELL_W - 2 * HOME_CELL_MARGIN
 HOME_CELL_INNER_H = HOME_CELL_H - 2 * HOME_CELL_MARGIN
 HOME_LABEL_H = sc(44)
-HOME_ICON_PAD_TOP = sc(12)
+HOME_ICON_PAD_TOP = sc(28)     # was sc(12) — clears the 16px dot + 10px inset
 HOME_ICON_W = HOME_CELL_INNER_W - 2 * HOME_BORDER_W
 HOME_ICON_H = max(1, HOME_CELL_INNER_H - 2 * HOME_BORDER_W - HOME_ICON_PAD_TOP - HOME_LABEL_H)
 HOME_TITLE_H = sc(40)
-HOME_TAG_STEP = sc(44)
-HOME_TAG_H = sc(32)
 HOME_TITLE_PAD = sc(8)
+HOME_FRESH_DOT = max(8, sc(16))     # [UX-9]
+
 
 class HomeMenuGrid(_BaseCardGrid):
     def __init__(self):
         _BaseCardGrid.__init__(self, HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H, font_size=max(16, sc(24)))
+        # [UX-19] pulse phase — toggled once per second by the screen
+        self.pulse_on = True
 
     def _buildRow(self, row_idx):
         start = self._getPageStart()
@@ -292,32 +389,49 @@ class HomeMenuGrid(_BaseCardGrid):
         row = [None]
         for col_idx in range(self.cols):
             item_idx = start + row_idx * self.cols + col_idx
-            if item_idx >= self._getPageEnd(): continue
-            cx = col_idx * self.cell_w + HOME_CELL_MARGIN
+            if item_idx >= self._getPageEnd():
+                continue
+            # [PATCH G3] whole-grid-block centering offset -- see build_pixmap_widgets_xml
+            # call site in plugin_screen_home.py for the matching icon-widget offset.
+            cx = HOME_CENTER_OFFSET_X + col_idx * self.cell_w + HOME_CELL_MARGIN
             cy = HOME_CELL_MARGIN
             item = self._items[item_idx]
             is_sel = is_sr and col_idx == self.currentCol
             bc = _G_CLR["cyan"] if is_sel else _G_CLR["border"]
             row.append(MultiContentEntryText(pos=(cx, cy), size=(HOME_CELL_INNER_W, HOME_CELL_INNER_H), font=0, text="", color=0, backcolor=bc, flags=0))
-            row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W, cy + HOME_BORDER_W), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W, HOME_CELL_INNER_H - 2 * HOME_BORDER_W), font=0, text="", color=0, backcolor=_G_CLR["surface2"], flags=0))
-            # Health dot (top-right corner)
+
+            # [UX-20] visited tiles get a dimmer surface (un-selected only)
+            _surf = _G_CLR["surface2"]
+            if item.get("_visited") and not is_sel:
+                _surf = _G_CLR["surface_dim"]
+            row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W, cy + HOME_BORDER_W), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W, HOME_CELL_INNER_H - 2 * HOME_BORDER_W), font=0, text="", color=0, backcolor=_surf, flags=0))
+
+            # Health dot (top-right) — [UX-19] blocked blinks
             hstate = item.get("_health")
             if hstate in _HEALTH_DOT_COLORS:
                 _ds = max(6, sc(14))
                 _dx = cx + HOME_CELL_INNER_W - HOME_BORDER_W - _ds - sc(10)
                 _dy = cy + HOME_BORDER_W + sc(10)
-                row.append(MultiContentEntryText(pos=(_dx, _dy), size=(_ds, _ds), font=0, text="", color=0, backcolor=_HEALTH_DOT_COLORS[hstate], flags=0))
+                _dot = _HEALTH_DOT_COLORS[hstate]
+                if hstate == "blocked" and not self.pulse_on:
+                    _dot = _HEALTH_DOT_DIM["blocked"]
+                row.append(MultiContentEntryText(pos=(_dx, _dy), size=(_ds, _ds), font=0, text="", color=0, backcolor=_dot, flags=0))
+
+            # [UX-9] freshness dot (top-left) — 24h activity marker
+            if item.get("_fresh"):
+                _fx = cx + HOME_BORDER_W + sc(10)
+                _fy = cy + HOME_BORDER_W + sc(10)
+                row.append(MultiContentEntryText(pos=(_fx, _fy), size=(HOME_FRESH_DOT, HOME_FRESH_DOT), font=0, text="", color=0, backcolor=_G_CLR["gold"], flags=0))
+
             title = item.get("title", "")
             tagline = item.get("tagline", "")
             ty = cy + HOME_BORDER_W + HOME_TITLE_PAD
-            row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W + HOME_TITLE_PAD, ty), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W - 2 * HOME_TITLE_PAD, HOME_TITLE_H), font=0, text=title, color=_G_CLR["text"], backcolor=_G_CLR["surface2"], flags=RT_HALIGN_CENTER))
-            if tagline:
-                tag_y = ty + HOME_TAG_STEP
-                row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W + HOME_TITLE_PAD, tag_y), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W - 2 * HOME_TITLE_PAD, HOME_TAG_H), font=0, text=tagline, color=_G_CLR["text2"], backcolor=_G_CLR["surface2"], flags=RT_HALIGN_CENTER))
+            row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W + HOME_TITLE_PAD, ty), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W - 2 * HOME_TITLE_PAD, HOME_TITLE_H), font=0, text=title, color=_G_CLR["text"], backcolor=_surf, flags=RT_HALIGN_CENTER))
+            
         return row
 
 
-# --- Plain vertical text list (categories / text-only listings) ---------
+# --- Plain vertical text list ---
 LIST_ROWS = 10
 LIST_CELL_W = sc(1840)
 LIST_CELL_H = sc(83)
@@ -326,8 +440,6 @@ LIST_TAG_W = sc(200)
 
 
 def _has_arabic(text):
-    """[PATCH 28] True if the string contains Arabic-script characters.
-    Arabic rows right-align (RTL reading); Latin rows stay LTR."""
     try:
         for ch in str(text or ""):
             if u"\u0600" <= ch <= u"\u06FF" or u"\u0750" <= ch <= u"\u077F":
@@ -342,11 +454,12 @@ class TextListGrid(_BaseCardGrid):
         _BaseCardGrid.__init__(self, 1, LIST_ROWS,
                                LIST_CELL_W, LIST_CELL_H,
                                font_size=max(16, sc(28)))
+        self.wrap_nav = False    # single column
 
     def _buildRow(self, row_idx):
         start = self._getPageStart()
         row = [None]
-        item_idx = start + row_idx              # single column: row == index
+        item_idx = start + row_idx
         if item_idx >= self._getPageEnd():
             return row
         item = self._items[item_idx]
@@ -355,18 +468,15 @@ class TextListGrid(_BaseCardGrid):
         inner_w = LIST_CELL_W - 2 * LIST_CELL_MARGIN
         inner_h = LIST_CELL_H - 2 * LIST_CELL_MARGIN
         bw = HOME_BORDER_W
-        # [PATCH 34] separator rows — dim centered dividers
         if item.get("type") == "separator":
             row.append(MultiContentEntryText(
                 pos=(cx, cy), size=(inner_w, inner_h), font=1,
                 text=item.get("title", ""), color=_G_CLR["text2"],
                 flags=RT_HALIGN_CENTER | RT_VALIGN_CENTER))
             return row
-        # frame + surface
         bc = _G_CLR["cyan"] if is_sel else _G_CLR["border"]
         row.append(MultiContentEntryText(pos=(cx, cy), size=(inner_w, inner_h), font=0, text="", color=0, backcolor=bc, flags=0))
         row.append(MultiContentEntryText(pos=(cx + bw, cy + bw), size=(inner_w - 2 * bw, inner_h - 2 * bw), font=0, text="", color=0, backcolor=_G_CLR["surface2"], flags=0))
-        # [PATCH 28] RTL rows
         title = item.get("title", "")
         tag = item.get("tagline") or item.get("count") or ""
         if _has_arabic(title):
@@ -397,22 +507,23 @@ class TextListGrid(_BaseCardGrid):
         return row
 
 
-# --- Poster grid (design: 7x2, posters 240x360 = exact 2:3 @1080p) ---
-POSTER_W = sc(240)                       # was sc(210) — wider, matches 2:3 with 360
-POSTER_H = sc(360)                       # keeps the taller poster
-POSTER_ZOOM_HEADROOM = sc(16)            # gap the 8% zoom grows into
+# --- Poster grid ---
+POSTER_W = sc(240)
+POSTER_H = sc(360)
+POSTER_ZOOM_HEADROOM = sc(16)
 POSTER_CAPTION_LINE_H = max(14, sc(24))
 POSTER_CAPTION_LINES = 2
 POSTER_CAPTION_H = POSTER_CAPTION_LINE_H * POSTER_CAPTION_LINES
-POSTER_CELL_MARGIN_H = max(4, sc(10))    # 7 cols × 260 = 1820, fits 1840 widget
+POSTER_CELL_MARGIN_H = max(4, sc(10))
 POSTER_CELL_MARGIN_V = max(4, sc(4))
-POSTER_CELL_W = POSTER_W + 2 * POSTER_CELL_MARGIN_H     # = 260
+POSTER_CELL_W = POSTER_W + 2 * POSTER_CELL_MARGIN_H
 POSTER_CELL_H = (POSTER_H + POSTER_ZOOM_HEADROOM
-                 + POSTER_CAPTION_H + 2 * POSTER_CELL_MARGIN_V)   # = 432
+                 + POSTER_CAPTION_H + 2 * POSTER_CELL_MARGIN_V)
 
-POSTER_GRID_COLS = max(4, (SCREEN_W - sc(80)) // POSTER_CELL_W)   # = 7
+POSTER_GRID_COLS = max(4, (SCREEN_W - sc(80)) // POSTER_CELL_W)
 POSTER_GRID_ROWS = 2
-POSTER_WRAP_CHARS = max(12, int(18 * _SCALE))    # was 16 — wider tile fits more chars
+POSTER_WRAP_CHARS = max(12, int(18 * _SCALE))
+
 
 class PosterCardGrid(_BaseCardGrid):
     def __init__(self):
@@ -421,36 +532,26 @@ class PosterCardGrid(_BaseCardGrid):
 
     def _buildRow(self, row_idx):
         start = self._getPageStart()
-        is_sr = (row_idx == self.currentRow)
         row = [None]
         cy = POSTER_CELL_MARGIN_V
         for col_idx in range(self.cols):
             item_idx = start + row_idx * self.cols + col_idx
-            if item_idx >= self._getPageEnd(): continue
+            if item_idx >= self._getPageEnd():
+                continue
             cx = col_idx * self.cell_w + POSTER_CELL_MARGIN_H
             item = self._items[item_idx]
 
-            # [PATCH 58] The right-edge cyan selection bar was removed from
-            # the listbox cell content — it lived at z=3 (same layer as the
-            # poster pixmaps), so the 8% zoom on the selected cell painted
-            # over it. It's now a dedicated screen-level widget
-            # ("pgridSel", z=5) positioned in _updatePosterPixmaps.
-
-            # Solid Pure Opaque Black Background for Poster
             row.append(MultiContentEntryText(pos=(cx, cy), size=(POSTER_W, POSTER_H), font=0, text="", color=0, backcolor="#000000", flags=0))
 
             title = item.get("title", "")
             if item.get("_is_next_page"):
                 caption = "الصفحة التالية"
+            elif item.get("_is_prev_page"):
+                caption = "الصفحة السابقة"
             else:
                 caption = title
 
-            # [PATCH 108] Caption sits below the poster PLUS the zoom
-            # headroom — so the 8% pop-up of the poster (and its overlay
-            # badges/strip/bar, which all ride the zoom) can never reach
-            # the caption. Was cy + POSTER_H + 2 (which overlapped by ~11 px).
             cap_y = cy + POSTER_H + POSTER_ZOOM_HEADROOM
-
             row.append(MultiContentEntryText(pos=(cx, cap_y), size=(POSTER_W, POSTER_CAPTION_H), font=0, text="", color=0, backcolor="#000000", flags=0))
             wrapped = _wrap_ui_text(caption, width=POSTER_WRAP_CHARS, max_lines=POSTER_CAPTION_LINES, fallback=caption)
             for line_idx, line in enumerate(wrapped.split("\n")):
@@ -468,12 +569,13 @@ def build_poster_pixmap_widgets_xml(x0, y0, name_prefix="poster"):
             parts.append('\n\t\t<widget name="%s_%d_%d" position="%d,%d" size="%d,%d" transparent="1" alphatest="blend" zPosition="3" />' % (name_prefix, r, c, px, py, POSTER_W, POSTER_H))
     return "".join(parts)
 
-# --- Per-cell overlay labels (z=4, above the poster pixmaps z=3) ----------
-POSTER_BADGE_H = max(20, sc(34))   # taller bottom strip — was sc(26)
-POSTER_BADGE_INSET = sc(6)         # how far in from the poster's edges the top badges sit
-POSTER_YEAR_W, POSTER_YEAR_H  = sc(78), sc(30)   # was sc(60) × sc(24)
-POSTER_RATE_W, POSTER_RATE_H  = sc(86), sc(30)   # was sc(70) × sc(24)
-POSTER_BADGE_FONT = max(14, sc(20))              # was sc(15)
+
+# --- Poster overlay badges (z=4) ---
+POSTER_BADGE_H = max(20, sc(34))
+POSTER_BADGE_INSET = sc(6)
+POSTER_YEAR_W, POSTER_YEAR_H = sc(78), sc(30)
+POSTER_RATE_W, POSTER_RATE_H = sc(86), sc(30)
+POSTER_BADGE_FONT = max(14, sc(20))
 
 
 def build_poster_badge_widgets_xml(x0, y0, name_prefix="pbadge"):
@@ -485,26 +587,18 @@ def build_poster_badge_widgets_xml(x0, y0, name_prefix="pbadge"):
         for c in range(POSTER_GRID_COLS):
             px = x0 + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
             py = y0 + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
-            # Bottom gold bar — full width, anchored to the poster's bottom edge.
-            # The runtime (see plugin_screen_home._updatePosterPixmaps) re-sizes
-            # and re-positions this on every redraw/zoom, so the skin values here
-            # are only the unzoomed defaults.
             parts.append('\n\t\t<widget name="%s_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="%d" />'
                          % (name_prefix, r, c, px, py + POSTER_H - POSTER_BADGE_H, POSTER_W, POSTER_BADGE_H, _f, _cr))
-            # Progress bar — thin gold line stacked immediately above the bottom bar.
-            # Initial width is 0; the runtime sizes it to the watch percentage.
             parts.append('\n\t\t<widget name="pbar_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" cornerRadius="2" />'
                          % (r, c, px, py + POSTER_H - POSTER_BADGE_H - sc(12), 0, sc(10)))
-            # Year badge (top-left) — enlarged to fit the wider 240-px poster.
             parts.append('\n\t\t<widget name="pyear_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#C0392B" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#F0F6FC" halign="center" valign="center" cornerRadius="%d" />'
                          % (r, c, px + _pad, py + _pad, POSTER_YEAR_W, POSTER_YEAR_H, _f, _cr))
-            # Rating badge (top-right) — enlarged, symmetric with the year badge.
             parts.append('\n\t\t<widget name="prat_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#000000" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#FFD740" halign="center" valign="center" cornerRadius="%d" />'
                          % (r, c, px + POSTER_W - POSTER_RATE_W - _pad, py + _pad, POSTER_RATE_W, POSTER_RATE_H, _f, _cr))
     return "".join(parts)
 
 
-# --- Carousel (design geometry @1080p, scaled to screen) ---
+# --- Carousel ---
 _CAROUSEL_DESIGN = {
     0: (55, 680, 145, 215), 1: (250, 630, 180, 270), 2: (485, 570, 230, 345),
     3: (790, 455, 340, 510), 4: (1205, 570, 230, 345), 5: (1490, 630, 180, 270), 6: (1720, 680, 145, 215),
@@ -523,42 +617,64 @@ def build_carousel_xml():
         parts.append('<widget name="cposterImg{i}" position="0,0" size="1,1" zPosition="5" alphatest="blend" scale="1" />'.format(i=i))
         parts.append('<widget name="cfavMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#FFD740" transparent="1" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_cf))
         parts.append('<widget name="cratingBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
-        # [PATCH 53] year badge — red box, top-left (matches grid)
         parts.append('<widget name="cyearBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
-        # [PATCH 112] release/quality label badge — gold box, matches the grid's own
-        # label badge; sits just above cresumeMark in _applyCarouselGeometry.
         parts.append('<widget name="clabel{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
         parts.append('<widget name="cresumeMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
-        # [PATCH 84] the carousel progress-bar widgets were declared but never
-        # created in the Home screen (no code draws them) — removed
     return "\n".join(parts)
 
 
-# --- Continue-watching strip (design space @1080p) -------------------------
-# [PATCH 63] CONT_Y 95 → 110 so "متابعة المشاهدة" has a proper gap
-# before the strip starts. Strip bottom now 110+285 = 395.
-# [PATCH 62] shrunken 220x330 → 190x285 with 20px gaps.
-# Total width: 6*190 + 5*20 = 1240px.
+# --- Continue-watching strip ---
 CONT_SLOTS = 6
 CONT_W = 190
 CONT_H = 285
 CONT_GAP = 20
-CONT_X0 = 45
 CONT_Y = 110
+
+_CONT_STRIP_W = CONT_SLOTS * CONT_W + (CONT_SLOTS - 1) * CONT_GAP
+CONT_X0 = max(45, (1920 - _CONT_STRIP_W) // 2)     # [PATCH 64] centered @1080p
 
 
 def build_continue_row_xml():
-    # cont_title stays above the strip: 65 + 30 = 95, then 15px gap to 110.
-    parts = ['<widget name="cont_title" position="45,65" size="1300,30" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="7" />']
-    # [PATCH 57] contSel is a thin right-edge bar (matches poster grid's
-    # selection strip) and lives ABOVE the poster pixmaps so the zoomed
-    # poster can't cover it.
-    parts.append('<widget name="contSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="6" transparent="0" />')
+    """[PATCH 64] centered title + centered strip.
+    [UX-2] adds per-slot progress track + fill."""
+    parts = [
+        '<widget name="cont_title" '
+        'position="0,65" size="1920,30" '
+        'font="Regular;26" foregroundColor="#FFD740" '
+        'transparent="1" halign="center" zPosition="7" />'
+    ]
+    parts.append(
+        '<widget name="contSel" position="0,0" size="1,1" '
+        'backgroundColor="#00E5FF" cornerRadius="3" '
+        'zPosition="6" transparent="0" />'
+    )
+    _bar_h = sc(6)
+    _bar_y = CONT_Y + CONT_H - 26 - _bar_h - sc(6)
     for i in range(CONT_SLOTS):
-        parts.append('<widget name="cont%d" position="%d,%d" size="%d,%d" zPosition="4" alphatest="blend" scale="1" />'
-                      % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y, CONT_W, CONT_H))
-        # [PATCH 13/54] per-item resume-time badge — gold bar, z=8 so the
-        # poster pixmap can never cover it.
-        parts.append('<widget name="contbadge%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="8" font="Regular;16" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="4" />'
-                     % (i, CONT_X0 + i * (CONT_W + CONT_GAP), CONT_Y + CONT_H - 26, CONT_W, 26))
+        slot_x = CONT_X0 + i * (CONT_W + CONT_GAP)
+        parts.append(
+            '<widget name="cont%d" position="%d,%d" size="%d,%d" '
+            'zPosition="4" alphatest="blend" scale="1" />'
+            % (i, slot_x, CONT_Y, CONT_W, CONT_H)
+        )
+        # [UX-2] progress track + fill
+        parts.append(
+            '<widget name="contbartrack%d" position="%d,%d" size="%d,%d" '
+            'backgroundColor="#30363D" transparent="0" '
+            'zPosition="6" cornerRadius="2" />'
+            % (i, slot_x + sc(6), _bar_y, CONT_W - sc(12), _bar_h)
+        )
+        parts.append(
+            '<widget name="contbar%d" position="%d,%d" size="%d,%d" '
+            'backgroundColor="#FFD740" transparent="0" '
+            'zPosition="7" cornerRadius="2" />'
+            % (i, slot_x + sc(6), _bar_y, 0, _bar_h)
+        )
+        parts.append(
+            '<widget name="contbadge%d" position="%d,%d" size="%d,%d" '
+            'backgroundColor="#FFD740" transparent="0" '
+            'zPosition="8" font="Regular;16" foregroundColor="#0D1117" '
+            'halign="center" valign="center" cornerRadius="4" />'
+            % (i, slot_x, CONT_Y + CONT_H - 26, CONT_W, 26)
+        )
     return "\n".join(parts)

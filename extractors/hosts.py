@@ -27,6 +27,7 @@ import base64
 import random
 from urllib.parse import urlparse, urljoin, parse_qs
 
+import threading  # [PATCH H1] for the vidsrc-family recursion guard below
 from .net import fetch, log, UA
 from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
                         _best_media_url, get_last_quality_variants,
@@ -1241,7 +1242,6 @@ def resolve_delucloud(url):
     except Exception:
         return None
 
-
 def resolve_savefiles(url):
     try:
         if '.m3u8' in url or '.txt' in url:
@@ -2177,10 +2177,202 @@ def extract_stream_urls_from_text(text):
 
     return urls
 
+# ─── OnlyFlix server tabs — vidsrc-family players ──────────────────────────
+# NEW (2026-09-24): the four embed hosts behind onlyflix.to's server tabs
+# (vidfast.vc / vidapi.xyz / share.cdnm.ink / sv2.nontongo.{stream,day}),
+# previously unhandled. Generalized resolve_vidcore — the "v"-family
+# players are clones of one codebase.
+
+def _ofx_expand_master(stream_url, referer_for_fetch):
+    """If the URL is an HLS master playlist, fetch it, stash the real
+    variants in _quality_tls (same contract as resolve_streamruby, so
+    extract_stream's quality readback works), and return the best
+    variant URL. Non-master URLs are returned untouched."""
+    try:
+        body, _ = fetch(stream_url, referer=referer_for_fetch)
+    except Exception:
+        body = None
+    if not body or "#EXT-X-STREAM-INF" not in body:
+        return stream_url
+    variants = _parse_hls_master_variants(stream_url, body)
+    if not variants:
+        return stream_url
+    _quality_tls.variants = [u for _, u in variants]
+    log("resolve_vidsrc_family: expanded master into {} variant(s)".format(len(variants)))
+    return variants[0][1]
+
+
+_vsf_in_progress = threading.local()  # [PATCH H1]
+
+
+def resolve_vidsrc_family(url, referer=None):
+    """
+    [OnlyFlix playback] vidfast.vc / vidapi.xyz / share.cdnm.ink /
+    sv2.nontongo.{stream,day} (captures 2026-09-24). Generalized
+    resolve_vidcore: vidcore.io/vidcloud.icu/embed.su already share one
+    resolver in this file — these are further members of the same player
+    family, so the api/play + "en" token contract is tried against
+    whatever host the URL carries. Referer-aware per resolve_host's
+    convention; defaults to onlyflix.to (vidfast's hydration payload
+    carries from="https://onlyflix.to/").
+    """
+    parsed = urlparse(url)
+    host = parsed.netloc
+
+    # [PATCH H1] recursion/cycle guard -- family members can iframe back to
+    # themselves or each other; without this, Stage 6 below recurses into
+    # resolve_host() unbounded and blows the call stack (confirmed by a
+    # real crash: "maximum recursion depth exceeded", which then poisons
+    # every other fetch on the same thread until the stack unwinds).
+    in_progress = getattr(_vsf_in_progress, "hosts", None)
+    if in_progress is None:
+        in_progress = set()
+        _vsf_in_progress.hosts = in_progress
+    if host in in_progress:
+        log("resolve_vidsrc_family: {} already in progress on this thread, skipping to avoid recursion".format(host))
+        return None
+    in_progress.add(host)
+    try:
+        log("resolve_vidsrc_family: Processing {}".format(url[:100]))
+        parts = [p for p in parsed.path.strip('/').split('/') if p]
+        query = parse_qs(parsed.query)
+
+        imdb_id, season, episode = "", "", ""
+        for i, p in enumerate(parts):
+            if re.match(r'^tt\d+', p):
+                imdb_id = p
+                tail = parts[i + 1:]
+                if len(tail) >= 2 and tail[0].isdigit() and tail[1].isdigit():
+                    season, episode = tail[0], tail[1]
+                break
+        if not season:
+            season = (query.get("season") or [""])[0]
+            episode = (query.get("episode") or [""])[0] or episode
+        mtype = "tv" if (season or "tv" in parts) else "movie"
+
+        page_referer = referer or "https://onlyflix.to/"
+        html, final_url = fetch(url, referer=page_referer)
+        if not html:
+            return None
+
+        candidates = []
+
+        def _found(u):
+            u = _correct_stream_url(str(u).replace("\\/", "/"))
+            if u and not _is_placeholder_media_url(u) and u not in candidates:
+                candidates.append(u)
+
+        # 1. direct media, RSC escapes folded (app-router "https:\/\/...")
+        scan = (html or "").replace("\\/", "/")
+        for u in (find_m3u8_all(scan) or find_mp4_all(scan) or []):
+            _found(u)
+
+        # 2. the "en" token (present in the raw SSR html)
+        tok_m = re.search(r'["\']en["\']\s*:\s*["\']([A-Za-z0-9_\-]{40,})["\']', html)
+        token = tok_m.group(1) if tok_m else ""
+        log("resolve_vidsrc_family: {} id={} en={}".format(
+            host, imdb_id or "-", "present" if token else "absent"))
+
+        # 3. family API: prefer an API URL found ON the page (mirrors
+        #    resolve_vidcore's api_match), else the api/play default.
+        #    Skipped for nontongo (soap2day family, different player).
+        if imdb_id and "nontongo" not in host:
+            api_m = re.search(
+                r'(https?://' + re.escape(host) + r'/api/[^\s"\']+)', html, re.I)
+            if api_m:
+                api_url = api_m.group(1)
+            else:
+                api_url = "https://{}/api/play?id={}&type={}".format(
+                    host, imdb_id, mtype)
+                if mtype == "tv" and season:
+                    api_url += "&season={}&episode={}".format(season, episode)
+            headers = {
+                "Referer": "https://{}/".format(host),
+                "Origin": "https://{}".format(host),
+                "User-Agent": UA,
+                "Accept": "application/json, text/plain, */*",
+            }
+            if token:
+                headers["Authorization"] = "Bearer {}".format(token)
+                api_url += "&token={}".format(token)
+            try:
+                api_body, _ = fetch(api_url, referer=url, extra_headers=headers)
+            except Exception:
+                api_body = None
+            if api_body:
+                for u in extract_stream_urls_from_text(api_body):
+                    _found(u)
+
+        # 4. __NEXT_DATA__ deep walk (pages-router members)
+        nd = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+                       html, re.S)
+        if nd:
+            try:
+                data = json.loads(nd.group(1))
+
+                def _walk(obj):
+                    if isinstance(obj, dict):
+                        for key in ("url", "src", "source", "file", "stream", "playlist"):
+                            v = obj.get(key)
+                            if isinstance(v, str) and (".m3u8" in v or ".mp4" in v):
+                                return v
+                        for v in obj.values():
+                            r = _walk(v)
+                            if r:
+                                return r
+                    elif isinstance(obj, list):
+                        for item in obj:
+                            r = _walk(item)
+                            if r:
+                                return r
+                    return None
+
+                found = _walk(data)
+                if found:
+                    _found(found)
+            except Exception:
+                pass
+
+        # 5. packed scripts
+        for txt in _unpack_all(html):
+            best = _best_media_url(txt)
+            if best:
+                _found(best)
+
+        # 6. family members iframe each other — recurse
+        for embed_url in extract_iframes(html, final_url or url):
+            if not embed_url.startswith("http"):
+                continue
+            if any(h in embed_url for h in
+                   ("vidfast.", "vidapi.", "cdnm.ink", "nontongo.")):
+                result = resolve_host(embed_url, referer=page_referer)
+                if result:
+                    if "|" in result:
+                        return result
+                    _found(result)
+
+        if not candidates:
+            return None
+        for u in candidates:
+            if ".m3u8" in u:
+                return _ofx_expand_master(u, "https://{}/".format(host))
+        return candidates[0]
+    except Exception as e:
+        log("resolve_vidsrc_family error: {}".format(e))
+        return None
+    finally:
+        in_progress.discard(host)  # [PATCH H1]
+
 
 # ─── Host dispatcher ──────────────────────────────────────────────────────────
 
 HOST_RESOLVERS = {
+    # ─── OnlyFlix server tabs — vidsrc-family players (2026-09-24) ──────
+    "vidfast.vc":   resolve_vidsrc_family,
+    "vidapi.xyz":   resolve_vidsrc_family,
+    "cdnm.ink":     resolve_vidsrc_family,   # share.cdnm.ink
+    "nontongo":     resolve_vidsrc_family,   # sv2.nontongo.stream / .day
+
     "streamtape":  resolve_streamtape,
     "dood":        resolve_doodstream,
     "dsvplay":     resolve_doodstream,
@@ -2382,7 +2574,6 @@ def _extract_packer_blocks(html):
         blocks.append(html[start:start + WINDOW])
         pos = start + len(marker)
     return blocks
-
 
 
 def decode_packer(packed):
@@ -2743,3 +2934,4 @@ def extract_stream(url):
     # success path — the first version returned raw `url`, which could
     # still contain a |Referer=... fragment.
     return None, "", main_url, []
+    
