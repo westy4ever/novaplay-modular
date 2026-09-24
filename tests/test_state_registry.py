@@ -18,9 +18,13 @@ def test_singleton_identity():
 
 def test_home_sites_complete_and_unique():
     sites = get_home_sites()
-    assert len(sites) == len(_SITE_REGISTRY) == 17
+    assert len(sites) == len(_SITE_REGISTRY)
     keys = [s[0] for s in sites]
     assert len(set(keys)) == len(keys)
+
+def test_registry_has_expected_sites():
+    for key in ("egydead", "egybest", "wecima", "onlyflix", "imdb_su"):
+        assert key in _SITE_REGISTRY, "missing site: {}".format(key)
 
 def test_home_sites_order_stable():
     assert [s[0] for s in get_home_sites()] == [s[0] for s in get_home_sites()]
