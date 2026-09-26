@@ -348,6 +348,8 @@ class AkwamsExtractor(BaseExtractor):
             url = url.strip().replace("&amp;", "&")
             if not url or url in seen:
                 return
+            if url.lower().startswith("data:"):  # [PATCH AK1] inline data URI, never a stream
+                return
             if any(ext in url.lower().split('?')[0] for ext in IMG_EXTS):
                 return
             if any(x in url.lower() for x in SKIP_DOMAINS):
@@ -408,7 +410,12 @@ class AkwamsExtractor(BaseExtractor):
             })
         
         # 1. data-link / data-url / data-iframe / data-src attributes (used by akwams watch pages)
-        for attr in ("data-link", "data-url", "data-iframe", "data-server", "data-href", "data-embed"):
+        # [PATCH AK1] "data-server" removed -- confirmed against a real capture it holds a
+        # numeric server ID (e.g. data-server="58") for an unrelated JS/AJAX flow on the
+        # movie detail page's watch/download buttons, not a URL. Picking it up produced a
+        # bogus "https://akwams.org/58" entry that silently blocked the already-correct
+        # /watch/ page fallback below (its `if not servers:` guard saw a non-empty list).
+        for attr in ("data-link", "data-url", "data-iframe", "data-href", "data-embed"):
             for m in re.finditer(attr + r'=["\']([^"\']+)["\']', html, re.I):
                 _add_server(m.group(1))
         

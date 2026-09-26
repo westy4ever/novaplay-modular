@@ -37,11 +37,12 @@ class ShaheedExtractor(BaseExtractor):
     """Extractor for Shaheed4u - shhahidd4u.net / shaheed4u.cash"""
     
     DOMAINS = [
+        "https://sshahiid4u.net/",  # [PATCH SH1] confirmed working, not in the old list at all
         "https://shhahidd4u.net/",
-        "https://shaheed4u.cash/",
+        "https://shaheed4u.cash/",  # confirmed dead by the user, kept as a low-priority fallback
         "https://shaied4u.co/",
     ]
-    VALID_HOST_MARKERS = ("shhahidd4u.net", "shaheed4u.cash", "shaied4u.co", "shahid4u")
+    VALID_HOST_MARKERS = ("sshahiid4u.net", "shhahidd4u.net", "shaheed4u.cash", "shaied4u.co", "shahid4u")
     BLOCKED_HOST_MARKERS = ("alliance4creativity.com",)
     
     def __init__(self):
@@ -161,9 +162,37 @@ class ShaheedExtractor(BaseExtractor):
     
     def _extract_servers_from_watch(self, html, base_url):
         """Parse the watch page HTML to extract server information.
-        Now uses extract_stream_all to get all quality variants.
+
+        [PATCH SH1] The old "securedServers" JS variable/embed-stream URL scheme is stale --
+        confirmed against real captures the site now uses `let servers = [{...}];` instead,
+        with a real, ready-to-use "url" field per entry (a /media-issue/watch/<hash> URL) --
+        no construction needed. The page's own source comment claims this array carries "one
+        invisible decoy as the last item" not matched by any visible server button, as an
+        anti-scraper trap; checked against three separate real captures and found no such
+        mismatch (every array index had a matching visible button each time) -- but the cross-
+        reference against the visible data-index buttons is kept anyway as a defensive, no-cost
+        measure in case that ever becomes real, rather than trusting the array wholesale.
         """
         servers = []
+        match = re.search(r'let\s+servers\s*=\s*(\[.*?\]);', html, re.DOTALL | re.I)
+        if match:
+            try:
+                servers_data = json.loads(match.group(1))
+                visible_indexes = set(int(m) for m in re.findall(r'data-index="(\d+)"', html))
+                for idx, server in enumerate(servers_data):
+                    if visible_indexes and idx not in visible_indexes:
+                        log("Shaheed: server array index {} has no matching visible button, skipping".format(idx))
+                        continue
+                    name = server.get("name") or "Server {}".format(idx + 1)
+                    url = server.get("url")
+                    if url:
+                        servers.append({"name": name, "url": url, "type": "embed"})
+                if servers:
+                    return servers
+            except Exception as e:
+                log("Shaheed: failed to parse servers array: {}".format(e))
+
+        # [PATCH SH1] older/fallback site variant using securedServers + embed-stream
         match = re.search(r'let\s+securedServers\s*=\s*(\[.*?\]);', html, re.DOTALL | re.I)
         if not match:
             match = re.search(r'securedServers\s*=\s*(\[.*?\]);', html, re.DOTALL | re.I)
@@ -175,19 +204,9 @@ class ShaheedExtractor(BaseExtractor):
                     hash_val = server.get("hash")
                     if hash_val:
                         embed_url = "{}/embed-stream/{}".format(base_url.rstrip('/'), quote(hash_val))
-                        # Get all qualities
-                        variants = []        # [PATCH 73] resolved lazily on play
-                        if variants:
-                            for stream_url, quality in variants:
-                                servers.append({
-                                    "name": f"{name} - {quality}",
-                                    "url": stream_url,
-                                    "type": "direct" if stream_url.endswith(('.m3u8', '.mp4')) else "embed"
-                                })
-                        else:
-                            # fallback
-                            servers.append({"name": name, "url": embed_url, "type": "embed"})
-                return servers
+                        servers.append({"name": name, "url": embed_url, "type": "embed"})
+                if servers:
+                    return servers
             except Exception as e:
                 log("Shaheed: failed to parse securedServers: {}".format(e))
 
@@ -215,6 +234,36 @@ class ShaheedExtractor(BaseExtractor):
                 servers.append({"name": "Embed Player", "url": src, "type": "iframe"})
         return servers
     
+    def _extract_downloads_from_page(self, html):
+        """[PATCH SH1] Parse a real /download/ page: links are grouped under quality
+        headers ("سيرفرات تحميل 1080/720/480"), each a plain <a class="btn btn-down"
+        href="...media-issue/download/HASH"> with a <span>hostname</span> inside.
+        Confirmed against a real capture -- 45 links across 3 quality tiers, all with
+        working URLs (unlike an unrelated site's /download/ page this session that
+        turned out to be its homepage in disguise on every capture -- this one is real).
+        """
+        downloads = []
+        sections = re.split(r'سيرفرات\s*تحميل\s*(\d+)', html)
+        for i in range(1, len(sections), 2):
+            quality = sections[i]
+            content = sections[i + 1]
+            for m in re.finditer(
+                r'<a\s+href="([^"]+)"[^>]*class="[^"]*btn-down[^"]*"[^>]*>(.*?)</a>',
+                content, re.S | re.I
+            ):
+                url = self._normalize_url(m.group(1))
+                if not url:
+                    continue
+                inner = m.group(2)
+                name_m = re.search(r'<span>([^<]+)</span>', inner)
+                name = html_unescape(name_m.group(1).strip()) if name_m else "Download"
+                downloads.append({
+                    "name": "{} [{}p]".format(name, quality) if quality else name,
+                    "url": url,
+                    "quality": quality,
+                })
+        return downloads
+
     def get_categories(self, mtype="movie"):
         base = self._get_base().rstrip("/")
         return [
@@ -262,9 +311,15 @@ class ShaheedExtractor(BaseExtractor):
             seen_urls.add(full_url)
 
             poster_url = ""
-            poster_m = re.search(r'background-image:\s*url\(([^)]+)\)', tag_open + card_content, re.I)
-            if poster_m:
-                poster_url = self._normalize_url(poster_m.group(1).strip("'\" "))
+            # [PATCH SH1] real cards use a plain <img src="...">, not a CSS background-image --
+            # confirmed against a real capture; the old pattern never matched at all
+            poster_m = re.search(r'<img[^>]+src="([^"]+)"', tag_open + card_content, re.I)
+            if not poster_m:
+                poster_m = re.search(r'background-image:\s*url\(([^)]+)\)', tag_open + card_content, re.I)
+                if poster_m:
+                    poster_url = self._normalize_url(poster_m.group(1).strip("'\" "))
+            else:
+                poster_url = self._normalize_url(poster_m.group(1))
 
             title_m = re.search(r'<p[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)</p>', card_content, re.I)
             if not title_m:
@@ -374,6 +429,7 @@ class ShaheedExtractor(BaseExtractor):
             "poster": "",
             "servers": [],
             "items": [],
+            "downloads": [],  # [PATCH SH1]
             "type": "movie",
         }
 
@@ -413,6 +469,30 @@ class ShaheedExtractor(BaseExtractor):
             if "/watch/" in url:
                 watch_html = html
                 watch_url = url
+
+        # [PATCH SH1] the film page's own download link carries a page-specific ?nav=
+        # token that differs from the watch link's -- can't be guessed/constructed,
+        # has to come from the page's own href, same pattern as the watch link above.
+        download_url = None
+        if "/download/" in url:
+            download_url = url
+        else:
+            dl_link_match = re.search(r'<a[^>]+href=["\']([^"\']+/download/[^"\']*)["\'][^>]*>.*?تحميل', html, re.I | re.S)
+            if dl_link_match:
+                download_url = self._normalize_url(dl_link_match.group(1))
+
+        download_html = None
+        if download_url:
+            download_html, _ = self._fetch_live(download_url)
+        elif "/download/" in url:
+            download_html = html
+
+        if download_html:
+            downloads = self._extract_downloads_from_page(download_html)
+            if downloads:
+                result["downloads"] = downloads
+            else:
+                log("Shaheed: no downloads found on download page")
 
         if watch_html:
             base_for_embed = self._get_base().rstrip('/')
