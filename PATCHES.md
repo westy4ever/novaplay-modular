@@ -201,3 +201,76 @@ BP1 — browser_proxy_v2.py (separate PC-side service, not part of    browser_pr
         didn't pass one -- confirmed empirically against a real
         headless Chromium instance, not just reasoned from docs.
 
+## SESSION: 2026-09-25 (Akwams watch-page fix, pop-out ring imports, continue-strip backdrop chain)
+All entries verified against real device logs (some multi-round diagnostics -- see notes).
+Backup suffix on disk matches the tag shown (e.g. plugin_screen_home.py.bak-g8 for [G8]).
+
+### Akwams
+AK1 — movie detail page's watch/download buttons are href="javascript:void(0);" --      extractors/akwams.py
+        data-server="58" on their parent (a numeric server ID for an unrelated
+        JS/AJAX flow) was misread as a URL by the generic data-* attribute scan,
+        producing one bogus "server" that silently blocked an already-correct
+        /watch/ page fallback from ever running. 18 real servers now found.
+        (The /download/ page investigated separately turned out to actually be
+        the site's homepage in disguise on every capture taken -- a site-side
+        redirect/instability, not a code bug; left unfixed pending a real capture.)
+
+### Home-grid pop-out ring (missed imports)
+G6  — HOME_CELL_INNER_W used by _applyPopGeometry's ring code but never          plugin_screen_home.py
+        imported from plugin_gridlist -- NameError on every animation frame,
+        caught by the surrounding except so the plugin never crashed, but the
+        ring never actually rendered. Found via a real log: 2933 of 3220 lines.
+G7  — follow-up to G6 -- the SAME _moveResize("homeSel", ...) call also uses    plugin_screen_home.py
+        HOME_CELL_INNER_H, also never imported, also never checked the first
+        time. Caught immediately by the next real log after G6 landed.
+
+### Continue-strip backdrop (multi-stage diagnosis, real device logs throughout)
+G8  — _paintContinueTmdbBackdrop's stale-guard compared a token that could be   plugin_screen_home.py
+        bumped by a second, near-simultaneous _paintContinueBackdrop call for
+        the SAME item (confirmed: happened on literally the first focus of the
+        strip) -- rejecting an otherwise valid, still-current result. cont_index
+        alone already answers "is the user still on this item"; token check
+        removed. Diagnosed via a temporary, reverted diagnostic-logging patch.
+G9  — background.jpg (a bare <ePixmap>, no name= attribute at all) could never  plugin_screen_home.py
+        be shown/hidden from Python -- visible on every screen this class
+        handles, no way to control it. Given a name, hidden on category/poster
+        /carousel screens, shown only on the home grid.
+G10 — continue-strip backdrop relied on shade_overlay's widget-level           plugin_screen_home.py
+        transparency to darken the image; confirmed on-device this box's skin
+        engine renders it as opaque instead (disabling shade_overlay made the
+        backdrop appear correctly). resizeCover()'s existing darken= parameter
+        (already used for the "no cached URL yet" path) is now used
+        consistently for BOTH backdrop-paint paths, under a distinct cache key
+        (url + "#dk45") so a darkened version can never collide with a
+        non-darkened one cached under the same plain URL+size elsewhere.
+        shade_overlay is no longer relied on for this at all.
+G11 — even after G9 gave it a name, background.jpg kept showing through on     plugin_screen_home.py
+        poster/carousel/list screens regardless -- confirmed NOT an exception
+        being swallowed (a separate exception-safety pass logged zero
+        failures). Root cause: <ePixmap> does not reliably honor show()/hide()
+        on this Enigma2 build the way a real <widget> does, even correctly
+        named and with no errors thrown. Converted to a <widget>; pixmap now
+        set explicitly from Python via setPixmapFromFile(), matching
+        backdropImg's already-proven-working pattern, instead of the skin's
+        static pixmap= attribute.
+
+### Site icons (asset issues, not code bugs -- resolve_icon_path itself was correct throughout)
+--  — onlyflix had no icons/onlyflix.png at all (added to the site registry     (asset, no code fix)
+        this session) -- fell through to the generic plugin.png fallback.
+        Fixed by adding the missing file; no code change needed.
+--  — six existing images/*.png files (egybest, mywecima, alooytv, aflaam,      (asset, no code fix)
+        vidsrc, imdb_su -- all dated Sep 23, vs. Jul 23 for every working icon)
+        were confirmed via xxd to be genuine JPEGs saved with a .png extension
+        (ffd8 ffe0 JFIF signature, not \x89PNG) -- same mistake as an earlier
+        background.jpg/.png mismatch this session, just inverted. Enigma2's
+        PNG decoder correctly refused to decode real JPEG bytes regardless of
+        the file's name. Fixed by re-saving as real PNGs; no code change needed.
+
+### Recurring lesson this session, worth keeping in mind
+Two separate false leads this session were both eventually traced to STALE STATE outside the
+actual source: applying a fix and seeing no behavior change turned out, more than once, to be
+Python loading old cached .pyc bytecode rather than the freshly-edited .py file. When a patch
+is confirmed present in the source (grep on the markers) but nothing changes on-device, clearing
+__pycache__ (`find / -name "__pycache__" -path "*AdvancedArabicPlayer*" -exec rm -rf {} +`) and
+the log before the next test is worth doing on principle, not just as a last resort.
+

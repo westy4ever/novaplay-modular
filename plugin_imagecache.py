@@ -41,7 +41,7 @@ except Exception:
 try:
     from urlparse import urlparse
 except Exception:
-    from urllib.parse import urlparse
+    from urllib.parse import urlparse, urlunparse, quote as _url_quote  # [PATCH IC1]
 
 try:
     from extractors.base import log as _log
@@ -208,11 +208,29 @@ def _maybe_evict_async():
         pass
 
 
+def _iri_to_uri(url):
+    # [PATCH IC1] urllib.request requires the request line to be ASCII.
+    # Some sites (confirmed: akwams.org) serve poster URLs with raw,
+    # un-percent-encoded non-ASCII characters in the path -- those throw
+    # UnicodeEncodeError inside urlopen() before any request is even sent.
+    # Percent-encode path/query (scheme+host are already ASCII) so the
+    # request can actually go out; a no-op for URLs that are already
+    # properly encoded.
+    try:
+        parts = urlparse(url)
+        path = _url_quote(parts.path, safe="/%")
+        query = _url_quote(parts.query, safe="=&%")
+        return urlunparse((parts.scheme, parts.netloc, path, parts.params, query, parts.fragment))
+    except Exception:
+        return url
+
+
 def downloadUrl(url, timeout=8):
     # Added Referer header (some CDNs require it) and a WebP-to-JPG URL
     # fallback (Enigma2 can't display WebP natively, and PIL may not have
     # libwebp support on embedded receivers) - matches the same fix
     # already used by plugin_util.py's _fetch_poster_bytes.
+    url = _iri_to_uri(url)  # [PATCH IC1]
     try:
         req = urllib_request.Request(url)
         req.add_header("User-Agent", "Mozilla/5.0")

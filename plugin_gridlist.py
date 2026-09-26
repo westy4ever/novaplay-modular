@@ -29,6 +29,16 @@ Legacy patches still in force:
   [PATCH 49/52] overlay badges at z=4, compact sizes.
   [PATCH 48] in-poster watch-progress state rides the item dict.
   [PATCH 28] RTL rows for Arabic titles.
+
+[Option A] Home-tile strip layout: title now has its own band between
+the dot strip and the icon, instead of sharing the top of the tile
+with the (much taller) site-logo PNG. Tagline removed.
+
+[pop-out] HOME_POP_OUT / HOME_POP_OUT_ICON constants for the selected-
+tile glow ring and icon enlargement (driven from plugin_screen_home).
+
+[pop-anim] POP_ANIM_FRAMES / POP_ANIM_INTERVAL drive the eased pop-out
+animation on selection change (also driven from plugin_screen_home).
 """
 
 import os
@@ -141,10 +151,7 @@ class MemoizedPixmapCache(object):
         self._paths = {}
 
     def set(self, widget, key, path):
-        # [PATCH G2] cache update moved inside the `inst is not None` branch -- previously
-        # it ran unconditionally, so a widget whose .instance was still None (possible before
-        # the screen's GUI is fully built) would get marked as cached without the pixmap ever
-        # actually being painted, permanently skipping it on every later call with that path.
+        # [PATCH G2] cache update moved inside the `inst is not None` branch.
         if self._paths.get(key) == path:
             return False
         try:
@@ -273,12 +280,7 @@ class _BaseCardGrid(GUIComponent):
         self._updateIndex(); self._redraw(); self._notify()
 
     def moveLeft(self):
-        # [UX-12 / PATCH G1] page-change now takes priority over wrap: wrap_nav was checked
-        # before the currentPage>0 branch, which made cross-page Left/Right navigation
-        # unreachable whenever wrap_nav is on (the default) -- pressing Left at column 0
-        # always wrapped within the same page instead of moving to the previous page's last
-        # column when one existed. Wrap-within-row is now only the fallback for the first
-        # page, matching the feature's own "wraps within the row" description there.
+        # [UX-12 / PATCH G1] page-change now takes priority over wrap.
         if self.currentCol > 0:
             self.currentCol -= 1
         elif self.currentPage > 0:
@@ -292,7 +294,7 @@ class _BaseCardGrid(GUIComponent):
         self._updateIndex(); self._redraw(); self._notify()
 
     def moveRight(self):
-        # [UX-12 / PATCH G1] page-change now takes priority over wrap (see moveLeft).
+        # [UX-12 / PATCH G1] page-change now takes priority over wrap.
         mc = self._getMaxCol(self.currentRow)
         if self.currentCol < mc:
             self.currentCol += 1
@@ -301,7 +303,6 @@ class _BaseCardGrid(GUIComponent):
             self.currentRow = min(self.currentRow, self._getMaxRow())
             self.currentCol = 0
         elif self.wrap_nav:
-            # [UX-12] wrap back to col 0 -- only when there's no next page to advance to
             self.currentCol = 0
         self._updateIndex(); self._redraw(); self._notify()
 
@@ -356,25 +357,38 @@ class _BaseCardGrid(GUIComponent):
 
 # --- Home site-menu grid ---
 # [PATCH G3] 7 columns (was 6), 260px tiles (was 290px): 7*260=1820px of content inside
-# the 1880px-wide home_grid widget, leaving a clean 60px total / 30px-per-side gap instead
-# of the old 6*290=1740px arrangement's lopsided 140px sitting entirely on the right.
+# the 1880px-wide home_grid widget, leaving a clean 60px total / 30px-per-side gap.
 HOME_GRID_COLS = 7
 HOME_GRID_ROWS = 2
 HOME_CELL_W = sc(260)
 HOME_CELL_H = sc(230)
-HOME_GRID_WIDTH = sc(1880)   # [PATCH G3] matches the home_grid widget's own skin width
-HOME_CENTER_OFFSET_X = max(0, (HOME_GRID_WIDTH - HOME_GRID_COLS * HOME_CELL_W) // 2)  # [PATCH G3]
+HOME_GRID_WIDTH = sc(1880)
+HOME_CENTER_OFFSET_X = max(0, (HOME_GRID_WIDTH - HOME_GRID_COLS * HOME_CELL_W) // 2)
 HOME_CELL_MARGIN = sc(12)
 HOME_BORDER_W = max(2, sc(4))
 HOME_CELL_INNER_W = HOME_CELL_W - 2 * HOME_CELL_MARGIN
 HOME_CELL_INNER_H = HOME_CELL_H - 2 * HOME_CELL_MARGIN
-HOME_LABEL_H = sc(44)
-HOME_ICON_PAD_TOP = sc(28)     # was sc(12) — clears the 16px dot + 10px inset
-HOME_ICON_W = HOME_CELL_INNER_W - 2 * HOME_BORDER_W
-HOME_ICON_H = max(1, HOME_CELL_INNER_H - 2 * HOME_BORDER_W - HOME_ICON_PAD_TOP - HOME_LABEL_H)
-HOME_TITLE_H = sc(40)
-HOME_TITLE_PAD = sc(8)
-HOME_FRESH_DOT = max(8, sc(16))     # [UX-9]
+
+# [Option A] tile strip layout (cell-local y, top of cell = 0):
+#    24 .. 40   dot strip   (freshness + health dots, 8px inset)
+#    48 .. 84   title strip
+#    88 .. 214  icon strip  (icon top = 12 + 4 + 72 = 88)
+# Every band is clear of the next -- no overlap between dots, title, icon.
+HOME_TITLE_STRIP_Y = sc(48)
+HOME_TITLE_H       = sc(36)
+HOME_TITLE_PAD     = sc(8)
+HOME_ICON_PAD_TOP  = sc(72)
+HOME_ICON_W        = HOME_CELL_INNER_W - 2 * HOME_BORDER_W
+HOME_ICON_H        = max(1, HOME_CELL_INNER_H - 2 * HOME_BORDER_W - HOME_ICON_PAD_TOP)
+HOME_FRESH_DOT     = max(8, sc(16))     # [UX-9]
+
+# [pop-out] selected-tile emphasis, driven from plugin_screen_home._updateIcons
+HOME_POP_OUT       = sc(8)              # cyan glow ring width around the selected tile
+HOME_POP_OUT_ICON  = sc(8)              # icon widget enlargement when selected
+
+# [pop-anim] eased pop-out animation on selection change
+POP_ANIM_FRAMES    = 8                  # frames per pop-out animation
+POP_ANIM_INTERVAL  = 25                 # ms between frames (8 * 25 = 200ms total)
 
 
 class HomeMenuGrid(_BaseCardGrid):
@@ -391,8 +405,6 @@ class HomeMenuGrid(_BaseCardGrid):
             item_idx = start + row_idx * self.cols + col_idx
             if item_idx >= self._getPageEnd():
                 continue
-            # [PATCH G3] whole-grid-block centering offset -- see build_pixmap_widgets_xml
-            # call site in plugin_screen_home.py for the matching icon-widget offset.
             cx = HOME_CENTER_OFFSET_X + col_idx * self.cell_w + HOME_CELL_MARGIN
             cy = HOME_CELL_MARGIN
             item = self._items[item_idx]
@@ -406,12 +418,12 @@ class HomeMenuGrid(_BaseCardGrid):
                 _surf = _G_CLR["surface_dim"]
             row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W, cy + HOME_BORDER_W), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W, HOME_CELL_INNER_H - 2 * HOME_BORDER_W), font=0, text="", color=0, backcolor=_surf, flags=0))
 
-            # Health dot (top-right) — [UX-19] blocked blinks
+            # [Option A] dots live in their own 8px-inset band, clear of the title strip below
             hstate = item.get("_health")
             if hstate in _HEALTH_DOT_COLORS:
                 _ds = max(6, sc(14))
-                _dx = cx + HOME_CELL_INNER_W - HOME_BORDER_W - _ds - sc(10)
-                _dy = cy + HOME_BORDER_W + sc(10)
+                _dx = cx + HOME_CELL_INNER_W - HOME_BORDER_W - _ds - sc(8)
+                _dy = cy + HOME_BORDER_W + sc(8)
                 _dot = _HEALTH_DOT_COLORS[hstate]
                 if hstate == "blocked" and not self.pulse_on:
                     _dot = _HEALTH_DOT_DIM["blocked"]
@@ -419,15 +431,17 @@ class HomeMenuGrid(_BaseCardGrid):
 
             # [UX-9] freshness dot (top-left) — 24h activity marker
             if item.get("_fresh"):
-                _fx = cx + HOME_BORDER_W + sc(10)
-                _fy = cy + HOME_BORDER_W + sc(10)
+                _fx = cx + HOME_BORDER_W + sc(8)
+                _fy = cy + HOME_BORDER_W + sc(8)
                 row.append(MultiContentEntryText(pos=(_fx, _fy), size=(HOME_FRESH_DOT, HOME_FRESH_DOT), font=0, text="", color=0, backcolor=_G_CLR["gold"], flags=0))
 
+            # [Option A] title in its own strip, between the dots and the icon.
             title = item.get("title", "")
-            tagline = item.get("tagline", "")
-            ty = cy + HOME_BORDER_W + HOME_TITLE_PAD
-            row.append(MultiContentEntryText(pos=(cx + HOME_BORDER_W + HOME_TITLE_PAD, ty), size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W - 2 * HOME_TITLE_PAD, HOME_TITLE_H), font=0, text=title, color=_G_CLR["text"], backcolor=_surf, flags=RT_HALIGN_CENTER))
-            
+            row.append(MultiContentEntryText(
+                pos=(cx + HOME_BORDER_W + HOME_TITLE_PAD, HOME_TITLE_STRIP_Y),
+                size=(HOME_CELL_INNER_W - 2 * HOME_BORDER_W - 2 * HOME_TITLE_PAD, HOME_TITLE_H),
+                font=0, text=title, color=_G_CLR["text"], backcolor=_surf,
+                flags=RT_HALIGN_CENTER))
         return row
 
 

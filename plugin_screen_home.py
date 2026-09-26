@@ -6,18 +6,29 @@ FINAL SET of UX features kept from the batch:
   [UX-2]  Per-continue-card watch-progress bar.
   [UX-3]  Hero fanart backdrop while the strip is focused.
   [UX-4]  Empty-strip hint text.
-  [UX-5]  MENU on a site tile → ChoiceBox quick-actions.  ← FIXED
+  [UX-5]  MENU on a site tile → ChoiceBox quick-actions.
   [UX-10] Paging-keys hint in the footer.
   [UX-12] Wrap-around arrow navigation (grid layer).
   [UX-17] Status auto-timeout (6s) for non-warning text.
-  [UX-19] Pulsing blocked-site health dot.  ← FIXED
+  [UX-19] Pulsing blocked-site health dot.
   [UX-20] Dim visited tiles.
   [UX-23] Carousel index math (no widget_map shuffling).
   [UX-24] Unified MemoizedPixmapCache.
 
-Everything else from the draft batch (theme system, section label,
-hide-unused config, usage reorder, double-BACK reset, clear-all
-continue) has been removed.
+[Option A] Tile strip layout: title has its own band between the dots
+and the site-logo PNG. Tagline removed.
+
+[pop-out] Selected home tile: cyan glow ring behind the tile + enlarged
+icon pixmap, driven by HOME_POP_OUT / HOME_POP_OUT_ICON.
+
+[pop-anim] Selection change drives an eased pop-out animation across
+POP_ANIM_FRAMES x POP_ANIM_INTERVAL ms (ease-out cubic). Applies to
+the home grid tiles, the continue-watch strip cards, and the poster
+grid (grid layout only; the carousel uses fixed per-slot geometry).
+
+[layout] Home grid moved down 90 px so the fanart backdrop band above
+the grid (between continue strip and grid row 0) is ~132 px, and the
+dead gap below the grid is ~28 px. Grid at y=515 instead of y=425.
 """
 
 import os
@@ -26,7 +37,7 @@ import time
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
-from Screens.ChoiceBox import ChoiceBox                     # [UX-5] fix
+from Screens.ChoiceBox import ChoiceBox                     # [UX-5]
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
@@ -53,7 +64,10 @@ from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     build_carousel_xml, build_continue_row_xml,
     HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
     HOME_CELL_MARGIN, HOME_BORDER_W, HOME_ICON_PAD_TOP, HOME_ICON_W, HOME_ICON_H,
-    HOME_CENTER_OFFSET_X,  # [PATCH G3 HOTFIX] was missing -- caused a NameError crash on launch
+    HOME_CELL_INNER_W, HOME_CELL_INNER_H,                # [PATCH G6][PATCH G7]
+    HOME_CENTER_OFFSET_X,
+    HOME_POP_OUT, HOME_POP_OUT_ICON,                     # [pop-out]
+    POP_ANIM_FRAMES, POP_ANIM_INTERVAL,                  # [pop-anim]
     POSTER_GRID_COLS, POSTER_GRID_ROWS, POSTER_W, POSTER_H,
     _CAROUSEL_GEOMETRY,
     CONT_SLOTS, CONT_W, CONT_H, CONT_GAP, CONT_X0, CONT_Y,
@@ -79,7 +93,7 @@ class AdvancedArabicPlayerHome(Screen):
     skin = """
     <screen name="AdvancedArabicPlayerHome" position="center,center" size="1920,1080" title="NovaPlay Media Center" flags="wfNoBorder" backgroundColor="#0D1117">
         <eLabel position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="0" />
-        <ePixmap position="0,0" size="1920,1080" pixmap="{plugin_path}/images/background.jpg" zPosition="1" alphatest="blend" />
+        <widget name="staticBackground" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" />
         <widget name="backdropImg" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" scale="1" />
         <widget name="shade_overlay" position="0,0" size="1920,1080" backgroundColor="#0D1117" transparency="150" zPosition="2" />
         <widget name="title_bar"  position="0,0"     size="1920,80" backgroundColor="#0D1117" zPosition="6" />
@@ -95,7 +109,8 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="content_title" position="40,95"  size="1200,50"  font="Bold;38" foregroundColor="#00E5FF" transparent="1" zPosition="5" halign="left" valign="top" />
         <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="5" halign="left" />
         <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
-        <widget name="home_grid" position="20,425" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        <widget name="homeSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="2" transparent="0" />
+        <widget name="home_grid" position="20,515" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
         <widget name="poster_grid" position="50,90" size="1820,864" scrollbarMode="showNever" transparent="1" zPosition="3" />
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
@@ -115,7 +130,7 @@ class AdvancedArabicPlayerHome(Screen):
     """
 
     _HOME_GRID_X = 20
-    _HOME_GRID_Y = 425
+    _HOME_GRID_Y = 515
     _POSTER_GRID_X = 50
     _POSTER_GRID_Y = 90
     carousel_slots = 7
@@ -124,8 +139,6 @@ class AdvancedArabicPlayerHome(Screen):
     def __init__(self, session):
         self.skin = AdvancedArabicPlayerHome.skin.format(
             plugin_path=PLUGIN_PATH,
-            # [PATCH G3] + HOME_CENTER_OFFSET_X so icon widgets line up with the now-
-            # centered tile backgrounds drawn by HomeMenuGrid._buildRow.
             home_grid_pics=build_pixmap_widgets_xml(
                 self._HOME_GRID_X + HOME_CENTER_OFFSET_X, self._HOME_GRID_Y,
                 HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
@@ -153,7 +166,7 @@ class AdvancedArabicPlayerHome(Screen):
         self._page_history = []
         self._focus_end = False
         self._tmdb_token = 0
-        self._cont_backdrop_token = 0  # [PATCH G5]
+        self._cont_backdrop_token = 0
         self._cats_cache = {}
         self._list_return_index = None
         self.index = 0
@@ -174,6 +187,23 @@ class AdvancedArabicPlayerHome(Screen):
         self._pulse_timer = eTimer()
         self._pulse_timer.callback.append(self._pulseTick)
 
+        # [pop-anim] home-grid animated pop-out on selection change
+        self._pop_timer = eTimer()
+        self._pop_timer.callback.append(self._popTick)
+        self._pop_frame = 0
+
+        # [pop-anim] continue-strip animated pop-out on selection change
+        self._cont_pop_timer = eTimer()
+        self._cont_pop_timer.callback.append(self._contPopTick)
+        self._cont_pop_frame = 0
+
+        # [pop-anim] poster-grid animated pop-out on selection change
+        self._poster_pop_timer = eTimer()
+        self._poster_pop_timer.callback.append(self._posterPopTick)
+        self._poster_pop_frame = 0
+        self._poster_pop_p = 1.0
+
+        self["staticBackground"] = Pixmap()  # [PATCH G9]
         self["backdropImg"] = Pixmap()
         self["shade_overlay"] = Label("")
         self._current_backdrop_path = ""
@@ -193,6 +223,10 @@ class AdvancedArabicPlayerHome(Screen):
         self["key_green"]  = Label("المفضلة")
         self["key_yellow"] = Label("بحث")
         self["key_blue"]   = Label("الإعدادات")
+
+        # [pop-out] cyan glow ring behind the selected home tile
+        self["homeSel"] = Label("")
+        self["homeSel"].hide()
 
         self["home_grid"] = HomeMenuGrid()
         self["home_grid"].onSelectionChanged = self._onGridSelectionChanged
@@ -440,7 +474,6 @@ class AdvancedArabicPlayerHome(Screen):
         self["title_text"].setText("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
         self["status"].setText("")
 
-        # [UX-9/20] decorate site tiles with recent-activity markers
         raw_sites = list(get_home_sites())
         try:
             hist = _history_items() or []
@@ -459,8 +492,6 @@ class AdvancedArabicPlayerHome(Screen):
             if ts and (_now - ts) < 86400:
                 recent_sites[s] = recent_sites.get(s, 0) + 1
 
-        # [PATCH G4] health (ok/unknown > blocked > down) then 24h recency, stable sort
-        # so equal-rank sites keep their existing relative order.
         _HEALTH_SORT_RANK = {"blocked": 1, "down": 2}
         visible_sites = [(key, title, tagline) for key, title, tagline in raw_sites
                           if not _is_site_hidden(key)]
@@ -482,7 +513,7 @@ class AdvancedArabicPlayerHome(Screen):
 
         self._items = site_items
         self["home_grid"].setList(self._items)
-        self._startHealthSweep()  # [PATCH G4]
+        self._startHealthSweep()
 
         self._showHomeMode()
         self._onGridSelectionChanged()
@@ -494,10 +525,20 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _showHomeMode(self):
         self._focus_zone = "grid"
+        try: self._poster_pop_timer.stop()                    # [pop-anim]
+        except Exception: pass
+        self._poster_pop_p = 1.0
         try:
             self._artworkPollTimer.start(1000, False)
         except Exception:
             pass
+        try:  # [PATCH G11] ePixmap ignored show()/hide() on this build; real widget + explicit
+              # pixmap load instead, matching backdropImg's already-working pattern
+            self["staticBackground"].instance.setPixmapFromFile(
+                os.path.join(PLUGIN_PATH, "images", "background.jpg"))
+            self["staticBackground"].show()  # [PATCH G9] only screen this is visible on
+        except Exception as e:
+            my_log("staticBackground show (home) failed: {}".format(e))
         self["backdropImg"].hide()
         self["shade_overlay"].hide()
         self["content_title"].hide()
@@ -538,7 +579,17 @@ class AdvancedArabicPlayerHome(Screen):
         self._paintContinueRow()
 
     def _showPosterMode(self):
+        try: self["staticBackground"].hide()  # [PATCH G9] not shown on poster/carousel screens
+        except Exception as e: my_log("staticBackground hide (poster) failed: {}".format(e))
         self["home_grid"].hide()
+        self["homeSel"].hide()                                # [pop-out]
+        try: self._pop_timer.stop()                           # [pop-anim]
+        except Exception: pass
+        try: self._cont_pop_timer.stop()                      # [pop-anim]
+        except Exception: pass
+        try: self._poster_pop_timer.stop()                    # [pop-anim]
+        except Exception: pass
+        self._poster_pop_p = 1.0
         self["text_list"].hide()
         for i in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
@@ -709,7 +760,6 @@ class AdvancedArabicPlayerHome(Screen):
         self._updateBackdrop()
 
     def _moveCarousel(self, delta):
-        # [UX-23] simple index bump; no widget_map shuffling
         total = len(self._items)
         if total <= 0:
             return
@@ -725,8 +775,44 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _onPosterGridSelectionChanged(self):
         self._updateGridFooter()
-        self._updatePosterPixmaps()
+        # [pop-anim] stop any in-flight animation, snap all posters to base size,
+        # then animate the new selection from p=0 upward
+        try:
+            self._poster_pop_timer.stop()
+        except Exception:
+            pass
+        self._poster_pop_p = 0.0
+        try:
+            self._updatePosterPixmaps(0.0)
+        except Exception as e:
+            my_log("poster pop reset error: {}".format(e))
+        self._poster_pop_frame = 0
+        try:
+            self._poster_pop_timer.start(POP_ANIM_INTERVAL, False)
+        except Exception as e:
+            my_log("poster pop timer start failed: {}".format(e))
         self._updateBackdrop()
+
+    def _posterPopTick(self):
+        """[pop-anim] Poster-grid animation frame — same ease-out cubic as the home grid."""
+        if self._display_mode != "poster" or self._layout_style != "grid":
+            try: self._poster_pop_timer.stop()
+            except Exception: pass
+            return
+        frames = max(1, POP_ANIM_FRAMES)
+        self._poster_pop_frame += 1
+        p_raw = min(1.0, float(self._poster_pop_frame) / float(frames))
+        # ease-out cubic: fast at the start, gentle landing
+        p = 1.0 - (1.0 - p_raw) ** 3
+        self._poster_pop_p = p
+        try:
+            self._updatePosterPixmaps(p)
+        except Exception as e:
+            my_log("_posterPopTick error: {}".format(e))
+        if self._poster_pop_frame >= frames:
+            try: self._poster_pop_timer.stop()
+            except Exception: pass
+            self._poster_pop_p = 1.0
 
     def _updateGridFooter(self):
         if self._display_mode == "poster":
@@ -741,10 +827,9 @@ class AdvancedArabicPlayerHome(Screen):
         start = (page - 1) * per_page + 1
         end = min(start + per_page - 1, total)
         self["grid_status_left"].setText("Shows {}-{} / {}".format(start, end, total))
-        # [UX-10] paging-keys hint
         self["grid_status_right"].setText("Page {} / {}  •  1–9 للتنقل".format(page, total_pages))
 
-    def _updatePosterPixmaps(self):
+    def _updatePosterPixmaps(self, pop_p=1.0):
         try:
             _g = self["poster_grid"]
             if (self._display_mode == "poster" and self._layout_style == "grid"
@@ -756,8 +841,9 @@ class AdvancedArabicPlayerHome(Screen):
                             + POSTER_CELL_MARGIN_H)
                 _sy_base = (self._POSTER_GRID_Y + _sr * POSTER_CELL_H
                             + POSTER_CELL_MARGIN_V)
-                _zw_s = int(POSTER_W * 1.08)
-                _zh_s = int(POSTER_H * 1.08)
+                _zoom_s = 0.08 * pop_p
+                _zw_s = int(POSTER_W * (1 + _zoom_s))
+                _zh_s = int(POSTER_H * (1 + _zoom_s))
                 _zx_s = _sx_base - (_zw_s - POSTER_W) // 2
                 _zy_s = _sy_base - (_zh_s - POSTER_H) // 2
                 self._moveResize("pgridSel", _zx_s + _zw_s + 2, _zy_s, 6, _zh_s)
@@ -796,8 +882,9 @@ class AdvancedArabicPlayerHome(Screen):
                 except Exception:
                     _is_sel = False
                 if _is_sel:
-                    _zw = int(POSTER_W * 1.08)
-                    _zh = int(POSTER_H * 1.08)
+                    _zoom = 0.08 * pop_p
+                    _zw = int(POSTER_W * (1 + _zoom))
+                    _zh = int(POSTER_H * (1 + _zoom))
                     _zx = _base_x - (_zw - POSTER_W) // 2
                     _zy = _base_y - (_zh - POSTER_H) // 2
                 else:
@@ -1054,7 +1141,7 @@ class AdvancedArabicPlayerHome(Screen):
         if self._display_mode != "poster":
             return
         if self._layout_style == "grid":
-            self._updatePosterPixmaps()
+            self._updatePosterPixmaps(getattr(self, "_poster_pop_p", 1.0))
             self._updateGridFooter()
             self._updateBackdrop(skip_tmdb=True)
         else:
@@ -1068,20 +1155,136 @@ class AdvancedArabicPlayerHome(Screen):
         if self._display_mode == "list":
             self._updateGridFooter()
 
+    # ── [pop-anim] home-grid helpers ────────────────────────────────────
+    def _iconBasePos(self, row, col):
+        """Top-left of the base (unzoomed) icon widget for cell (row, col).
+        Mirrors build_pixmap_widgets_xml():
+            px = x0 + c*cell_w + margin + border_w
+            py = y0 + r*cell_h + margin + border_w + icon_pad_top
+        """
+        bx = (self._HOME_GRID_X + HOME_CENTER_OFFSET_X
+              + col * HOME_CELL_W + HOME_CELL_MARGIN + HOME_BORDER_W)
+        by = (self._HOME_GRID_Y + row * HOME_CELL_H
+              + HOME_CELL_MARGIN + HOME_BORDER_W + HOME_ICON_PAD_TOP)
+        return bx, by
+
     def _updateIcons(self):
+        # hide all icons + ring, stop any in-flight pop animation
         for _r in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
                 self["pic_%d_%d" % (_r, _c)].hide()
+        try:
+            self["homeSel"].hide()
+        except Exception:
+            pass
+        try:
+            self._pop_timer.stop()
+        except Exception:
+            pass
+
         if self._display_mode != "home":
             return
-        for row, col, item in self["home_grid"].getPageItems():
+
+        grid = self["home_grid"]
+
+        # draw every visible icon at its base size
+        for row, col, item in grid.getPageItems():
             icon_path = resolve_icon_path(item, PLUGIN_PATH)
             if not icon_path:
                 continue
             widget = self["pic_%d_%d" % (row, col)]
+            bx, by = self._iconBasePos(row, col)
+            try:
+                inst = getattr(widget, "instance", None)
+                if inst is not None:
+                    inst.move(ePoint(int(bx), int(by)))
+                    inst.resize(eSize(int(HOME_ICON_W), int(HOME_ICON_H)))
+            except Exception as e:
+                my_log("_updateIcons base geometry error: {}".format(e))
             try:
                 self._pix.set(widget, ("icon", row, col), icon_path)
                 widget.show()
+            except Exception:
+                pass
+
+        # start pop animation on the selected tile
+        self._pop_frame = 0
+        try:
+            self._applyPopGeometry(0.0)
+        except Exception:
+            pass
+        try:
+            self._pop_timer.start(POP_ANIM_INTERVAL, False)
+        except Exception as e:
+            my_log("pop timer start failed: {}".format(e))
+
+    def _applyPopGeometry(self, p):
+        """Draw the selected tile's icon and homeSel ring at pop factor p (0..1)."""
+        if self._display_mode != "home":
+            return
+        grid = self["home_grid"]
+        sel_r, sel_c = grid.currentRow, grid.currentCol
+        if not (0 <= sel_r < HOME_GRID_ROWS and 0 <= sel_c < HOME_GRID_COLS):
+            return
+
+        ipop = HOME_POP_OUT_ICON * p
+        rpop = HOME_POP_OUT * p
+
+        # selected icon — grow from centre of base position
+        sel_item = None
+        for row, col, item in grid.getPageItems():
+            if row == sel_r and col == sel_c:
+                sel_item = item
+                break
+        if sel_item is not None:
+            icon_path = resolve_icon_path(sel_item, PLUGIN_PATH)
+            if icon_path:
+                widget = self["pic_%d_%d" % (sel_r, sel_c)]
+                bx, by = self._iconBasePos(sel_r, sel_c)
+                try:
+                    inst = getattr(widget, "instance", None)
+                    if inst is not None:
+                        inst.move(ePoint(int(bx - ipop), int(by - ipop)))
+                        inst.resize(eSize(int(HOME_ICON_W + 2 * ipop),
+                                          int(HOME_ICON_H + 2 * ipop)))
+                    self._pix.set(widget, ("icon", sel_r, sel_c), icon_path)
+                    widget.show()
+                except Exception as e:
+                    my_log("_applyPopGeometry icon error: {}".format(e))
+
+        # cyan glow ring behind the selected tile
+        try:
+            bx = (self._HOME_GRID_X + HOME_CENTER_OFFSET_X
+                  + sel_c * HOME_CELL_W + HOME_CELL_MARGIN)
+            by = (self._HOME_GRID_Y + sel_r * HOME_CELL_H + HOME_CELL_MARGIN)
+            self._moveResize("homeSel",
+                             bx - rpop, by - rpop,
+                             HOME_CELL_INNER_W + 2 * rpop,
+                             HOME_CELL_INNER_H + 2 * rpop)
+            self["homeSel"].show()
+        except Exception as e:
+            my_log("_applyPopGeometry ring error: {}".format(e))
+
+    def _popTick(self):
+        """One animation frame: advance p, apply ease-out cubic, stop at p=1."""
+        if self._display_mode != "home":
+            try:
+                self._pop_timer.stop()
+            except Exception:
+                pass
+            return
+        frames = max(1, POP_ANIM_FRAMES)
+        self._pop_frame += 1
+        p_raw = min(1.0, float(self._pop_frame) / float(frames))
+        # ease-out cubic: fast at the start, gentle landing
+        p = 1.0 - (1.0 - p_raw) ** 3
+        try:
+            self._applyPopGeometry(p)
+        except Exception as e:
+            my_log("_popTick error: {}".format(e))
+        if self._pop_frame >= frames:
+            try:
+                self._pop_timer.stop()
             except Exception:
                 pass
 
@@ -1117,7 +1320,6 @@ class AdvancedArabicPlayerHome(Screen):
                 else:
                     widget.hide()
 
-                # [PATCH 13] resume-time badge
                 pos = int(item.get("last_position_sec") or 0)
                 mm, ss = divmod(pos, 60)
                 hh, mm = divmod(mm, 60)
@@ -1125,7 +1327,6 @@ class AdvancedArabicPlayerHome(Screen):
                 badge.setText(tstr)
                 badge.show()
 
-                # [UX-2] watch-progress percentage
                 dur = int(item.get("total_duration")
                           or item.get("duration")
                           or item.get("total_seconds") or 0)
@@ -1149,7 +1350,6 @@ class AdvancedArabicPlayerHome(Screen):
                 except Exception: pass
             self._updateContinueLabel()
         else:
-            # [UX-4] empty-strip hint
             self["cont_title"].setText("لا يوجد محتوى قيد المشاهدة — ابدأ من الشبكة أدناه")
             self["cont_title"].show()
             self._resetContinueZoom()
@@ -1169,14 +1369,16 @@ class AdvancedArabicPlayerHome(Screen):
         else:
             self["cont_title"].setText("متابعة المشاهدة")
 
-    def _applyContinueLayout(self, zoom_index=None):
-        # [UX-2] also places the progress track + fill per slot
+    # [pop-anim] p in [0,1] interpolates the zoomed card from base size to +8%.
+    # Called with zoom_index=None to reset every slot to base.
+    def _applyContinueLayout(self, zoom_index=None, p=1.0):
         _bar_h = sc(6)
+        _zoom_factor = 0.08 * p
         for i in range(CONT_SLOTS):
             base_x = CONT_X0 + i * (CONT_W + CONT_GAP)
             if i == zoom_index:
-                zw = int(CONT_W * 1.08)
-                zh = int(CONT_H * 1.08)
+                zw = int(CONT_W * (1 + _zoom_factor))
+                zh = int(CONT_H * (1 + _zoom_factor))
                 zx = base_x - (zw - CONT_W) // 2
                 zy = CONT_Y - (zh - CONT_H) // 2
                 self._moveResize("cont%d" % i, zx, zy, zw, zh)
@@ -1184,6 +1386,10 @@ class AdvancedArabicPlayerHome(Screen):
                 _bx = zx + sc(6)
                 _by = zy + zh - 26 - _bar_h - sc(6)
                 _bw = zw - sc(12)
+                # cyan selection ring at the right edge
+                self._moveResize("contSel", zx + zw + 2, zy, 6, zh)
+                try: self["contSel"].show()
+                except Exception: pass
             else:
                 self._moveResize("cont%d" % i, base_x, CONT_Y, CONT_W, CONT_H)
                 self._moveResize("contbadge%d" % i, base_x,
@@ -1207,12 +1413,16 @@ class AdvancedArabicPlayerHome(Screen):
                     self["contbar%d" % i].hide()
             except Exception:
                 pass
+        if zoom_index is None:
+            try: self["contSel"].hide()
+            except Exception: pass
 
     def _resetContinueZoom(self):
+        try: self._cont_pop_timer.stop()                       # [pop-anim]
+        except Exception: pass
         self._applyContinueLayout(None)
         try: self["contSel"].hide()
         except Exception: pass
-        # [UX-3] leaving the row clears the hero backdrop
         try:
             self["backdropImg"].hide()
             self["shade_overlay"].hide()
@@ -1224,33 +1434,54 @@ class AdvancedArabicPlayerHome(Screen):
         if not (0 <= self._cont_index < len(self._cont_items)):
             self._resetContinueZoom()
             return
-        self._applyContinueLayout(self._cont_index)
-        bar_w = 6
-        zw = int(CONT_W * 1.08)
-        zh = int(CONT_H * 1.08)
-        base_x = CONT_X0 + self._cont_index * (CONT_W + CONT_GAP)
-        zx = base_x - (zw - CONT_W) // 2
-        zy = CONT_Y - (zh - CONT_H) // 2
-        self._moveResize("contSel", zx + zw + 2, zy, bar_w, zh)
-        self["contSel"].show()
+        # [pop-anim] stop any in-flight strip animation, snap all cards to base,
+        # then animate the new selection from p=0 upward.
+        try:
+            self._cont_pop_timer.stop()
+        except Exception:
+            pass
+        self._applyContinueLayout(None)
+        self._cont_pop_frame = 0
+        try:
+            self._cont_pop_timer.start(POP_ANIM_INTERVAL, False)
+        except Exception as e:
+            my_log("continue pop timer start failed: {}".format(e))
         self._updateContinueLabel()
         self._paintContinueBackdrop()
+
+    def _contPopTick(self):
+        """Continue-strip animation frame — same ease-out cubic as the grid."""
+        if self._display_mode != "home" or self._focus_zone != "row":
+            try:
+                self._cont_pop_timer.stop()
+            except Exception:
+                pass
+            return
+        frames = max(1, POP_ANIM_FRAMES)
+        self._cont_pop_frame += 1
+        p_raw = min(1.0, float(self._cont_pop_frame) / float(frames))
+        p = 1.0 - (1.0 - p_raw) ** 3
+        try:
+            self._applyContinueLayout(self._cont_index, p)
+        except Exception as e:
+            my_log("_contPopTick error: {}".format(e))
+        if self._cont_pop_frame >= frames:
+            try:
+                self._cont_pop_timer.stop()
+            except Exception:
+                pass
 
     # ── [UX-3] hero fanart backdrop for the focused continue card ──────
     def _paintContinueBackdrop(self):
         if not (0 <= self._cont_index < len(self._cont_items)):
             return
-        self._cont_backdrop_token += 1  # [PATCH G5] invalidate any in-flight fetch for a prior card
+        self._cont_backdrop_token += 1
         item = self._cont_items[self._cont_index]
         url = item.get("fanart") or item.get("backdrop") or ""
         if not url:
             self["backdropImg"].hide()
             self["shade_overlay"].hide()
             self._current_backdrop_path = ""
-            # [PATCH G5] no stored backdrop URL at all -- continue entries never carry one
-            # (see plugin_state._entry_from_item). Fall back to a TMDB lookup, same source
-            # _updateBackdrop already uses for the separate site-detail view, so the hero
-            # backdrop actually has something to show instead of staying permanently blank.
             if not item.get("_backdrop_fetch_tried"):
                 item["_backdrop_fetch_tried"] = True
                 token = self._cont_backdrop_token
@@ -1260,37 +1491,49 @@ class AdvancedArabicPlayerHome(Screen):
                     args=(item, cont_index, token), daemon=True).start()
             return
         target = (1920, 1080)
-        path = plugin_imagecache.getCachedImage(url, target_size=target)
+        cache_key = self._darkenedBackdropCacheKey(url)  # [PATCH G10]
+        path = plugin_imagecache.getCachedImage(cache_key, target_size=target)
         if path and path != self._current_backdrop_path:
             try:
                 self["backdropImg"].instance.setPixmapFromFile(path)
                 self["backdropImg"].show()
-                self["shade_overlay"].show()
                 self._current_backdrop_path = path
             except Exception as e:
                 my_log("continue backdrop paint failed: {}".format(e))
         elif not path:
-            plugin_imagecache.requestImageAsyncPriority(url, target_size=target)
+            token = self._cont_backdrop_token
+            cont_index = self._cont_index
+            threading.Thread(
+                target=self._bgFetchContinueBackdrop,
+                args=(item, cont_index, token),
+                kwargs={"known_url": url}, daemon=True).start()
 
-    def _bgFetchContinueBackdrop(self, item, cont_index, token):
-        # [PATCH G5] mirrors _bgFetchTmdbText's fetch/cache sequence, scoped to the
-        # continue strip via its own token instead of self._tmdb_token (a different,
-        # unrelated selection context -- the site-detail poster grid).
+    def _darkenedBackdropCacheKey(self, backdrop_url):
+        # [PATCH G10] a distinct cache key so a darkened backdrop never collides with (or gets
+        # silently overwritten by) any other, non-darkened use of the same URL+size elsewhere
+        # -- e.g. requestImageAsyncPriority's generic async worker, which never darkens.
+        return backdrop_url + "#dk45"
+
+    def _bgFetchContinueBackdrop(self, item, cont_index, token, known_url=None):
         try:
-            meta = _tmdb_search_metadata(item.get("title", ""), item.get("year", ""),
-                                         item.get("type", "movie"))
-            if not (meta and meta.get("backdrop_url")):
-                return
-            backdrop_url = meta["backdrop_url"]
-            item["fanart"] = backdrop_url
+            if known_url:
+                backdrop_url = known_url
+            else:
+                meta = _tmdb_search_metadata(item.get("title", ""), item.get("year", ""),
+                                             item.get("type", "movie"))
+                if not (meta and meta.get("backdrop_url")):
+                    return
+                backdrop_url = meta["backdrop_url"]
+                item["fanart"] = backdrop_url
+            cache_key = self._darkenedBackdropCacheKey(backdrop_url)
             target_size = (1920, 1080)
-            path = plugin_imagecache.getCachedImage(backdrop_url, target_size=target_size)
+            path = plugin_imagecache.getCachedImage(cache_key, target_size=target_size)
             if not path:
                 data = plugin_imagecache.downloadUrl(backdrop_url, timeout=8)
                 if data:
                     processed = plugin_imagecache.resizeCover(data, target_size, darken=0.45)
                     if processed is not None:
-                        cache_path = plugin_imagecache.buildCachePath(backdrop_url, target_size=target_size)
+                        cache_path = plugin_imagecache.buildCachePath(cache_key, target_size=target_size)
                         if plugin_imagecache.writeFileAtomic(cache_path, processed):
                             path = cache_path
             if path:
@@ -1299,22 +1542,23 @@ class AdvancedArabicPlayerHome(Screen):
             my_log("_bgFetchContinueBackdrop error: {}".format(e))
 
     def _paintContinueTmdbBackdrop(self, path, cont_index, token):
-        # [PATCH G5] only paint if the user is still on the same continue card and no
-        # newer fetch has started since (e.g. they arrowed to a different card while
-        # this one was still loading).
-        if token != self._cont_backdrop_token or self._cont_index != cont_index or not path:
+        # [PATCH G8] cont_index alone answers "is the user still on this item" --
+        # the token comparison was redundant and could reject a valid, still-current
+        # result whenever _paintContinueBackdrop fired twice in quick succession for
+        # the same item (confirmed via real device diagnostics: this happened on the
+        # very first focus of the strip, silently losing that item's backdrop forever
+        # since _backdrop_fetch_tried was already set, so no retry ever happened).
+        if self._cont_index != cont_index or not path:
             return
         try:
             self["backdropImg"].instance.setPixmapFromFile(path)
             self["backdropImg"].show()
-            self["shade_overlay"].show()
             self._current_backdrop_path = path
         except Exception as e:
             my_log("_paintContinueTmdbBackdrop: setPixmapFromFile threw for {}: {}".format(path, e))
 
-    # ── [UX-5] MENU handling — FIXED with ChoiceBox ─────────────────────
+    # ── [UX-5] MENU handling ────────────────────────────────────────────
     def _onMenu(self):
-        # Continue-row: MENU on a card → remove from continue
         if (self._display_mode == "home" and self._focus_zone == "row"
                 and 0 <= self._cont_index < len(self._cont_items)):
             item = self._cont_items[self._cont_index]
@@ -1338,7 +1582,6 @@ class AdvancedArabicPlayerHome(Screen):
                 MessageBox.TYPE_YESNO, timeout=8, default=False)
             return
 
-        # Site tile: MENU on a grid tile → quick actions
         if self._display_mode == "home" and self._focus_zone == "grid":
             item = self["home_grid"].getCurrent()
             if not item:
@@ -1349,7 +1592,6 @@ class AdvancedArabicPlayerHome(Screen):
             site_key = a.replace("site_", "")
             label = item.get("title", site_key)
 
-            # [UX-5 FIX] ChoiceBox returns the selected tuple, not True/False
             _opts = [
                 ("فتح الموقع",        "open"),
                 ("اختبار الاتصال",    "ping"),
@@ -1578,6 +1820,8 @@ class AdvancedArabicPlayerHome(Screen):
             self._items = items
             self._display_mode = "list"
             self._artworkPollTimer.stop()
+            try: self["staticBackground"].hide()  # [PATCH G9] not shown on category/list screens
+            except Exception as e: my_log("staticBackground hide (list) failed: {}".format(e))
             for i in range(CONT_SLOTS):
                 self["cont%d" % i].hide()
                 self["contbadge%d" % i].hide()
@@ -1623,6 +1867,14 @@ class AdvancedArabicPlayerHome(Screen):
                 for _c in range(HOME_GRID_COLS):
                     self["pic_%d_%d" % (i, _c)].hide()
             self["home_grid"].hide()
+            self["homeSel"].hide()                            # [pop-out]
+            try: self._pop_timer.stop()                       # [pop-anim]
+            except Exception: pass
+            try: self._cont_pop_timer.stop()                  # [pop-anim]
+            except Exception: pass
+            try: self._poster_pop_timer.stop()                # [pop-anim]
+            except Exception: pass
+            self._poster_pop_p = 1.0
             self["text_list"].show()
             self["text_list"].setList(items)
             try:
@@ -1884,6 +2136,12 @@ class AdvancedArabicPlayerHome(Screen):
         try: self._status_timer.stop()
         except: pass
         try: self._pulse_timer.stop()
+        except: pass
+        try: self._pop_timer.stop()                          # [pop-anim]
+        except: pass
+        try: self._cont_pop_timer.stop()                     # [pop-anim]
+        except: pass
+        try: self._poster_pop_timer.stop()                   # [pop-anim]
         except: pass
         try: plugin_imagecache.cancelAsyncImages()
         except: pass
