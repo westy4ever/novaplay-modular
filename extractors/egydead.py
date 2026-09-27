@@ -1520,8 +1520,8 @@ class EgyDeadExtractor(BaseExtractor):
 
         # ─── VIDHIDEVIP ──────────────────────────────────────────────────
         if "vidhidevip" in low or "vidhide" in low:
-            if resolve_streamwish:
-                stream = resolve_streamwish(url)
+            if resolve_govid:   # <--- USE resolve_govid HERE INSTEAD!
+                stream = resolve_govid(url)
                 if stream:
                     stream = _correct_stream_url(stream)
                     return stream, None, None, _variants_for(stream)

@@ -195,22 +195,57 @@ def resolve_uqload(url):
     return None
 
 
-def resolve_govid(url):
+def resolve_govid(url, referer=None):
+    """Centralized resolver for govid.live / vidhide embeds.
+    Handles the /play/ -> /e/ iframe chain and hex-encoded HLS URLs.
+    """
     try:
         if '.m3u8' in url:
-            log("resolve_govid: direct m3u8 URL")
-            return url
-        html, _ = fetch(url, referer="https://faselhd.rip/")
+            return _correct_stream_url(url)
+            
+        # Use govid.live as referer to bypass Cloudflare on all sites
+        req_referer = "https://govid.live/"
+        html, _ = fetch(url, referer=req_referer)
+        
         if not html:
             return None
-        m3u8 = find_m3u8(html)
-        if m3u8:
-            log("resolve_govid: found m3u8: {}".format(m3u8[:80]))
-            return m3u8
-        return find_mp4(html)
-    except Exception:
-        pass
-    return None
+
+        # If this is a /play/ page, extract the inner iframe to /e/{id}/
+        if '/play/' in url.lower():
+            iframe_m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', html, re.I)
+            if iframe_m:
+                embed_url = iframe_m.group(1).replace("\\/", "/")
+                if not embed_url.startswith('http'):
+                    embed_url = "https://govid.live" + embed_url
+                if embed_url != url:
+                    return resolve_govid(embed_url, referer)
+
+        # Method 1: hex-encoded variable (Mohix pattern used by govid)
+        for m in re.finditer(r'(?:const|var|let)\s+\w+\s*=\s*["\']([0-9a-fA-F]{40,})["\']', html):
+            try:
+                decoded = bytes.fromhex(m.group(1)).decode('utf-8', errors='ignore')
+                if '.m3u8' in decoded and decoded.startswith('http'):
+                    log("resolve_govid: decoded hex stream URL: {}".format(decoded[:80]))
+                    return _correct_stream_url(decoded) + "|Referer=" + req_referer
+            except Exception:
+                pass
+
+        # Method 2: JWPlayer sources array
+        sources_m = re.search(r'sources\s*:\s*\[[^\]]*?file\s*:\s*["\']([^"\']+)["\']', html, re.S | re.I)
+        if sources_m:
+            stream_url = sources_m.group(1).replace("\\/", "/")
+            return _correct_stream_url(stream_url) + "|Referer=" + req_referer
+
+        # Method 3: Any m3u8 URL in the page
+        m3u8_m = re.search(r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)', html, re.I)
+        if m3u8_m:
+            stream_url = m3u8_m.group(1).replace("\\/", "/")
+            return _correct_stream_url(stream_url) + "|Referer=" + req_referer
+
+        return None
+    except Exception as e:
+        log("resolve_govid error: {}".format(e))
+        return None
 
 
 def resolve_upstream(url):
@@ -999,6 +1034,46 @@ def resolve_okru(url):
     except Exception:
         pass
     return None
+
+def resolve_send_cm(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        patterns = [
+            r'(https?://[^\s"\'<>]+\.send\.cm[^\s"\'<>]+\.mp4[^\s"\'<>]*)',
+            r'(https?://[^\s"\'<>]+\.send\.cm[^\s"\'<>]+\.m3u8[^\s"\'<>]*)',
+            r'(https?://[^\s"\'<>]+/d/[^\s"\'<>]+\.mp4[^\s"\'<>]*)',
+            r'(https?://[^\s"\'<>]+/d/[^\s"\'<>]+\.m3u8[^\s"\'<>]*)',
+            r'"file"\s*:\s*"([^"]+\.(?:mp4|m3u8)[^"]*)"',
+            r'"url"\s*:\s*"([^"]+\.(?:mp4|m3u8)[^"]*)"',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html, re.I)
+            if match:
+                return _correct_stream_url(match.group(1))
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return None
+
+def resolve_vikingfile(url):
+    try:
+        html, _ = fetch(url, referer=url)
+        if not html:
+            return None
+        patterns = [
+            r'(https?://[^\s"\'<>]+\.vikingfile\.com[^\s"\'<>]+\.mp4[^\s"\'<>]*)',
+            r'(https?://[^\s"\'<>]+\.vikingfile\.com[^\s"\'<>]+\.m3u8[^\s"\'<>]*)',
+            r'(https?://[^\s"\'<>]+/f/[^\s"\'<>]+\.mp4[^\s"\'<>]*)',
+            r'"file"\s*:\s*"([^"]+\.(?:mp4|m3u8)[^"]*)"',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html, re.I)
+            if match:
+                return _correct_stream_url(match.group(1))
+        return find_m3u8(html) or find_mp4(html)
+    except Exception:
+        return None
 
 
 def resolve_vidguard(url):
@@ -2404,15 +2479,27 @@ HOST_RESOLVERS = {
     "wishfast":    resolve_streamwish,
     "filelion":    resolve_streamwish,
     "filelions":   resolve_streamwish,
-    "vidhide":     resolve_streamwish,
-    "streamhide":  resolve_streamwish,
+    "vidhide":     resolve_govid,
+    "vidhide.com": resolve_govid,
+    "vidhide.pro": resolve_govid,
+    "streamhide":  resolve_govid,
     "dhtpre":      resolve_streamwish,
     "embedrise":   resolve_streamwish,
     "hglamioz":    resolve_streamwish,
     "filemoon":    resolve_filemoon,
+    "medixiru":              resolve_streamwish,
+    "smoothpre":             resolve_streamwish,
+    "gentlebrookmediagroup": resolve_streamwish,
+    "bysekoze":              resolve_streamwish,
+    "minochinos":            resolve_streamwish,
+    "forafile":              resolve_streamwish,
+    "hgplaycdn":             resolve_filemoon,    
     "lulustream":  resolve_lulustream,
     "ok.ru":       resolve_okru,
     "okru":        resolve_okru,
+    "send.cm":           resolve_send_cm,
+    "vikingfile":        resolve_vikingfile,
+    "vikingfile.com":    resolve_vikingfile,    
     "vidguard":    resolve_vidguard,
     "vgfplay":     resolve_vidguard,
     "fastvid":     resolve_fastvid,
