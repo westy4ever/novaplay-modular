@@ -1,45 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-AlooyTV extractor — WordPress site
+AlooyTV extractor — WordPress site (fixed for OpenATV 7)
 
-Canonical base: https://alooytv.co/ (a WordPress 6.x site running the
-AlooyTV/Tajawal theme — cards use `pm-card` class on category pages,
-`movie__block` on some carousel templates; both share the same inner
-structure).
-
-Sequence followed (mirrors egydead.py):
-
-    homepage      → get_categories(mtype) — the site's own top nav
-                    plus every filter taxonomy (genre × quality × year)
-    category      → get_category_items(url, page) — parses pm-card /
-                    movie__block cards, follows /page/N/ pagination
-    movie landing → get_page(url) — og:title / og:image / meta desc,
-                    plus site-specific info fields
-    revealed      → same get_page() — hits /watch/ or appends ?watch=1
-                    when the server list is rendered lazily
-    embeds        → .servList li / .single_servers / iframes / data-*
-    downloads     → downloadMaster / dls_table / data-href link pairs
-
-Fixes applied in this revision:
-  * Multi-domain probing with a deep-content probe.  Every category
-    page carries `.pm-card` markers; a landing page does not.
-  * _full_url() percent-encodes non-ASCII bytes for ABSOLUTE URLs too —
-    AlooyTV's categories are Arabic (‎/category/افلام-اجنبي/‎), and the
-    HTTP client used by the plugin cannot put raw non-ASCII bytes in
-    a request line.
-  * Cards are parsed defensively: `pm-card`, `movie__block`, plain
-    `<article class="post">`, and bare `<a>+<img>`+<h3> — covers the
-    3 markup shapes actually used across the site's templates.
-  * Pagination handles both `/page/N/` and `?paged=N`.
-  * Playable servers try, in order: `.servList li[data-*]`,
-    `.single_servers` blocks, any `data-link`/`data-url`/`data-server`
-    attribute, `<iframe src>`, then `<source>`/`<video>`.
-  * The quality/genre/year filter dropdowns are exposed as category
-    items (a curated recent-years list keeps the menu navigable on a
-    remote).
+Key fixes in this revision:
+  * Server extraction now uses the site's AJAX endpoint
+    (wp-content/themes/timemovies/ajax.php) with POST_ID and server
+    index, returning JSON with server names and iframe HTML.
+  * Stream resolution follows the govid.live iframe chain:
+    /play/=...  →  /e/{id}/  →  JWPlayer HLS source (hex-encoded Mohix)
+  * Detail page parsing updated for sng-* CSS classes (sng-detail-row,
+    sng-tags, sng-subtitle, sng-btn-sec).
+  * Download link extraction from sng-btn-sec (govid.live/d/{id}/).
+  * Card parsing unchanged — pm-card still used on category/related pages.
+  * Playback headers fixed to bypass Cloudflare on govid.live streams.
 """
 
 import re
+import json
 import time
 import threading
 
@@ -53,8 +30,8 @@ from html import unescape as html_unescape
 
 
 # ─── Process-wide base-domain cache ──────────────────────────────────────────
-_BASE_CACHE_TTL = 300            # 5 minutes
-_PROBE_COOLDOWN = 30             # 30 seconds
+_BASE_CACHE_TTL = 300
+_PROBE_COOLDOWN = 30
 _base_cache = {"url": None, "resolved_at": 0, "probed_at": 0}
 _base_cache_lock = threading.Lock()
 _probe_lock = threading.Lock()
@@ -139,6 +116,7 @@ class AlooyTvExtractor(BaseExtractor):
             or "الوي تي في" in text
             or "pm-card" in text
             or "movie__block" in text
+            or "sng-hero" in text
             or "arc-wrap" in text
         )
 
@@ -147,12 +125,6 @@ class AlooyTvExtractor(BaseExtractor):
         return "{}://{}/".format(parts.scheme or "https", parts.netloc)
 
     def _base_serves_deep_content(self, base):
-        """Confirm the candidate actually serves listing pages, not just a
-        homepage.  AlooyTV's /home/ is a landing-only page with no cards;
-        real cards live under /category/*.  Some WordPress mirrors
-        respond 200 to `/` but return the same landing page for every
-        deep URL — accepting them makes every category collapse to the
-        same empty items."""
         if not base:
             return False
         test_url = urljoin(base, "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/")
@@ -258,15 +230,6 @@ class AlooyTvExtractor(BaseExtractor):
         return re.sub(r"\s+", " ", title).strip(" -|")
 
     def _full_url(self, path):
-        """
-        Resolve a relative or absolute URL against the base, then
-        percent-encode any non-ASCII bytes in the result.
-
-        The percent-encoding step MUST run for absolute URLs too:
-        AlooyTV's categories are Arabic (‎/category/افلام-اجنبي/‎), and
-        the HTTP client used by the plugin cannot put raw non-ASCII
-        bytes in a request line.
-        """
         if not path:
             return ""
         path = html_unescape(path.strip())
@@ -333,22 +296,9 @@ class AlooyTvExtractor(BaseExtractor):
 
     # ─── Cards ──────────────────────────────────────────────────────────
     def _parse_movie_items(self, html, current_url=None):
-        """
-        Extract movie/series cards from a listing page.
-
-        AlooyTV uses three markup shapes across its templates:
-          1. `a.pm-card` — the category-page template, present in every
-             capture (Arabic categories, filters, pagination).
-          2. `a.movie__block` — the homepage/carousel template.
-          3. plain `<article class="post">` / bare link+img+h3 — rare
-             fallback for WordPress default pages.
-        All three share: href on the wrapper, poster <img>, and a
-        title inside an <h3>/<h2>/<img alt>.
-        """
         items = []
         seen = set()
 
-        # Strategy 1+2: pm-card and movie__block — split on either
         blocks = re.split(
             r'(?=<a[^>]+class="[^"]*(?:pm-card|movie__block))',
             html or "")
@@ -376,8 +326,6 @@ class AlooyTvExtractor(BaseExtractor):
             seen.add(url)
 
             title = ""
-            # pm-card uses <div class="pm-title">; movie__block uses
-            # <div class="title"> or <h3 class="title">
             for pat in (
                     r'<div[^>]*class=["\'][^"\']*\bpm-title\b[^"\']*["\'][^>]*>(.*?)</div>',
                     r'<(?:h[1-4])[^>]*class=["\'][^"\']*\btitle\b[^"\']*["\'][^>]*>(.*?)</(?:h[1-4])>',
@@ -388,7 +336,6 @@ class AlooyTvExtractor(BaseExtractor):
                     if title:
                         break
             if not title:
-                # Fallback: the card's own title attr, or the img alt
                 tm = (re.search(r'<a[^>]+title=["\']([^"\']+)["\']', block, re.I)
                       or re.search(r'<img[^>]+alt=["\']([^"\']+)["\']', block, re.I))
                 if tm:
@@ -396,7 +343,6 @@ class AlooyTvExtractor(BaseExtractor):
             if not title:
                 continue
 
-            # Poster: try lazy attrs, then src.  Skip placeholders.
             poster = ""
             for pat in (
                     r'<img[^>]+class=["\'][^"\']*\bpm-img\b[^"\']*["\'][^>]+src=["\']([^"\']+)["\']',
@@ -413,14 +359,12 @@ class AlooyTvExtractor(BaseExtractor):
                     poster = self._full_url(cand)
                     break
 
-            # Quality badge: `pm-quality` on pm-card, `__quality` on movie__block
             quality = ""
             qm = (re.search(r'<span[^>]*class=["\'][^"\']*\bpm-quality\b[^"\']*["\'][^>]*>(.*?)</span>', block, re.S | re.I)
                   or re.search(r'<span[^>]*class=["\'][^"\']*\b__quality\b[^"\']*["\'][^>]*>(.*?)</span>', block, re.S | re.I))
             if qm:
                 quality = self._strip_tags(qm.group(1)).strip()
 
-            # Year: `pm-year` (with a star), or a bare 20xx in the title
             year = ""
             ym = re.search(r'<span[^>]*class=["\'][^"\']*\bpm-year\b[^"\']*["\'][^>]*>.*?(\d{4})',
                            block, re.S | re.I)
@@ -431,14 +375,12 @@ class AlooyTvExtractor(BaseExtractor):
                 if ym2:
                     year = ym2.group(1)
 
-            # Status badge: `pm-ep` → "جديد" (new) or similar
             label = ""
             lm = re.search(r'<span[^>]*class=["\'][^"\']*\bpm-ep\b[^"\']*["\'][^>]*>(.*?)</span>',
                            block, re.S | re.I)
             if lm:
                 label = self._strip_tags(lm.group(1)).strip()
 
-            # Category name (badge on hover) — useful as plot teaser
             plot = ""
             cm = re.search(r'<span[^>]*class=["\'][^"\']*\bpm-categ\b[^"\']*["\'][^>]*>(.*?)</span>',
                            block, re.S | re.I)
@@ -450,14 +392,12 @@ class AlooyTvExtractor(BaseExtractor):
                 if pm2:
                     plot = self._strip_tags(pm2.group(1)).strip()
 
-            # Strip a trailing year from the title so the "title" field
-            # is clean (year moves to its own field)
             if year:
                 title = re.sub(r'\s*\b' + year + r'\b\s*', ' ', title)
                 title = re.sub(r'\s{2,}', ' ', title).strip(' -|')
 
             url_low = url.lower()
-            raw_title = block  # for "مسلسل" detection keep the raw block
+            raw_title = block
             if ("الحلقة" in raw_title or "حلقة" in raw_title or
                     "/episode" in url_low):
                 item_type = "episode"
@@ -479,7 +419,7 @@ class AlooyTvExtractor(BaseExtractor):
                 "_action": "details",
             })
 
-        # Strategy 3: fallback — plain article / bare <a>+<img>+<h3>
+        # Fallback: plain article / bare <a>+<img>+<h3>
         if not items:
             for m in re.finditer(
                     r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
@@ -521,10 +461,8 @@ class AlooyTvExtractor(BaseExtractor):
         return items
 
     def _parse_episode_list(self, html):
-        """Parse an episode list from a series landing page."""
         items = []
         seen = set()
-        # The theme renders episodes inside .EpisodesList / .all-episodes
         for scope_m in re.finditer(
                 r'<(?:div|ul)[^>]*class=["\'][^"\']*(?:EpisodesList|all-episodes|episodes-list)[^"\']*["\'][^>]*>(.*?)</(?:div|ul)>',
                 html or "", re.S | re.I):
@@ -548,7 +486,6 @@ class AlooyTvExtractor(BaseExtractor):
         return items
 
     def _parse_season_list(self, html):
-        """Parse season links from a series landing page."""
         items = []
         seen = set()
         for m in re.finditer(
@@ -570,7 +507,6 @@ class AlooyTvExtractor(BaseExtractor):
         return items
 
     def _parse_pagination(self, html, current_url):
-        """WordPress pagination → returns the next-page item or None."""
         next_href = ""
         m = re.search(r'<link[^>]+rel=["\']next["\'][^>]+href=["\']([^"\']+)["\']',
                       html or "", re.I)
@@ -581,7 +517,6 @@ class AlooyTvExtractor(BaseExtractor):
             m = re.search(r'<a[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']next["\']',
                           html or "", re.I)
         if not m:
-            # AlooyTV's own pagination: <a class="arc-page-btn">›</a>
             m = re.search(r'<a[^>]+class=["\'][^"\']*\barc-page-btn\b[^"\']*["\'][^>]+'
                           r'href=["\']([^"\']+)["\'][^>]*>\s*›\s*</a>',
                           html or "", re.I | re.S)
@@ -601,19 +536,14 @@ class AlooyTvExtractor(BaseExtractor):
             }
         return None
 
-    # ─── Public API ─────────────────────────────────────────────────────
+    # ─── Public API: categories ─────────────────────────────────────────
     def get_categories(self, mtype="movie"):
-        """Homepage → the site's own top-level navigation plus every
-        filter taxonomy (quality × genre × year)."""
         base = self._get_base()
-
         cats = []
 
-        # ── Landing pages ────────────────────────────────────────────
         cats.append({"title": "🏠 الرئيسية",       "url": urljoin(base, "home/"),  "type": "category", "_action": "category"})
         cats.append({"title": "🆕 المضاف حديثًا",   "url": urljoin(base, "last/"),  "type": "category", "_action": "category"})
 
-        # ── Movies ───────────────────────────────────────────────────
         cats.append({"title": "── أفلام ──", "url": "", "type": "separator"})
         movies = [
             ("🎬 كل الأفلام",   "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/"),
@@ -628,7 +558,6 @@ class AlooyTvExtractor(BaseExtractor):
             cats.append({"title": title, "url": urljoin(base, path),
                          "type": "category", "_action": "category"})
 
-        # ── Series ───────────────────────────────────────────────────
         cats.append({"title": "── مسلسلات ──", "url": "", "type": "separator"})
         series = [
             ("📺 مسلسلات اجنبي",   "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/"),
@@ -643,7 +572,6 @@ class AlooyTvExtractor(BaseExtractor):
             cats.append({"title": title, "url": urljoin(base, path),
                          "type": "category", "_action": "category"})
 
-        # ── Ramadan ──────────────────────────────────────────────────
         cats.append({"title": "── مسلسلات رمضان ──", "url": "", "type": "separator"})
         ramadan = [
             ("🌙 رمضان 2026", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2026/"),
@@ -656,7 +584,6 @@ class AlooyTvExtractor(BaseExtractor):
             cats.append({"title": title, "url": urljoin(base, path),
                          "type": "category", "_action": "category"})
 
-        # ── Other ────────────────────────────────────────────────────
         cats.append({"title": "── أخرى ──", "url": "", "type": "separator"})
         cats.append({"title": "📡 برامج تلفزيونية",
                      "url": urljoin(base, "category/%d8%a8%d8%b1%d8%a7%d9%85%d8%ac-%d8%aa%d9%84%d9%81%d8%b2%d9%8a%d9%88%d9%86%d9%8a%d8%a9/"),
@@ -665,42 +592,28 @@ class AlooyTvExtractor(BaseExtractor):
                      "url": urljoin(base, "category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%85%d8%b5%d8%a7%d8%b1%d8%b9%d8%a9/"),
                      "type": "category", "_action": "category"})
 
-        # ── Genres (filter URLs) ─────────────────────────────────────
         cats.append({"title": "── تصنيفات حسب النوع ──", "url": "", "type": "separator"})
         genres = [
-            ("🎭 أكشن",       "أكشن"),
-            ("😂 كوميدي",     "كوميدي"),
-            ("🎭 دراما",       "دراما"),
-            ("👻 رعب",         "رعب"),
-            ("💕 رومانسي",    "رومانسي"),
-            ("🔪 جريمة",       "جريمة"),
-            ("😱 تشويق",       "تشويق-واثارة"),
-            ("🚀 خيال علمي",   "خيال-علمي"),
-            ("🧙 فانتازيا",   "فانتازيا"),
-            ("⚔️ حروب",        "حروب"),
-            ("🌍 مغامرات",     "مغامرات"),
-            ("🎌 انمي",        "انمي"),
-            ("🎠 كرتون",       "كرتون"),
-            ("📽️ وثائقي",      "وثائقي"),
-            ("😕 غموض",        "غموض"),
-            ("👨‍👩‍👧 عائلي",        "عائلي"),
-            ("🏛️ تاريخي",      "تاريخي"),
-            ("🎵 موسيقى",      "موسيقى"),
-            ("👮 بوليسي",      "بوليسي"),
-            ("🏃 حركة",        "حركة"),
-            ("🎮 مسابقات",    "مسابقات"),
-            ("🕵️ سيرة ذاتية",  "سيرة-ذاتية"),
+            ("🎭 أكشن",       "أكشن"),     ("😂 كوميدي",     "كوميدي"),
+            ("🎭 دراما",       "دراما"),    ("👻 رعب",         "رعب"),
+            ("💕 رومانسي",    "رومانسي"),  ("🔪 جريمة",       "جريمة"),
+            ("😱 تشويق",       "تشويق-واثارة"), ("🚀 خيال علمي", "خيال-علمي"),
+            ("🧙 فانتازيا",   "فانتازيا"),  ("⚔️ حروب",        "حروب"),
+            ("🌍 مغامرات",     "مغامرات"),   ("🎌 انمي",        "انمي"),
+            ("🎠 كرتون",       "كرتون"),    ("📽️ وثائقي",      "وثائقي"),
+            ("😕 غموض",        "غموض"),    ("👨‍👩‍👧 عائلي",        "عائلي"),
+            ("🏛️ تاريخي",      "تاريخي"),   ("🎵 موسيقى",      "موسيقى"),
+            ("👮 بوليسي",      "بوليسي"),   ("🏃 حركة",        "حركة"),
+            ("🎮 مسابقات",    "مسابقات"),  ("🕵️ سيرة ذاتية",  "سيرة-ذاتية"),
             ("🎬 قصير",        "قصير"),
         ]
         for title, slug in genres:
             cats.append({
                 "title": title,
                 "url": urljoin(base, "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/?filter-genre=" + slug),
-                "type": "category",
-                "_action": "category",
+                "type": "category", "_action": "category",
             })
 
-        # ── Years (filter URLs, curated recent) ─────────────────────
         cats.append({"title": "── حسب السنة ──", "url": "", "type": "separator"})
         years = ["2026", "2025", "2024", "2023", "2022", "2021", "2020",
                  "2019", "2018", "2017", "2016", "2015", "2014", "2013",
@@ -709,14 +622,12 @@ class AlooyTvExtractor(BaseExtractor):
             cats.append({
                 "title": "📅 {}".format(yr),
                 "url": urljoin(base, "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/?filter-year=" + yr),
-                "type": "category",
-                "_action": "category",
+                "type": "category", "_action": "category",
             })
 
         return cats
 
     def get_category_items(self, url, page=None):
-        """Category page → cards + optional next-page link."""
         fetch_url = url
         if page and page > 1:
             parsed = urlparse(fetch_url)
@@ -729,7 +640,6 @@ class AlooyTvExtractor(BaseExtractor):
                         parts.append(part)
                 fetch_url = parsed._replace(query="&".join(parts)).geturl()
             else:
-                # WordPress default: /category/xxx/page/N/
                 trimmed = fetch_url.rstrip("/")
                 if re.search(r"/page/\d+/?$", trimmed):
                     trimmed = re.sub(r"/page/\d+/?$", "", trimmed)
@@ -753,7 +663,6 @@ class AlooyTvExtractor(BaseExtractor):
         return items
 
     def search(self, query, page=1):
-        """WordPress search: /?s=QUERY&paged=N."""
         base = self._get_base().rstrip("/")
         search_url = "{}/?s={}".format(base, quote_plus(query))
         if page > 1:
@@ -771,26 +680,167 @@ class AlooyTvExtractor(BaseExtractor):
                 items.append(nxt)
         return items
 
-    # ─── Detail / revealed / embeds / downloads ─────────────────────────
+    # ─── AJAX server extraction (NEW) ──────────────────────────────────
+    def _extract_post_id(self, html):
+        m = re.search(r'var\s+POST_ID\s*=\s*(\d+)', html or "")
+        return m.group(1) if m else None
+
+    def _extract_ajax_url(self, html):
+        m = re.search(r'var\s+AJAX_URL\s*=\s*["\']([^"\']+)["\']', html or "")
+        if m:
+            return self._full_url(m.group(1))
+        return urljoin(self._get_base(), 'wp-content/themes/timemovies/ajax.php')
+
+    def _extract_watch_servers(self, html, page_url):
+        servers = []
+        post_id = self._extract_post_id(html)
+        if not post_id:
+            log("AlooyTV: POST_ID not found on page, falling back to legacy")
+            return self._extract_watch_servers_legacy(html, page_url)
+
+        ajax_url = self._extract_ajax_url(html)
+        log("AlooyTV: POST_ID={} AJAX_URL={}".format(post_id, ajax_url))
+
+        post_data = 'post_id={}&server=0'.format(post_id)
+        ajax_html, _ = self._fetch(ajax_url, referer=page_url, post_data=post_data)
+
+        try:
+            if isinstance(ajax_html, bytes):
+                ajax_html = ajax_html.decode('utf-8', errors='ignore')
+            data = json.loads(ajax_html)
+        except (ValueError, TypeError) as e:
+            log("AlooyTV: AJAX JSON parse failed: {}".format(e))
+            return self._extract_watch_servers_legacy(html, page_url)
+
+        if not data.get('success'):
+            log("AlooyTV: AJAX returned success=false")
+            return servers
+
+        server_names = data.get('servers', [])
+        log("AlooyTV: AJAX returned {} servers: {}".format(
+            len(server_names), server_names))
+
+        iframe_html = data.get('iframe', '')
+        iframe_m = re.search(r'<iframe[^>]+src=["\']([^"\']+)["\']', iframe_html, re.I)
+        if iframe_m:
+            servers.append({
+                'name': server_names[0] if server_names else 'سيرفر 1',
+                'url': iframe_m.group(1),
+                'type': 'embed',
+                'quality': '',
+            })
+
+        for i in range(1, len(server_names)):
+            post_data = 'post_id={}&server={}'.format(post_id, i)
+            ajax_html, _ = self._fetch(ajax_url, referer=page_url, post_data=post_data)
+            try:
+                if isinstance(ajax_html, bytes):
+                    ajax_html = ajax_html.decode('utf-8', errors='ignore')
+                data_i = json.loads(ajax_html)
+                if data_i.get('success'):
+                    iframe_m = re.search(
+                        r'<iframe[^>]+src=["\']([^"\']+)["\']',
+                        data_i.get('iframe', ''), re.I)
+                    if iframe_m:
+                        servers.append({
+                            'name': server_names[i] if i < len(server_names) else 'سيرفر {}'.format(i + 1),
+                            'url': iframe_m.group(1),
+                            'type': 'embed',
+                            'quality': '',
+                        })
+            except (ValueError, TypeError):
+                pass
+
+        log("AlooyTV: extracted {} servers via AJAX".format(len(servers)))
+        return servers
+
+    def _extract_watch_servers_legacy(self, html, page_url):
+        servers = []
+        seen = set()
+        if not html:
+            return servers
+
+        def _add(url, name="", kind="embed"):
+            url = html_unescape(str(url).strip())
+            if url.startswith("//"):
+                url = "https:" + url
+            if not url or url in seen:
+                return
+            if any(x in url.lower() for x in (
+                    "facebook.com", "twitter.com", "instagram.com",
+                    "youtube.com/embed", "google.com", "doubleclick",
+                    "googletag", "analytics", "cloudflareinsights")):
+                return
+            seen.add(url)
+            servers.append({
+                "name": name or "سيرفر {}".format(len(servers) + 1),
+                "url": url, "type": kind, "quality": "",
+            })
+
+        for li in re.finditer(
+                r'<li[^>]*class=["\'][^"\']*\bservList\b[^"\']*["\'][^>]*>(.*?)</li>',
+                html, re.S | re.I):
+            inner = li.group(1)
+            href_m = (re.search(r'data-(?:link|url|iframe|server|src)=["\']([^"\']+)["\']', inner, re.I)
+                      or re.search(r'<a[^>]+href=["\']([^"\']+)["\']', inner, re.I))
+            if not href_m:
+                continue
+            name_m = re.search(r'>([^<>]{2,})<', inner)
+            name = self._strip_tags(name_m.group(1)).strip() if name_m else ""
+            _add(href_m.group(1), name)
+
+        if not servers:
+            for m in re.finditer(
+                    r'<[^>]*class=["\'][^"\']*\bsingle_servers\b[^"\']*["\'][^>]*'
+                    r'(?:data-(?:server|url|link|src)=["\']([^"\']+)["\'])?',
+                    html, re.I):
+                if m.group(1):
+                    _add(m.group(1), "سيرفر")
+
+        if not servers:
+            for attr in ("data-link", "data-url", "data-iframe",
+                         "data-src", "data-server", "data-embed"):
+                for m in re.finditer(attr + r'=["\']([^"\']+)["\']', html, re.I):
+                    _add(m.group(1))
+
+        if not servers:
+            for iframe in extract_iframes(html, page_url):
+                _add(iframe)
+
+        if not servers:
+            for m in re.finditer(
+                    r'<(?:source|video)[^>]+src=["\']([^"\']+\.(?:mp4|m3u8|txt)[^"\']*)["\']',
+                    html, re.I):
+                _add(m.group(1), "مشاهدة مباشرة", "direct")
+
+        return servers
+
+    # ─── Detail page parsing ────────────────────────────────────────────
     def _parse_info_box(self, html):
-        """Pull labelled metadata out of the single-post layout.  AlooyTV
-        uses <dl class="dl-horizontal"> on detail pages, plus Yoast
-        meta tags we already read in get_page."""
         info = {}
         if not html:
             return info
         labels = {
-            "القسم": "category",
-            "النوع": "genres",
-            "الجودة": "quality",
-            "اللغة": "language",
-            "البلد": "country",
-            "السنة": "year",
-            "المدة": "runtime",
-            "مدة العرض": "runtime",
-            "القناة": "channel",
+            "القسم": "category",   "النوع": "genres",
+            "الجودة": "quality",   "اللغة": "language",
+            "البلد": "country",    "السنة": "year",
+            "المدة": "runtime",    "مدة العرض": "runtime",
+            "القناة": "channel",   "المخرج": "director",
+            "الكتابة": "writer",   "البطولة": "cast",
+            "القصة": "plot",
         }
-        # <dt>Label</dt><dd>Value</dd>
+        for m in re.finditer(
+                r'<div[^>]*class=["\'][^"\']*\bsng-detail-row\b[^"\']*["\'][^>]*>'
+                r'\s*<span[^>]*class=["\'][^"\']*\bsng-dk\b[^"\']*["\'][^>]*>(.*?)</span>'
+                r'\s*<span[^>]*class=["\'][^"\']*\bsng-dv\b[^"\']*["\'][^>]*>(.*?)</span>',
+                html, re.S | re.I):
+            key_raw = self._strip_tags(m.group(1)).rstrip(":：").strip()
+            key = labels.get(key_raw)
+            if not key:
+                continue
+            value = self._strip_tags(m.group(2)).strip()
+            if value:
+                info[key] = value
         for m in re.finditer(r'<dt[^>]*>(.*?)</dt>\s*<dd[^>]*>(.*?)</dd>',
                              html, re.S | re.I):
             key_raw = self._strip_tags(m.group(1)).rstrip(":：").strip()
@@ -802,15 +852,37 @@ class AlooyTvExtractor(BaseExtractor):
                 info[key] = value
         return info
 
+    def _extract_quality_from_tags(self, html):
+        tags_m = re.search(
+            r'<div[^>]*class=["\'][^"\']*\bsng-tags\b[^"\']*["\'][^>]*>(.*?)</div>',
+            html or "", re.S | re.I)
+        if tags_m:
+            tags = tags_m.group(1)
+            for tag_m in re.finditer(
+                    r'<span[^>]*class=["\'][^"\']*\bsng-tag\b[^"\']*["\'][^>]*>(.*?)</span>',
+                    tags, re.S | re.I):
+                text = self._strip_tags(tag_m.group(1)).strip()
+                if re.search(r'\b(?:2160p|1440p|1080p|720p|480p|360p|4k|HD|CAM|TS|WEB-?DL|BluRay|BDRip)\b',
+                             text, re.I):
+                    return text
+        return ""
+
+    def _extract_year_from_tags(self, html):
+        tags_m = re.search(
+            r'<div[^>]*class=["\'][^"\']*\bsng-tags\b[^"\']*["\'][^>]*>(.*?)</div>',
+            html or "", re.S | re.I)
+        if tags_m:
+            tags = tags_m.group(1)
+            for tag_m in re.finditer(
+                    r'<span[^>]*class=["\'][^"\']*\bsng-tag\b[^"\']*["\'][^>]*>(.*?)</span>',
+                    tags, re.S | re.I):
+                text = self._strip_tags(tag_m.group(1)).strip()
+                ym = re.search(r'\b(19\d{2}|20\d{2})\b', text)
+                if ym:
+                    return ym.group(1)
+        return ""
+
     def _parse_downloads(self, html):
-        """
-        Return [{"resolution","size","quality","url"}, ...] for the
-        download section.  The theme ships two shapes:
-          1. a `.downloadMaster` block with <span.ser-name> and
-             an <a.ser-link href="…">
-          2. a `dls_table` whose rows carry an <a href="…"> with the
-             resolution inside the row.
-        """
         downloads = []
         seen = set()
         if not html:
@@ -826,13 +898,17 @@ class AlooyTvExtractor(BaseExtractor):
                 return
             seen.add(url)
             downloads.append({
-                "resolution": resolution,
-                "size": size,
-                "quality": quality,
-                "url": url,
+                "resolution": resolution, "size": size,
+                "quality": quality, "url": url,
             })
 
-        # Variant 1 — downloadMaster
+        for m in re.finditer(
+                r'<a[^>]+class=["\'][^"\']*\bsng-btn-sec\b[^"\']*["\'][^>]+href=["\']([^"\']+)["\']',
+                html, re.I):
+            dl_url = m.group(1)
+            if 'govid.live/d/' in dl_url or '/download' in dl_url.lower():
+                _add(dl_url)
+
         block_m = re.search(
             r'<div[^>]*class=["\'][^"\']*(?:downloadMaster|List--Download)[^"\']*["\'][^>]*>'
             r'(.*?)</ul>',
@@ -853,7 +929,6 @@ class AlooyTvExtractor(BaseExtractor):
                 size = size_m.group(1) if size_m else ""
                 _add(href_m.group(1), resolution, size, quality)
 
-        # Variant 2 — dls_table
         if not downloads:
             for tbl in re.finditer(
                     r'<table[^>]*class=["\'][^"\']*\bdls_table\b[^"\']*["\'][^>]*>(.*?)</table>',
@@ -884,92 +959,69 @@ class AlooyTvExtractor(BaseExtractor):
 
         return downloads
 
-    def _extract_watch_servers(self, html, page_url):
-        """Parse streaming servers from a revealed/watch page."""
-        servers = []
-        seen = set()
-        if not html:
-            return servers
-
-        def _add(url, name="", kind="embed"):
-            url = html_unescape(str(url).strip())
-            if url.startswith("//"):
-                url = "https:" + url
-            if not url or url in seen:
-                return
-            if any(x in url.lower() for x in (
-                    "facebook.com", "twitter.com", "instagram.com",
-                    "youtube.com/embed", "google.com", "doubleclick",
-                    "googletag", "analytics", "cloudflareinsights")):
-                return
-            seen.add(url)
-            servers.append({
-                "name": name or "سيرفر {}".format(len(servers) + 1),
-                "url": url,
-                "type": kind,
-                "quality": "",
-            })
-
-        # Primary: `.servList li` — data attributes or an <a> inside
-        for li in re.finditer(
-                r'<li[^>]*class=["\'][^"\']*\bservList\b[^"\']*["\'][^>]*>(.*?)</li>',
-                html, re.S | re.I):
-            inner = li.group(1)
-            href_m = (re.search(r'data-(?:link|url|iframe|server|src)=["\']([^"\']+)["\']', inner, re.I)
-                      or re.search(r'<a[^>]+href=["\']([^"\']+)["\']', inner, re.I))
-            if not href_m:
-                continue
-            name_m = re.search(r'>([^<>]{2,})<', inner)
-            name = self._strip_tags(name_m.group(1)).strip() if name_m else ""
-            _add(href_m.group(1), name)
-
-        # Secondary: `.single_servers` block with a data-server attribute
-        if not servers:
-            for m in re.finditer(
-                    r'<[^>]*class=["\'][^"\']*\bsingle_servers\b[^"\']*["\'][^>]*'
-                    r'(?:data-(?:server|url|link|src)=["\']([^"\']+)["\'])?',
-                    html, re.I):
-                if m.group(1):
-                    _add(m.group(1), "سيرفر")
-
-        # Tertiary: any data-* attribute carrying a playable URL
-        if not servers:
-            for attr in ("data-link", "data-url", "data-iframe",
-                         "data-src", "data-server", "data-embed"):
-                for m in re.finditer(attr + r'=["\']([^"\']+)["\']', html, re.I):
-                    _add(m.group(1))
-
-        # Quaternary: iframes
-        if not servers:
-            for iframe in extract_iframes(html, page_url):
-                _add(iframe)
-
-        # Last resort: <source>/<video> tags
-        if not servers:
-            for m in re.finditer(
-                    r'<(?:source|video)[^>]+src=["\']([^"\']+\.(?:mp4|m3u8|txt)[^"\']*)["\']',
-                    html, re.I):
-                _add(m.group(1), "مشاهدة مباشرة", "direct")
-
-        return servers
-
     def _find_watch_url(self, html, page_url):
-        """Find the watch URL from the landing page."""
-        # 1. Explicit link to /watch/ or ?watch=1
         m = (re.search(r'<a[^>]+class=["\'][^"\']*\bwatch\b[^"\']*["\'][^>]+href=["\']([^"\']+)["\']', html, re.I)
              or re.search(r'<a[^>]+href=["\']([^"\']+/watch/?)["\']', html, re.I)
              or re.search(r'<a[^>]+href=["\']([^"\']*[?&]watch=1[^"\']*)["\']', html, re.I))
         if m:
             return self._full_url(m.group(1))
-        # 2. The theme's own "شاهد الآن" button often points to #watch or
-        #    the post itself with ?watch=1 — fall back to appending it.
         base = page_url.split("?")[0].rstrip("/")
         if not base.endswith("/watch"):
             return base + "/watch/"
         return page_url
 
+    # ─── govid.live stream resolution (NEW) ────────────────────────────
+    def _resolve_govid_stream(self, url, _depth=0):
+        if _depth > 3:
+            return None
+
+        html, final_url = self._fetch(url)
+        if not html:
+            return None
+
+        if '/play/' in url.lower():
+            iframe_m = re.search(
+                r'<iframe[^>]+src=["\']([^"\']+)["\']',
+                html, re.I)
+            if iframe_m:
+                embed_url = self._full_url(iframe_m.group(1))
+                if embed_url and embed_url != url:
+                    log("AlooyTV: following inner iframe: {}".format(embed_url))
+                    return self._resolve_govid_stream(embed_url, _depth + 1)
+
+        for m in re.finditer(
+                r'(?:const|var|let)\s+\w+\s*=\s*["\']([0-9a-fA-F]{40,})["\']',
+                html):
+            try:
+                decoded = bytes.fromhex(m.group(1)).decode('utf-8', errors='ignore')
+                if '.m3u8' in decoded or '.mp4' in decoded:
+                    log("AlooyTV: decoded hex stream URL: {}".format(decoded[:80]))
+                    return decoded
+            except Exception:
+                pass
+
+        sources_m = re.search(
+            r'sources\s*:\s*\[[^\]]*?file\s*:\s*["\']([^"\']+)["\']',
+            html, re.S | re.I)
+        if sources_m:
+            return sources_m.group(1)
+
+        m3u8_m = re.search(
+            r'(https?://[^\s"\'<>]+\.m3u8[^\s"\'<>]*)',
+            html, re.I)
+        if m3u8_m:
+            return m3u8_m.group(1)
+
+        mp4_m = re.search(
+            r'(https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*)',
+            html, re.I)
+        if mp4_m:
+            return mp4_m.group(1)
+
+        return None
+
+    # ─── get_page ───────────────────────────────────────────────────────
     def get_page(self, url, m_type=None):
-        """Movie landing → revealed → servers + episodes + downloads."""
         html, final_url = self._fetch(url)
         result = {
             "url": url,
@@ -987,12 +1039,14 @@ class AlooyTvExtractor(BaseExtractor):
             log("AlooyTV: get_page failed for {}".format(url))
             return result
 
-        # ── Metadata ────────────────────────────────────────────────────
         title = ""
-        # Yoast's og:title is the cleanest
         tm = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
         if tm:
             title = self._clean_title(tm.group(1))
+        if not title:
+            tm = re.search(r'<h1[^>]*class=["\'][^"\']*\bsng-title\b[^"\']*["\'][^>]*>(.*?)</h1>', html, re.S | re.I)
+            if tm:
+                title = self._clean_title(tm.group(1))
         if not title:
             tm = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S | re.I)
             if tm:
@@ -1007,44 +1061,51 @@ class AlooyTvExtractor(BaseExtractor):
         pm = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html, re.I)
         if pm:
             poster = pm.group(1).strip()
-            # Normalize the WordPress size suffix, e.g. 336x600
             poster = re.sub(r"-\d+x\d+(?=\.\w+$)", "", poster)
             result["poster"] = self._full_url(poster)
 
         plot = ""
-        for pat in (
-                r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
-                r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
-                r'<div[^>]*class=["\'][^"\']*\bstory\b[^"\']*["\'][^>]*>(.*?)</div>'):
-            plm = re.search(pat, html, re.S | re.I)
-            if plm:
-                plot = self._strip_tags(plm.group(1)).strip()
-                if plot:
-                    break
+        sm = re.search(
+            r'<div[^>]*class=["\'][^"\']*\bsng-subtitle\b[^"\']*["\'][^>]*>(.*?)</div>',
+            html, re.S | re.I)
+        if sm:
+            plot = self._strip_tags(sm.group(1)).strip()
+        if not plot:
+            for pat in (
+                    r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']',
+                    r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']',
+                    r'<div[^>]*class=["\'][^"\']*\bstory\b[^"\']*["\'][^>]*>(.*?)</div>'):
+                plm = re.search(pat, html, re.S | re.I)
+                if plm:
+                    plot = self._strip_tags(plm.group(1)).strip()
+                    if plot:
+                        break
         result["plot"] = plot
 
-        # Rating — theme has `.postRating` from egydead-style templates,
-        # but AlooyTV primary template doesn't show a rating; skip if absent.
         rat_m = re.search(r'class=["\'][^"\']*\bpostRating\b[^"\']*["\'][^>]*>.*?<span[^>]*>([\d.]+)',
                           html, re.S | re.I)
         if rat_m:
             result["rating"] = rat_m.group(1).strip()
 
-        # ── Info box ────────────────────────────────────────────────────
         info = self._parse_info_box(html)
         for k in ("category", "genres", "quality", "language",
                   "country", "year", "channel", "runtime"):
             if info.get(k):
                 result[k] = info[k]
 
-        # Trailing year from title
+        quality = self._extract_quality_from_tags(html)
+        if quality:
+            result["quality"] = quality
+
+        year_tag = self._extract_year_from_tags(html)
+        if year_tag:
+            result["year"] = year_tag
         ym = re.search(r'\b(19\d{2}|20\d{2})\b', result["title"])
         if ym:
             result["year"] = result["year"] or ym.group(1)
             result["title"] = re.sub(r'\s*\b' + ym.group(1) + r'\b\s*', ' ',
                                      result["title"]).strip(" -|")
 
-        # ── Type detection ──────────────────────────────────────────────
         url_low = (final_url or url).lower()
         if "/episode" in url_low or "الحلقة" in raw_title:
             result["type"] = "episode"
@@ -1053,7 +1114,6 @@ class AlooyTvExtractor(BaseExtractor):
         elif m_type:
             result["type"] = m_type
 
-        # ── Servers (revealed) ──────────────────────────────────────────
         servers = self._extract_watch_servers(html, final_url or url)
 
         if not servers:
@@ -1072,10 +1132,8 @@ class AlooyTvExtractor(BaseExtractor):
                             result["plot"] = self._strip_tags(pm2.group(1)).strip()
         result["servers"] = servers
 
-        # ── Downloads ───────────────────────────────────────────────────
         result["downloads"] = self._parse_downloads(html)
 
-        # ── Episodes / seasons ──────────────────────────────────────────
         if result["type"] == "series":
             seasons = self._parse_season_list(html)
             episodes = self._parse_episode_list(html)
@@ -1126,11 +1184,31 @@ class AlooyTvExtractor(BaseExtractor):
         # Direct media URL
         if ".m3u8" in low:
             q = self._quality_from_url(url)
-            return url, q, self._get_base(), _variants_for(url)
+            headers = {
+                "User-Agent": _PROBE_HEADERS["User-Agent"],
+                "Referer": self._get_base()
+            }
+            return url, q, headers, _variants_for(url)
         if ".mp4" in low:
             return url, self._quality_from_url(url), self._get_base(), []
 
-        # Anything else → delegate to the shared host dispatcher
+        # ── govid.live / vidhide embed → resolve HLS ──────────────────
+        if any(h in low for h in (
+                "govid.live", "vidhide", "vidplay", "vidhide.pro",
+                "vidhide.com", "go-stream.link")):
+            log("AlooyTV: resolving govid.live embed: {}".format(url[:80]))
+            stream_url = self._resolve_govid_stream(url, _depth)
+            if stream_url:
+                # govid.live uses Cloudflare and requires specific headers to allow playback
+                headers = {
+                    "User-Agent": _PROBE_HEADERS["User-Agent"],
+                    "Referer": "https://govid.live/",
+                    "Origin": "https://govid.live"
+                }
+                return stream_url, "HD", headers, _variants_for(stream_url)
+            log("AlooyTV: govid.live resolution failed for {}".format(url[:80]))
+
+        # ── Generic host dispatcher ────────────────────────────────────
         if base_extract_stream is not None:
             try:
                 result = base_extract_stream(url)
