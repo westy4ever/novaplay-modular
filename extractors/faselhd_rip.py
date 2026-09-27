@@ -19,8 +19,6 @@ class FaselhdRipExtractor(BaseExtractor):
     """Extractor for faselhd.rip"""
     
     BASE_URL = "https://faselhd.rip"
-    # Internal embed host used by faselhd.rip — NOT a user-facing domain.
-    # Requests to it must still carry faselhd.rip as Origin/Referer.
     GOVID_BASE = "https://govid.live"
     MAX_AJAX_SERVERS = 16
     NOISE_DOMAINS = {
@@ -32,6 +30,19 @@ class FaselhdRipExtractor(BaseExtractor):
         super(FaselhdRipExtractor, self).__init__()
         self.main_url = self.BASE_URL
         self._resolved_base = self.BASE_URL
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+            "Referer": self.BASE_URL,
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Upgrade-Insecure-Requests": "1",
+        }
     
     def _get_base(self):
         return self._resolved_base or self.BASE_URL
@@ -56,28 +67,14 @@ class FaselhdRipExtractor(BaseExtractor):
         return title.strip()
     
     def _find_m3u8(self, text):
-        """Locate an m3u8 URL in raw HTML/JS.
-
-        Handles four cases:
-          1. Plain http(s) m3u8 URL.
-          2. m3u8 in a JS/HTML attribute (file=, src=, url=, source=, hls=).
-          3. Hex-encoded m3u8 in a quoted string (govid.live's `const Mohix = "6874..."`).
-          4. Hex-encoded m3u8 as a bare 64+ char hex run.
-        """
         if not text:
             return None
-
-        # 1) Direct m3u8 URL
         m = re.search(r'(https?://[^\s"\'<>`\\]+\.m3u8(?:\?[^\s"\'<>`\\]*)?)', text, re.I)
         if m:
             return m.group(1).replace('\\/', '/').replace('&amp;', '&')
-
-        # 2) m3u8 in a JS/HTML attribute
         m = re.search(r'(?:file|src|url|source|hls)\s*[=:]\s*["\']([^"\']+\.m3u8[^"\']*)["\']', text, re.I)
         if m:
             return m.group(1).replace('\\/', '/').replace('&amp;', '&')
-
-        # 3) Hex-encoded m3u8 (quoted)
         for m in re.finditer(r'["\']([0-9a-fA-F]{64,})["\']', text):
             try:
                 decoded = bytes.fromhex(m.group(1)).decode('utf-8', errors='ignore')
@@ -85,8 +82,6 @@ class FaselhdRipExtractor(BaseExtractor):
                     return decoded.replace('\\/', '/').replace('&amp;', '&')
             except Exception:
                 pass
-
-        # 4) Hex-encoded m3u8 (bare)
         for m in re.finditer(r'\b([0-9a-fA-F]{64,})\b', text):
             try:
                 decoded = bytes.fromhex(m.group(1)).decode('utf-8', errors='ignore')
@@ -94,7 +89,6 @@ class FaselhdRipExtractor(BaseExtractor):
                     return decoded.replace('\\/', '/').replace('&amp;', '&')
             except Exception:
                 pass
-
         return None
     
     def _is_noise_domain(self, url):
@@ -104,16 +98,7 @@ class FaselhdRipExtractor(BaseExtractor):
         return False
     
     def _govid_fetch(self, url, referer):
-        """Fetch an embed page.
-
-        Origin/Referer must always be faselhd.rip — govid.live rejects
-        requests whose Origin is not the real site.
-        """
-        hdrs = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-        }
+        hdrs = dict(self.headers)
         hdrs["Referer"] = referer or self.BASE_URL
         hdrs["Origin"] = self.BASE_URL
         return fetch(url, referer=referer or self.BASE_URL, extra_headers=hdrs)
@@ -121,165 +106,145 @@ class FaselhdRipExtractor(BaseExtractor):
     def _scan_page_for_stream(self, html, page_url):
         if not html:
             return None, None
-    
         inline_blocks = re.findall(r'<script(?:\s[^>]*)?>(.+?)</script>', html, re.DOTALL | re.I)
-        log("faselhd_rip: found {} inline script blocks in {}".format(len(inline_blocks), page_url[:60]))
         for i, blk in enumerate(inline_blocks):
             found = self._find_m3u8(blk)
             if found:
-                log("faselhd_rip: m3u8 in inline script[{}]: {}".format(i, found[:80]))
                 return found, None
-    
         ext_srcs = re.findall(r'<script[^>]+src=["\']?([^"\'>\s]+)["\']?', html, re.I)
-        log("faselhd_rip: found {} external scripts in page".format(len(ext_srcs)))
         for src in ext_srcs[:6]:
             if not src.startswith('http'):
                 src = self.BASE_URL + '/' + src.lstrip('/')
             if self._is_noise_domain(src):
-                log("faselhd_rip: skipping noise script: {}".format(src[:60]))
                 continue
-            log("faselhd_rip: fetching external script: {}".format(src[:80]))
             js, _ = self._govid_fetch(src, page_url)
             if not js:
                 continue
             found = self._find_m3u8(js)
             if found:
-                log("faselhd_rip: m3u8 in external script {}: {}".format(src[:60], found[:80]))
                 return found, None
             api_m = re.search(r'["\']/((?:stream|hls|vod|live|video|play|src)/)["\']', js)
             if api_m:
                 return None, api_m.group(1)
-    
         found = self._find_m3u8(html)
         if found:
-            log("faselhd_rip: m3u8 in raw HTML: {}".format(found[:80]))
             return found, None
-    
         id_m = re.search(r'govid\.live/e/(\d+)/?', html)
         if id_m:
             return None, id_m.group(1)
-    
         return None, None
     
     def _extract_govid_by_id(self, video_id, embed_url):
-        log("faselhd_rip: _extract_govid_by_id id={} embed={}".format(video_id, embed_url[:80]))
-    
         canonical = "{}/e/{}/".format(self.GOVID_BASE, video_id)
         urls_to_scan = [canonical]
         if embed_url != canonical and "govid.live" in embed_url:
             urls_to_scan.append(embed_url)
-    
         for page_url in urls_to_scan:
-            log("faselhd_rip: fetching govid page {}".format(page_url[:80]))
             html, _ = self._govid_fetch(page_url, self.BASE_URL)
             if not html:
                 continue
-    
             stream, extra = self._scan_page_for_stream(html, page_url)
             if stream:
                 quality = "1080p" if "1080" in stream else ("720p" if "720" in stream else "HD")
                 return stream, quality, page_url
-    
             if extra:
                 if extra.isdigit():
                     if extra != video_id:
-                        log("faselhd_rip: found different video ID {} in page, retrying".format(extra))
                         return self._extract_govid_by_id(extra, "{}/e/{}/".format(self.GOVID_BASE, extra))
                 else:
                     api_url = "{}/{}{}".format(self.GOVID_BASE, extra, video_id)
-                    log("faselhd_rip: trying API hint: {}".format(api_url))
                     api_resp, _ = self._govid_fetch(api_url, canonical)
                     if api_resp:
                         stream = self._find_m3u8(api_resp)
                         if stream:
                             return stream, "HD", canonical
-    
-        log("faselhd_rip: all strategies exhausted for id={}".format(video_id))
         return None, "", embed_url
     
     def _extract_govid_stream(self, embed_url, page_referer):
-        log("faselhd_rip: _extract_govid_stream {}".format(embed_url[:80]))
-    
         m = re.search(r'/e/(\d+)/?', embed_url)
         if m:
             return self._extract_govid_by_id(m.group(1), embed_url)
-    
         if '/play/' in embed_url:
-            log("faselhd_rip: fetching /play/ page to discover video ID")
             html, _ = self._govid_fetch(embed_url, page_referer)
             if html:
                 id_m = re.search(r'govid\.live/e/(\d+)/?', html)
                 if not id_m:
                     id_m = re.search(r'(?:video_?id|post_?id|vid|pid)\s*[=:"\']\s*["\']?(\d{4,7})["\']?', html, re.I)
                 if id_m:
-                    video_id = id_m.group(1)
-                    log("faselhd_rip: found video ID {} in /play/ page".format(video_id))
-                    return self._extract_govid_by_id(video_id, embed_url)
-    
+                    return self._extract_govid_by_id(id_m.group(1), embed_url)
                 stream, extra = self._scan_page_for_stream(html, embed_url)
                 if stream:
                     quality = "1080p" if "1080" in stream else ("720p" if "720" in stream else "HD")
                     return stream, quality, embed_url
                 if extra and extra.isdigit():
                     return self._extract_govid_by_id(extra, embed_url)
-    
-        log("faselhd_rip: all govid strategies failed for {}".format(embed_url[:80]))
         return None, "", embed_url
     
     def get_categories(self, mtype="movie"):
-        return [
-            {"title": "🎬 Recent Movies",  "url": self.BASE_URL + "/movies",       "type": "category", "_action": "category"},
-            {"title": "🎬 English Movies", "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/",           "type": "category", "_action": "category"},
-            {"title": "🎬 Arabic Movies",  "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/",                  "type": "category", "_action": "category"},
-            {"title": "🎬 Dubbed Movies",  "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a%d8%a9-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/", "type": "category", "_action": "category"},
-            {"title": "🎬 Indian Movies",  "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a/",                   "type": "category", "_action": "category"},
-            {"title": "🎬 Turkish Movies", "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/",             "type": "category", "_action": "category"},
-            {"title": "🎬 Asian Movies",   "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/",       "type": "category", "_action": "category"},
-            {"title": "🎬 Anime Movies",   "url": self.BASE_URL + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/",                   "type": "category", "_action": "category"},
-            {"title": "📺 English Series", "url": self.BASE_URL + "/series",        "type": "category", "_action": "category"},
-            {"title": "📺 Turkish Series", "url": self.BASE_URL + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/", "type": "category", "_action": "category"},
-            {"title": "📺 Asian Series",   "url": self.BASE_URL + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/", "type": "category", "_action": "category"},
-            {"title": "📺 Anime Series",   "url": self.BASE_URL + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%86%d9%85%d9%8a/",       "type": "category", "_action": "category"},
-        ]
+        base = self.BASE_URL
+        cats = []
+        
+        cats.append({"title": "🏠 الرئيسية", "url": base + "/", "type": "category", "_action": "category"})
+        
+        cats.append({"title": "── أفلام ──", "url": "", "type": "separator"})
+        cats.append({"title": "🎬 أفلام أجنبي", "url": base + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/", "type": "category", "_action": "category"})
+        cats.append({"title": "🎬 أفلام عربي", "url": base + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/", "type": "category", "_action": "category"})
+        cats.append({"title": "🎬 أفلام هندي", "url": base + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a/", "type": "category", "_action": "category"})
+        cats.append({"title": "🎬 أفلام تركية", "url": base + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/", "type": "category", "_action": "category"})
+        cats.append({"title": "🎬 أفلام اسيوية", "url": base + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/", "type": "category", "_action": "category"})
+        cats.append({"title": "🎬 أفلام انمي", "url": base + "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/", "type": "category", "_action": "category"})
+        
+        cats.append({"title": "── مسلسلات ──", "url": "", "type": "separator"})
+        cats.append({"title": "📺 مسلسلات اجنبي", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/", "type": "category", "_action": "category"})
+        cats.append({"title": "📺 مسلسلات تركية", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/", "type": "category", "_action": "category"})
+        cats.append({"title": "📺 مسلسلات انمي", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%86%d9%85%d9%8a/", "type": "category", "_action": "category"})
+        cats.append({"title": "📺 مسلسلات هندية", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d8%a9/", "type": "category", "_action": "category"})
+        cats.append({"title": "📺 مسلسلات مدبلجة", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/", "type": "category", "_action": "category"})
+        cats.append({"title": "📺 مسلسلات اسيوية", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/", "type": "category", "_action": "category"})
+        
+        cats.append({"title": "── مسلسلات رمضان ──", "url": "", "type": "separator"})
+        cats.append({"title": "🌙 مسلسلات رمضان 2026", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2026/", "type": "category", "_action": "category"})
+        cats.append({"title": "🌙 مسلسلات رمضان 2025", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2025/", "type": "category", "_action": "category"})
+        cats.append({"title": "🌙 مسلسلات رمضان 2024", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2024/", "type": "category", "_action": "category"})
+        cats.append({"title": "🌙 مسلسلات رمضان 2023", "url": base + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2023/", "type": "category", "_action": "category"})
+        cats.append({"title": "🌙 مسلسلات رمضان 2022", "url": base + "/category/%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2022/", "type": "category", "_action": "category"})
+        
+        cats.append({"title": "── أخرى ──", "url": "", "type": "separator"})
+        cats.append({"title": "🥊 عروض مصارعة", "url": base + "/category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%85%d8%b5%d8%a7%d8%b1%d8%b9%d8%a9/", "type": "category", "_action": "category"})
+        cats.append({"title": "📡 برامج تلفزيونية", "url": base + "/category/%d8%a8%d8%b1%d8%a7%d9%85%d8%ac-%d8%aa%d9%84%d9%81%d8%b2%d9%8a%d9%88%d9%86%d9%8a%d8%a9/", "type": "category", "_action": "category"})
+        
+        return cats
     
-    # ------------------------------------------------------------------ #
-    #  Category page parsing — matches the exact markup used on
-    #  https://faselhd.rip/category/.../page/N/
-    # ------------------------------------------------------------------ #
     def get_category_items(self, url, page=1):
         page_match = re.search(r'/page/(\d+)/', url)
         if page_match and page == 1:
             page = int(page_match.group(1))
     
-        log("faselhd_rip: get_category_items page={} url={}".format(page, url))
         clean_url = re.sub(r'/page/\d+/?$', '', url.rstrip('/'))
         current_url = clean_url + "/page/{}/".format(page) if page > 1 else clean_url + "/"
     
-        html, _ = fetch(current_url, referer=self.BASE_URL)
+        html, _ = fetch(current_url, referer=self.BASE_URL, extra_headers=self.headers)
         if not html:
             return []
     
         items = []
         seen_urls = set()
     
-        # Each card looks like:
-        #   <a href="..." class="show-card" style="background-image:url(...); --br:12px;">
-        #       ... <p class="title">…</p> ...
-        #   </a>
-        # `href` and `class` may appear in any order and other attrs may
-        # be present, so we match the whole opening tag first.
-        for m in re.finditer(
-                r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bshow-card\b[^"]*"[^>]*>(.*?)</a>',
-                html, re.DOTALL | re.I):
-            href, card_content = m.group(1), m.group(2)
+        for m in re.finditer(r'<a\b([^>]*\bclass="[^"]*\bshow-card\b[^"]*"[^>]*)>(.*?)</a>', html, re.DOTALL | re.I):
+            attrs = m.group(1)
+            card_content = m.group(2)
+            href_m = re.search(r'\bhref="([^"]+)"', attrs, re.I)
+            if not href_m:
+                continue
+            
+            href = href_m.group(1)
             full_url = self._normalize_url(href)
             if ('/category/' in full_url or '/page/' in full_url
                     or full_url in seen_urls):
                 continue
     
-            open_tag = m.group(0)[:m.group(0).find('>')]
             poster_url = ""
-            pm = re.search(r'background-image\s*:\s*url\(([^)]+)\)', open_tag, re.I)
+            pm = re.search(r'background-image\s*:\s*url\(([^)]+)\)', attrs, re.I)
             if pm:
                 poster_url = pm.group(1).strip('\'"')
     
@@ -300,20 +265,6 @@ class FaselhdRipExtractor(BaseExtractor):
             if len(items) >= 50:
                 break
     
-        log("faselhd_rip: extracted {} items (page {})".format(len(items), page))
-    
-        # --------------------------------------------------------------
-        # Pagination:
-        #   <div class="pagination">
-        #     <div class="page-btn active">1</div>
-        #     <a href=".../page/2/" class="page-btn">2</a>
-        #     ...
-        #     <a href=".../page/2/" class="page-btn">›</a>
-        #   </div>
-        # We prefer the › (next) link; fall back to the numeric page-N link.
-        # Any link pointing back at the current page is rejected to prevent
-        # self-loop.
-        # --------------------------------------------------------------
         next_url = None
         am = re.search(
             r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bpage-btn\b[^"]*"[^>]*>\s*(?:›|&rsaquo;|&gt;)\s*</a>',
@@ -332,7 +283,7 @@ class FaselhdRipExtractor(BaseExtractor):
             normalized_current = self._normalize_url(current_url)
             if next_url.rstrip('/') != normalized_current.rstrip('/'):
                 items.append({
-                    "title": "➡️ Next Page",
+                    "title": "➡️ الصفحة التالية",
                     "url": next_url,
                     "type": "category",
                     "_action": "category"
@@ -344,14 +295,17 @@ class FaselhdRipExtractor(BaseExtractor):
         search_url = self.BASE_URL + "/?s=" + quote_plus(query)
         if page > 1:
             search_url += "&page=" + str(page)
-        html, _ = fetch(search_url, referer=self.BASE_URL)
+        html, _ = fetch(search_url, referer=self.BASE_URL, extra_headers=self.headers)
         if not html:
             return []
         items, seen_urls = [], set()
-        for m in re.finditer(
-                r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bshow-card\b[^"]*"[^>]*>(.*?)</a>',
-                html, re.DOTALL | re.I):
-            href, card_content = m.group(1), m.group(2)
+        for m in re.finditer(r'<a\b([^>]*\bclass="[^"]*\bshow-card\b[^"]*"[^>]*)>(.*?)</a>', html, re.DOTALL | re.I):
+            attrs = m.group(1)
+            card_content = m.group(2)
+            href_m = re.search(r'\bhref="([^"]+)"', attrs, re.I)
+            if not href_m:
+                continue
+            href = href_m.group(1)
             full_url = self._normalize_url(href)
             if full_url in seen_urls:
                 continue
@@ -365,7 +319,7 @@ class FaselhdRipExtractor(BaseExtractor):
     
     def get_page(self, url, m_type=None):
         log("faselhd_rip: get_page {}".format(url))
-        html, final_url = fetch(url, referer=self.BASE_URL)
+        html, final_url = fetch(url, referer=self.BASE_URL, extra_headers=self.headers)
         if not html:
             return {"title": "Error", "servers": [], "items": [], "type": "movie"}
     
@@ -375,8 +329,6 @@ class FaselhdRipExtractor(BaseExtractor):
             if m:
                 post_id = m.group(1)
                 break
-        if post_id:
-            log("faselhd_rip: extracted POST_ID = {}".format(post_id))
     
         title_m = (re.search(r'<h1[^>]*class="[^"]*post-title[^"]*"[^>]*>(.*?)</h1>', html, re.I)
                    or re.search(r'<title>([^<]+)</title>', html, re.I))
@@ -399,30 +351,27 @@ class FaselhdRipExtractor(BaseExtractor):
                 episodes.append({"title": "الحلقة {}".format(m.group(2)),
                                   "url": self._normalize_url(m.group(1)), "type": "episode", "_action": "details"})
     
-        servers, seen_embed = [], set()
+        servers, seen_embed = [], []
     
         def _add(embed_url):
             embed_url = embed_url.replace('&amp;', '&').strip()
             if embed_url and embed_url not in seen_embed:
-                seen_embed.add(embed_url)
+                seen_embed.append(embed_url)
                 servers.append({"name": "🎬 Server {}".format(len(servers) + 1),
                                 "url": embed_url, "type": "embed"})
-                log("faselhd_rip: added server {}: {}".format(len(servers), embed_url[:80]))
     
         if post_id:
             _add("{}/e/{}/".format(self.GOVID_BASE, post_id))
-    
-        if post_id:
             ajax_url = self.BASE_URL + "/wp-content/themes/timemovies/ajax.php"
-            ajax_hdrs = {"Content-Type": "application/x-www-form-urlencoded",
-                         "X-Requested-With": "XMLHttpRequest",
-                         "Referer": url,
-                         "Origin": self.BASE_URL,
-                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            log("faselhd_rip: checking AJAX for additional servers")
+            ajax_hdrs = dict(self.headers)
+            ajax_hdrs.update({
+                "Content-Type": "application/x-www-form-urlencoded",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": url,
+                "Origin": self.BASE_URL
+            })
             for server_num in range(0, 16):
                 if len(servers) > self.MAX_AJAX_SERVERS:
-                    log("faselhd_rip: AJAX cap reached, stopping")
                     break
                 ajax_html, _ = fetch(ajax_url, referer=url,
                                      post_data="post_id={}&server={}".format(post_id, server_num),
@@ -434,13 +383,10 @@ class FaselhdRipExtractor(BaseExtractor):
                     if data.get("success") and data.get("iframe"):
                         sm = re.search(r'src=["\']([^"\']+)["\']', data["iframe"], re.I)
                         if sm:
-                            alt = sm.group(1).replace('&amp;', '&')
-                            log("faselhd_rip: found alternative server: {}".format(alt[:80]))
-                            _add(alt)
-                except Exception as e:
-                    log("faselhd_rip: AJAX error server {}: {}".format(server_num, e))
+                            _add(sm.group(1).replace('&amp;', '&'))
+                except Exception:
+                    pass
     
-        log("faselhd_rip: {} -> {} servers found".format(url, len(servers)))
         return {"url": final_url or url, "title": title, "plot": plot,
                 "poster": poster, "year": year, "rating": rating,
                 "servers": servers, "items": episodes, "type": item_type}
@@ -449,13 +395,19 @@ class FaselhdRipExtractor(BaseExtractor):
         log("faselhd_rip extract_stream: {}".format(url[:100]))
         url = url.replace('&amp;', '&').strip()
     
+        govid_headers = {
+            "User-Agent": self.headers["User-Agent"],
+            "Referer": "https://govid.live/",
+            "Origin": "https://govid.live"
+        }
+    
         if "govid.live" in url:
             if ".m3u8" not in url:
                 stream, quality, ref = self._extract_govid_stream(url, self.BASE_URL)
                 if stream:
-                    return stream, quality, ref
+                    return stream, quality, govid_headers
             quality = "1080p" if "1080" in url else ("720p" if "720" in url else "HD")
-            return url, quality, self.BASE_URL
+            return url, quality, govid_headers
     
         if ".m3u8" in url:
             quality = "1080p" if "1080" in url else ("720p" if "720" in url else "HD")
