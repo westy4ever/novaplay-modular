@@ -39,6 +39,14 @@ tile glow ring and icon enlargement (driven from plugin_screen_home).
 
 [pop-anim] POP_ANIM_FRAMES / POP_ANIM_INTERVAL drive the eased pop-out
 animation on selection change (also driven from plugin_screen_home).
+
+[catlist-effects] TextListGrid.getRowY() accessor lets the home screen
+place its accent bar alongside the selected row (the one hook the list
+class needs to expose for that overlay).
+
+[7x4] Home grid is 7 columns x 4 rows = 28 slots on ONE page — enough
+for the whole site registry, no pagination. Tiles shrank slightly
+(230 -> 215 px tall) so 4 rows fit inside the 860-px grid widget.
 """
 
 import os
@@ -356,12 +364,16 @@ class _BaseCardGrid(GUIComponent):
 
 
 # --- Home site-menu grid ---
-# [PATCH G3] 7 columns (was 6), 260px tiles (was 290px): 7*260=1820px of content inside
-# the 1880px-wide home_grid widget, leaving a clean 60px total / 30px-per-side gap.
+# [7x4] Home grid is 7 columns x 4 rows = 28 slots on ONE page — enough for
+# the whole site registry (currently 22), no pagination. Tiles were 260x230
+# when the grid was only 2 rows; height dropped to 215 so 4 rows fit inside
+# the 860-px grid widget without crowding the title bar (top) or the
+# button bar (bottom). 7*260 = 1820 px of content inside 1880 px of widget,
+# leaving a clean 30-px gutter on each side.
 HOME_GRID_COLS = 7
-HOME_GRID_ROWS = 2
+HOME_GRID_ROWS = 4              # [7x4] one page
 HOME_CELL_W = sc(260)
-HOME_CELL_H = sc(230)
+HOME_CELL_H = sc(215)           # [7x4] was sc(230); 4 * 215 = 860
 HOME_GRID_WIDTH = sc(1880)
 HOME_CENTER_OFFSET_X = max(0, (HOME_GRID_WIDTH - HOME_GRID_COLS * HOME_CELL_W) // 2)
 HOME_CELL_MARGIN = sc(12)
@@ -372,12 +384,12 @@ HOME_CELL_INNER_H = HOME_CELL_H - 2 * HOME_CELL_MARGIN
 # [Option A] tile strip layout (cell-local y, top of cell = 0):
 #    24 .. 40   dot strip   (freshness + health dots, 8px inset)
 #    48 .. 84   title strip
-#    88 .. 214  icon strip  (icon top = 12 + 4 + 72 = 88)
-# Every band is clear of the next -- no overlap between dots, title, icon.
+#    84 .. 215  icon strip  (icon top = 12 + 4 + 68 = 84)
+# Every band is clear of the next — no overlap between dots, title, icon.
 HOME_TITLE_STRIP_Y = sc(48)
 HOME_TITLE_H       = sc(36)
 HOME_TITLE_PAD     = sc(8)
-HOME_ICON_PAD_TOP  = sc(72)
+HOME_ICON_PAD_TOP  = sc(68)     # [7x4] was sc(72); title strip ends at y=84
 HOME_ICON_W        = HOME_CELL_INNER_W - 2 * HOME_BORDER_W
 HOME_ICON_H        = max(1, HOME_CELL_INNER_H - 2 * HOME_BORDER_W - HOME_ICON_PAD_TOP)
 HOME_FRESH_DOT     = max(8, sc(16))     # [UX-9]
@@ -519,6 +531,16 @@ class TextListGrid(_BaseCardGrid):
                                                   backcolor=_G_CLR["surface2"],
                                                   flags=RT_HALIGN_RIGHT | RT_VALIGN_CENTER))
         return row
+
+    # [catlist-effects] Screen-space Y of a visible row's top edge, relative
+    # to the listbox widget. Returns None when the row is off-page. Used by
+    # AdvancedArabicPlayerHome to park the accent bar next to the selection.
+    def getRowY(self, row_idx):
+        s = self._getPageStart()
+        e = self._getPageEnd()
+        if row_idx < 0 or (s + row_idx) >= e:
+            return None
+        return row_idx * LIST_CELL_H
 
 
 # --- Poster grid ---

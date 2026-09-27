@@ -19,8 +19,10 @@ class FaselhdRipExtractor(BaseExtractor):
     """Extractor for faselhd.rip"""
     
     BASE_URL = "https://faselhd.rip"
+    # Internal embed host used by faselhd.rip — NOT a user-facing domain.
+    # Requests to it must still carry faselhd.rip as Origin/Referer.
     GOVID_BASE = "https://govid.live"
-    MAX_AJAX_SERVERS = 16  # Increased from 5 to show all available servers
+    MAX_AJAX_SERVERS = 16
     NOISE_DOMAINS = {
         "unpkg.com", "cdn.jsdelivr.net", "cdnjs.cloudflare.com",
         "ajax.googleapis.com", "code.jquery.com", "stackpath.bootstrapcdn.com",
@@ -54,14 +56,45 @@ class FaselhdRipExtractor(BaseExtractor):
         return title.strip()
     
     def _find_m3u8(self, text):
+        """Locate an m3u8 URL in raw HTML/JS.
+
+        Handles four cases:
+          1. Plain http(s) m3u8 URL.
+          2. m3u8 in a JS/HTML attribute (file=, src=, url=, source=, hls=).
+          3. Hex-encoded m3u8 in a quoted string (govid.live's `const Mohix = "6874..."`).
+          4. Hex-encoded m3u8 as a bare 64+ char hex run.
+        """
         if not text:
             return None
+
+        # 1) Direct m3u8 URL
         m = re.search(r'(https?://[^\s"\'<>`\\]+\.m3u8(?:\?[^\s"\'<>`\\]*)?)', text, re.I)
         if m:
             return m.group(1).replace('\\/', '/').replace('&amp;', '&')
+
+        # 2) m3u8 in a JS/HTML attribute
         m = re.search(r'(?:file|src|url|source|hls)\s*[=:]\s*["\']([^"\']+\.m3u8[^"\']*)["\']', text, re.I)
         if m:
             return m.group(1).replace('\\/', '/').replace('&amp;', '&')
+
+        # 3) Hex-encoded m3u8 (quoted)
+        for m in re.finditer(r'["\']([0-9a-fA-F]{64,})["\']', text):
+            try:
+                decoded = bytes.fromhex(m.group(1)).decode('utf-8', errors='ignore')
+                if '.m3u8' in decoded and decoded.startswith('http'):
+                    return decoded.replace('\\/', '/').replace('&amp;', '&')
+            except Exception:
+                pass
+
+        # 4) Hex-encoded m3u8 (bare)
+        for m in re.finditer(r'\b([0-9a-fA-F]{64,})\b', text):
+            try:
+                decoded = bytes.fromhex(m.group(1)).decode('utf-8', errors='ignore')
+                if '.m3u8' in decoded and decoded.startswith('http'):
+                    return decoded.replace('\\/', '/').replace('&amp;', '&')
+            except Exception:
+                pass
+
         return None
     
     def _is_noise_domain(self, url):
@@ -71,14 +104,19 @@ class FaselhdRipExtractor(BaseExtractor):
         return False
     
     def _govid_fetch(self, url, referer):
+        """Fetch an embed page.
+
+        Origin/Referer must always be faselhd.rip — govid.live rejects
+        requests whose Origin is not the real site.
+        """
         hdrs = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
         }
-        hdrs["Referer"] = referer
-        hdrs["Origin"] = self.GOVID_BASE
-        return fetch(url, referer=referer, extra_headers=hdrs)
+        hdrs["Referer"] = referer or self.BASE_URL
+        hdrs["Origin"] = self.BASE_URL
+        return fetch(url, referer=referer or self.BASE_URL, extra_headers=hdrs)
     
     def _scan_page_for_stream(self, html, page_url):
         if not html:
@@ -91,14 +129,12 @@ class FaselhdRipExtractor(BaseExtractor):
             if found:
                 log("faselhd_rip: m3u8 in inline script[{}]: {}".format(i, found[:80]))
                 return found, None
-        if inline_blocks:
-            log("faselhd_rip: inline script[0] snippet: {}".format(inline_blocks[0][:300].replace('\n', ' ')))
     
         ext_srcs = re.findall(r'<script[^>]+src=["\']?([^"\'>\s]+)["\']?', html, re.I)
         log("faselhd_rip: found {} external scripts in page".format(len(ext_srcs)))
         for src in ext_srcs[:6]:
             if not src.startswith('http'):
-                src = self.GOVID_BASE + '/' + src.lstrip('/')
+                src = self.BASE_URL + '/' + src.lstrip('/')
             if self._is_noise_domain(src):
                 log("faselhd_rip: skipping noise script: {}".format(src[:60]))
                 continue
@@ -123,7 +159,6 @@ class FaselhdRipExtractor(BaseExtractor):
         if id_m:
             return None, id_m.group(1)
     
-        log("faselhd_rip: page dump (first 500): {}".format(html[:500].replace('\n', ' ')))
         return None, None
     
     def _extract_govid_by_id(self, video_id, embed_url):
@@ -207,6 +242,10 @@ class FaselhdRipExtractor(BaseExtractor):
             {"title": "📺 Anime Series",   "url": self.BASE_URL + "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%86%d9%85%d9%8a/",       "type": "category", "_action": "category"},
         ]
     
+    # ------------------------------------------------------------------ #
+    #  Category page parsing — matches the exact markup used on
+    #  https://faselhd.rip/category/.../page/N/
+    # ------------------------------------------------------------------ #
     def get_category_items(self, url, page=1):
         page_match = re.search(r'/page/(\d+)/', url)
         if page_match and page == 1:
@@ -222,21 +261,37 @@ class FaselhdRipExtractor(BaseExtractor):
     
         items = []
         seen_urls = set()
-        pattern = (r'<a\s+href="([^"]+)"\s+class="[^"]*show-card[^"]*"'
-                   r'[^>]*style="[^"]*background-image:\s*url\(([^)]+)\)[^"]*"'
-                   r'[^>]*>(.*?)</a>')
     
-        for href, poster_url, card_content in re.findall(pattern, html, re.DOTALL | re.I):
+        # Each card looks like:
+        #   <a href="..." class="show-card" style="background-image:url(...); --br:12px;">
+        #       ... <p class="title">…</p> ...
+        #   </a>
+        # `href` and `class` may appear in any order and other attrs may
+        # be present, so we match the whole opening tag first.
+        for m in re.finditer(
+                r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bshow-card\b[^"]*"[^>]*>(.*?)</a>',
+                html, re.DOTALL | re.I):
+            href, card_content = m.group(1), m.group(2)
             full_url = self._normalize_url(href)
-            if '/category/' in full_url or '/page/' in full_url or full_url in seen_urls:
+            if ('/category/' in full_url or '/page/' in full_url
+                    or full_url in seen_urls):
                 continue
-            tm = re.search(r'<p[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)</p>', card_content, re.I)
+    
+            open_tag = m.group(0)[:m.group(0).find('>')]
+            poster_url = ""
+            pm = re.search(r'background-image\s*:\s*url\(([^)]+)\)', open_tag, re.I)
+            if pm:
+                poster_url = pm.group(1).strip('\'"')
+    
+            tm = re.search(r'<p[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)</p>',
+                           card_content, re.I)
             title = tm.group(1).strip() if tm else href.split('/')[-1].replace('-', ' ')
+    
             seen_urls.add(full_url)
             items.append({
                 "title": self._clean_title(title),
                 "url": full_url,
-                "poster": self._normalize_url(poster_url.strip('\'"')),
+                "poster": self._normalize_url(poster_url) if poster_url else "",
                 "rating": "",
                 "year": "",
                 "type": "movie",
@@ -247,16 +302,42 @@ class FaselhdRipExtractor(BaseExtractor):
     
         log("faselhd_rip: extracted {} items (page {})".format(len(items), page))
     
-        next_n = page + 1
-        nm = re.search(r'<a[^>]+href="([^"]+)"[^>]*class="[^"]*page-btn[^"]*"[^>]*>\s*{}\s*</a>'.format(next_n), html, re.I)
-        if nm:
-            items.append({"title": "➡️ Next Page - Page {}".format(next_n),
-                          "url": self._normalize_url(nm.group(1)), "type": "category", "_action": "category"})
+        # --------------------------------------------------------------
+        # Pagination:
+        #   <div class="pagination">
+        #     <div class="page-btn active">1</div>
+        #     <a href=".../page/2/" class="page-btn">2</a>
+        #     ...
+        #     <a href=".../page/2/" class="page-btn">›</a>
+        #   </div>
+        # We prefer the › (next) link; fall back to the numeric page-N link.
+        # Any link pointing back at the current page is rejected to prevent
+        # self-loop.
+        # --------------------------------------------------------------
+        next_url = None
+        am = re.search(
+            r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bpage-btn\b[^"]*"[^>]*>\s*(?:›|&rsaquo;|&gt;)\s*</a>',
+            html, re.I)
+        if am:
+            next_url = self._normalize_url(am.group(1))
         else:
-            am = re.search(r'<a[^>]+href="([^"]+)"[^>]*class="[^"]*page-btn[^"]*"[^>]*>›</a>', html, re.I)
-            if am:
-                items.append({"title": "➡️ Next Page",
-                              "url": self._normalize_url(am.group(1)), "type": "category", "_action": "category"})
+            next_n = page + 1
+            nm = re.search(
+                r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bpage-btn\b[^"]*"[^>]*>\s*{}\s*</a>'.format(next_n),
+                html, re.I)
+            if nm:
+                next_url = self._normalize_url(nm.group(1))
+    
+        if next_url:
+            normalized_current = self._normalize_url(current_url)
+            if next_url.rstrip('/') != normalized_current.rstrip('/'):
+                items.append({
+                    "title": "➡️ Next Page",
+                    "url": next_url,
+                    "type": "category",
+                    "_action": "category"
+                })
+    
         return items
     
     def search(self, query, page=1):
@@ -267,14 +348,15 @@ class FaselhdRipExtractor(BaseExtractor):
         if not html:
             return []
         items, seen_urls = [], set()
-        pattern = (r'<a\s+href="([^"]+)"\s+class="[^"]*show-card[^"]*"'
-                   r'[^>]*style="[^"]*background-image:\s*url\([^)]+\)[^"]*"'
-                   r'[^>]*>(.*?)</a>')
-        for href, card_content in re.findall(pattern, html, re.DOTALL | re.I):
+        for m in re.finditer(
+                r'<a\b[^>]*\bhref="([^"]+)"[^>]*\bclass="[^"]*\bshow-card\b[^"]*"[^>]*>(.*?)</a>',
+                html, re.DOTALL | re.I):
+            href, card_content = m.group(1), m.group(2)
             full_url = self._normalize_url(href)
             if full_url in seen_urls:
                 continue
-            tm = re.search(r'<p[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)</p>', card_content, re.I)
+            tm = re.search(r'<p[^>]*class="[^"]*title[^"]*"[^>]*>([^<]+)</p>',
+                           card_content, re.I)
             title = tm.group(1) if tm else href.split('/')[-1]
             seen_urls.add(full_url)
             items.append({"title": self._clean_title(title), "url": full_url,
@@ -335,11 +417,10 @@ class FaselhdRipExtractor(BaseExtractor):
             ajax_hdrs = {"Content-Type": "application/x-www-form-urlencoded",
                          "X-Requested-With": "XMLHttpRequest",
                          "Referer": url,
+                         "Origin": self.BASE_URL,
                          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             log("faselhd_rip: checking AJAX for additional servers")
             for server_num in range(0, 16):
-                # Check if we've reached the maximum number of servers
-                # MAX_AJAX_SERVERS is now 16, so this will loop through all 16
                 if len(servers) > self.MAX_AJAX_SERVERS:
                     log("faselhd_rip: AJAX cap reached, stopping")
                     break
@@ -374,7 +455,7 @@ class FaselhdRipExtractor(BaseExtractor):
                 if stream:
                     return stream, quality, ref
             quality = "1080p" if "1080" in url else ("720p" if "720" in url else "HD")
-            return url, quality, self.GOVID_BASE
+            return url, quality, self.BASE_URL
     
         if ".m3u8" in url:
             quality = "1080p" if "1080" in url else ("720p" if "720" in url else "HD")

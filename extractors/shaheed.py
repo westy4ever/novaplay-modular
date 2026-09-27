@@ -382,27 +382,78 @@ class ShaheedExtractor(BaseExtractor):
                     "_action": "details",
                 })
 
+        # ─── Pagination detection ──────────────────────────────────────
+        # [PATCH SH2] The old code looked for <button class="page-link
+        # cursor-normal">, but the site actually renders the CURRENT page
+        # as a <span class="page-link cursor-normal">, and it tried to
+        # pull page numbers from `updateQuery('page', N)` — which the
+        # site never emits (it only uses updateQuery for genre/year/
+        # quality filters). Both failed, so current_page/max_page stayed
+        # None and the "Next Page" item was never added: only page 1
+        # ever loaded. We now (a) accept <span> for the current page,
+        # (b) pull page numbers from the pagination <nav> links, and
+        # (c) prefer the rel="next" anchor when present.
         current_page = None
-        max_page = None
+        page_nums = set()
 
+        # Current page marker: real markup uses <span>, keep <button> as fallback
         curr_match = re.search(
-            r'<button[^>]+class="[^"]*page-link[^"]*cursor-normal[^"]*"[^>]*>(\d+)</button>',
-            html, re.I
+            r'<span[^>]+class="[^"]*page-link[^"]*cursor-normal[^"]*"[^>]*>\s*(\d+)\s*</span>',
+            html, re.I | re.S
         )
+        if not curr_match:
+            curr_match = re.search(
+                r'<button[^>]+class="[^"]*page-link[^"]*cursor-normal[^"]*"[^>]*>\s*(\d+)\s*</button>',
+                html, re.I | re.S
+            )
         if curr_match:
             current_page = int(curr_match.group(1))
 
-        page_nums = set()
-        for match in re.finditer(r"updateQuery\('page',\s*(\d+)\)", html):
-            page_nums.add(int(match.group(1)))
-        if page_nums:
-            max_page = max(page_nums)
+        # Narrow the search to the pagination <nav> when possible, so that
+        # numbers elsewhere on the page (filters, ratings, years) can't
+        # pollute page_nums.
+        pag_block = re.search(
+            r'<nav[^>]+aria-label=["\'][^"\']*التنقل[^"\']*["\'][^>]*>(.*?)</nav>',
+            html, re.S | re.I
+        )
+        pag_html = pag_block.group(1) if pag_block else html
 
-        if current_page is not None and max_page is not None and max_page > current_page:
+        # Page numbers rendered as links/text inside the pagination
+        for m in re.finditer(r'page-link[^>]*>\s*(\d+)\s*<', pag_html):
+            page_nums.add(int(m.group(1)))
+
+        # Page numbers in ?page=N hrefs (also covers the next-page arrow
+        # on page 1, where only 1 and 2 are rendered — max=2 lets us
+        # build a next URL for page 2; from page 2 onwards the full
+        # numbered set is shown).
+        for m in re.finditer(r'[?&]page=(\d+)', pag_html):
+            page_nums.add(int(m.group(1)))
+
+        # Most reliable: the explicit rel="next" link (attribute order varies)
+        next_href = None
+        next_match = (
+            re.search(r'<a[^>]+rel=["\']next["\'][^>]*href=["\']([^"\']+)["\']', pag_html, re.I)
+            or re.search(r'<a[^>]+href=["\']([^"\']+)["\'][^>]*rel=["\']next["\']', pag_html, re.I)
+        )
+        if next_match:
+            next_href = next_match.group(1)
+
+        if current_page is None and page_nums:
+            current_page = min(page_nums)
+
+        max_page = max(page_nums) if page_nums else current_page
+
+        next_url = None
+        if next_href:
+            next_url = self._normalize_url(next_href)
+        elif current_page is not None and max_page is not None and max_page > current_page:
             sep = "&" if "?" in url else "?"
+            next_url = url + sep + "page=" + str(current_page + 1)
+
+        if next_url:
             items.append({
                 "title": "➡️ Next Page",
-                "url": url + sep + "page=" + str(current_page + 1),
+                "url": next_url,
                 "type": "category",
                 "_action": "category",
             })

@@ -19,16 +19,28 @@ FINAL SET of UX features kept from the batch:
 and the site-logo PNG. Tagline removed.
 
 [pop-out] Selected home tile: cyan glow ring behind the tile + enlarged
-icon pixmap, driven by HOME_POP_OUT / HOME_POP_OUT_ICON.
+icon pixmap.
 
-[pop-anim] Selection change drives an eased pop-out animation across
-POP_ANIM_FRAMES x POP_ANIM_INTERVAL ms (ease-out cubic). Applies to
-the home grid tiles, the continue-watch strip cards, and the poster
-grid (grid layout only; the carousel uses fixed per-slot geometry).
+[pop-anim] Eased pop-out animation on selection change.
 
-[layout] Home grid moved down 90 px so the fanart backdrop band above
-the grid (between continue strip and grid row 0) is ~132 px, and the
-dead gap below the grid is ~28 px. Grid at y=515 instead of y=425.
+[zone-slide] Continue strip and site grid occupy mutually-exclusive
+vertical zones. Exponential smoothing makes a mid-flight direction
+reversal seamless.
+
+[zone-slide-2] Grid at TOP of screen, continue strip at BOTTOM.
+Pressing DOWN slides the grid down into place and the strip off the
+bottom; pressing UP on grid row 0 / page 0 reverses it. A bouncing
+direction-arrow hint tells the user which way to press.
+
+[7x4] Home grid is now 7 columns x 4 rows = 28 slots on ONE page.
+The registry (22 sites) fits with no pagination. Tiles shrank
+230 -> 215 px tall so 4 rows fit inside the 860-px grid widget.
+The nav-hint Y is dynamic: above the strip (y=600) in strip mode,
+below the grid (y=980) in grid mode.
+
+[catlist-effects] Category list: mutual slide-in / slide-out,
+gold accent bar parked beside the selected row, ▲ / ▼ scroll hints,
+horizontal shake on fetch failure.
 """
 
 import os
@@ -61,6 +73,7 @@ from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     build_pixmap_widgets_xml, build_poster_pixmap_widgets_xml,
     build_poster_badge_widgets_xml,
     TextListGrid,
+    LIST_CELL_H, LIST_CELL_MARGIN,                       # [catlist-effects]
     build_carousel_xml, build_continue_row_xml,
     HOME_GRID_COLS, HOME_GRID_ROWS, HOME_CELL_W, HOME_CELL_H,
     HOME_CELL_MARGIN, HOME_BORDER_W, HOME_ICON_PAD_TOP, HOME_ICON_W, HOME_ICON_H,
@@ -110,7 +123,7 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="5" halign="left" />
         <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
         <widget name="homeSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="2" transparent="0" />
-        <widget name="home_grid" position="20,515" size="1880,520" scrollbarMode="showNever" transparent="1" zPosition="3" />
+        <widget name="home_grid" position="20,100" size="1880,860" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
         <widget name="poster_grid" position="50,90" size="1820,864" scrollbarMode="showNever" transparent="1" zPosition="3" />
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
@@ -119,6 +132,10 @@ class AdvancedArabicPlayerHome(Screen):
         <widget name="pgridSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="5" transparent="0" />
         {carousel_xml}
         {continue_xml}
+        <widget name="navHint" position="0,600" size="1920,38" font="Regular;26" foregroundColor="#FFD740" transparent="1" halign="center" valign="center" zPosition="8" />
+        <widget name="catAccent"   position="34,101"   size="6,71"  backgroundColor="#FFD740" zPosition="6" transparent="0" cornerRadius="3" />
+        <widget name="catScrollUp" position="1884,110" size="32,26" font="Regular;20" foregroundColor="#8B949E" transparent="1" halign="center" valign="center" zPosition="6" />
+        <widget name="catScrollDn" position="1884,900" size="32,26" font="Regular;20" foregroundColor="#8B949E" transparent="1" halign="center" valign="center" zPosition="6" />
         <widget name="grid_status_left"  position="40,965"  size="900,32" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="left" zPosition="7" />
         <widget name="grid_status_right" position="940,965" size="900,32" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="7" />
         <widget name="btn_bar"    position="0,1015"  size="1920,65" backgroundColor="#0D1117" zPosition="6" />
@@ -130,11 +147,19 @@ class AdvancedArabicPlayerHome(Screen):
     """
 
     _HOME_GRID_X = 20
-    _HOME_GRID_Y = 515
+    _HOME_GRID_Y = 100              # [zone-slide-2] grid VISIBLE at top of screen
     _POSTER_GRID_X = 50
     _POSTER_GRID_Y = 90
     carousel_slots = 7
     carousel_center = 3
+
+    # [zone-slide-2 / 7x4] zone geometry: grid at TOP (4 rows * 215 = 860 px),
+    # strip at BOTTOM. _GRID_ABOVE_OFF must clear the WHOLE 860-px grid:
+    # y=100 + (-960) = -860, fully above the screen.
+    _GRID_ABOVE_OFF    = -960
+    _STRIP_BOTTOM_OFF  = 580        # strip visible: CONT_Y + 580 = 690
+    _STRIP_BELOW_OFF   = 1010       # strip off-screen below: CONT_Y + 1010 = 1120
+    _NAV_HINT_Y        = 600        # legacy default; real Y comes from _navHintBaseY()
 
     def __init__(self, session):
         self.skin = AdvancedArabicPlayerHome.skin.format(
@@ -186,6 +211,31 @@ class AdvancedArabicPlayerHome(Screen):
 
         self._pulse_timer = eTimer()
         self._pulse_timer.callback.append(self._pulseTick)
+
+        # [zone-slide] transition between continue strip (p=0) and home grid (p=1)
+        self._zone_p          = 0.0
+        self._zone_target     = 0.0
+        self._strip_y_off     = 0
+        self._grid_y_off      = 0
+        self._zone_anim_timer = eTimer()
+        self._zone_anim_timer.callback.append(self._zoneAnimTick)
+
+        # [zone-slide-2] direction hint
+        self._navHintDir   = "down"
+        self._navHintPhase = 0
+        self._navHintTimer = eTimer()
+        self._navHintTimer.callback.append(self._navHintTick)
+
+        # [catlist-effects] category-list overlays + slide + shake
+        self._listVisible     = False
+        self._listSlideTimer  = eTimer()
+        self._listSlideTimer.callback.append(self._listSlideTick)
+        self._listSlidePhase  = 0
+        self._listSlideFrame  = 0
+        self._listSlideDoneCb = None
+        self._catShakeTimer   = eTimer()
+        self._catShakeTimer.callback.append(self._catShakeTick)
+        self._catShakeFrames  = 0
 
         # [pop-anim] home-grid animated pop-out on selection change
         self._pop_timer = eTimer()
@@ -266,6 +316,18 @@ class AdvancedArabicPlayerHome(Screen):
             self["contbar%d" % i] = Label("")
             self["cont%d" % i] = Pixmap()
 
+        # [zone-slide-2] direction-hint label
+        self["navHint"] = Label("")
+        self["navHint"].hide()
+
+        # [catlist-effects] list overlays
+        self["catAccent"]   = Label("")
+        self["catScrollUp"] = Label("")
+        self["catScrollDn"] = Label("")
+        self["catAccent"].hide()
+        self["catScrollUp"].hide()
+        self["catScrollDn"].hide()
+
         self.onExecBegin.append(self._paintContinueRow)
 
         self["grid_status_left"] = Label("")
@@ -320,13 +382,20 @@ class AdvancedArabicPlayerHome(Screen):
                     pass
         self._applyCarouselGeometry()
         self._showHome()
-        # [UX-1] cold-open focus on the continue strip when populated
         if self._cold_open and self._cont_items:
             self._focus_zone = "row"
             self._cont_index = 0
+            self._zone_p = 0.0
+            self._zone_target = 0.0
+            self._applyZoneOffsets()
             self._moveContinueSel()
+        else:
+            self._focus_zone = "grid"
+            self._zone_p = 1.0
+            self._zone_target = 1.0
+            self._applyZoneOffsets()
         self._cold_open = False
-        # [UX-19] start the health-dot pulse
+        self._updateNavHint()
         try:
             self._pulse_timer.start(1000, False)
         except Exception:
@@ -349,7 +418,6 @@ class AdvancedArabicPlayerHome(Screen):
         except Exception as e:
             my_log("clock tick error: {}".format(e))
 
-    # ── [UX-17] status auto-timeout ─────────────────────────────────────
     def _setStatus(self, text, warning=False):
         try:
             self["status"].setText(text)
@@ -373,7 +441,6 @@ class AdvancedArabicPlayerHome(Screen):
             except Exception:
                 pass
 
-    # ── [PATCH G4] proactive health sweep ────────────────────────────────
     def _startHealthSweep(self):
         if getattr(self, "_health_swept", False):
             return
@@ -419,7 +486,6 @@ class AdvancedArabicPlayerHome(Screen):
         except Exception:
             pass
 
-    # ── [UX-19] pulse blocked-site health dots ──────────────────────────
     def _pulseTick(self):
         self._pulse_on = not self._pulse_on
         if self._display_mode == "home":
@@ -429,6 +495,305 @@ class AdvancedArabicPlayerHome(Screen):
                 grid._redraw()
             except Exception:
                 pass
+
+    # ── [zone-slide] slide transition between strip and grid ────────────
+    def _startZoneAnim(self, target):
+        self._zone_target = target
+        try:
+            self._zone_anim_timer.start(25, False)
+        except Exception as e:
+            my_log("zone slide: timer start failed: {}".format(e))
+
+    def _zoneAnimTick(self):
+        if self._display_mode != "home":
+            try: self._zone_anim_timer.stop()
+            except Exception: pass
+            return
+        diff = self._zone_target - self._zone_p
+        if abs(diff) < 0.02:
+            self._zone_p = self._zone_target
+            self._applyZoneOffsets()
+            try: self._zone_anim_timer.stop()
+            except Exception: pass
+            return
+        self._zone_p += diff * 0.35
+        self._applyZoneOffsets()
+
+    def _applyZoneOffsets(self):
+        p = self._zone_p
+        grid_y_off  = int((1.0 - p) * self._GRID_ABOVE_OFF)
+        strip_y_off = int((1.0 - p) * self._STRIP_BOTTOM_OFF
+                          + p * self._STRIP_BELOW_OFF)
+        self._strip_y_off = strip_y_off
+        self._grid_y_off  = grid_y_off
+
+        try:
+            inst = self["home_grid"].instance
+            if inst:
+                inst.move(ePoint(self._HOME_GRID_X,
+                                 self._HOME_GRID_Y + grid_y_off))
+        except Exception as e:
+            my_log("zone slide: home_grid move failed: {}".format(e))
+
+        for r in range(HOME_GRID_ROWS):
+            for c in range(HOME_GRID_COLS):
+                try:
+                    inst = self["pic_%d_%d" % (r, c)].instance
+                    if inst:
+                        bx, by = self._iconBasePos(r, c)
+                        inst.move(ePoint(bx, by))
+                except Exception:
+                    pass
+
+        try:
+            self._applyContinueLayout(None, 1.0, y_off=strip_y_off)
+        except Exception as e:
+            my_log("zone slide: continue layout failed: {}".format(e))
+
+        try:
+            inst = self["cont_title"].instance
+            if inst:
+                inst.move(ePoint(0, 65 + strip_y_off))
+        except Exception:
+            pass
+
+        if self._display_mode == "home" and p > 0.5:
+            try:
+                sel_r = self["home_grid"].currentRow
+                sel_c = self["home_grid"].currentCol
+                if 0 <= sel_r < HOME_GRID_ROWS and 0 <= sel_c < HOME_GRID_COLS:
+                    bx = (self._HOME_GRID_X + HOME_CENTER_OFFSET_X
+                          + sel_c * HOME_CELL_W + HOME_CELL_MARGIN)
+                    by = (self._HOME_GRID_Y + self._grid_y_off
+                          + sel_r * HOME_CELL_H + HOME_CELL_MARGIN)
+                    self._moveResize("homeSel", bx, by,
+                                     HOME_CELL_INNER_W, HOME_CELL_INNER_H)
+                    self["homeSel"].show()
+            except Exception:
+                pass
+        else:
+            try: self["homeSel"].hide()
+            except Exception: pass
+
+    # ── [zone-slide-2] direction-hint arrow ────────────────────────────
+    def _navHintBaseY(self):
+        """Strip mode → hint above the strip (y=600).  Grid mode → hint
+        below the 860-px grid (y=980).  With 4 rows the grid now runs from
+        y=100 to y=960, so a fixed Y would collide with one zone or the
+        other; the base Y follows the focus."""
+        return 600 if self._navHintDir == "down" else 980
+
+    def _updateNavHint(self):
+        if self._display_mode != "home":
+            self._hideNavHint()
+            return
+        if self._focus_zone == "row":
+            self._navHintDir = "down"
+            self["navHint"].setText(u"▼   اضغط للأسفل لعرض المواقع")
+        else:
+            self._navHintDir = "up"
+            self["navHint"].setText(u"▲   اضغط للأعلى لاستئناف المشاهدة")
+        try:
+            self["navHint"].show()
+        except Exception:
+            pass
+        self._navHintPhase = 0
+        base_y = self._navHintBaseY()
+        try:
+            self["navHint"].instance.move(ePoint(0, base_y))
+        except Exception:
+            pass
+        try:
+            self._navHintTimer.start(40, False)
+        except Exception:
+            pass
+
+    def _hideNavHint(self):
+        try: self._navHintTimer.stop()
+        except Exception: pass
+        try: self["navHint"].hide()
+        except Exception: pass
+
+    def _navHintTick(self):
+        if self._display_mode != "home":
+            self._hideNavHint()
+            return
+        self._navHintPhase = (self._navHintPhase + 1) % 30
+        t = self._navHintPhase / 30.0
+        if t < 0.5:
+            offset = int(t * 2 * 14)
+        else:
+            offset = 0
+        if self._navHintDir != "down":
+            offset = -offset
+        try:
+            inst = self["navHint"].instance
+            if inst:
+                inst.move(ePoint(0, self._navHintBaseY() + offset))
+        except Exception:
+            pass
+
+    # ── [catlist-effects] category-list: overlays, slide-in, shake ──────
+    def _hideCatOverlays(self):
+        for k in ("catAccent", "catScrollUp", "catScrollDn"):
+            try: self[k].hide()
+            except Exception: pass
+
+    def _slideListIn(self):
+        self._listSlidePhase = 1
+        self._listSlideFrame = 0
+        try:
+            inst = self["text_list"].instance
+            if inst:
+                inst.move(ePoint(1920, 95))
+        except Exception:
+            pass
+        try:
+            self._listSlideTimer.start(20, False)
+        except Exception as e:
+            my_log("list slide-in start failed: {}".format(e))
+
+    def _slideListOut(self, on_done):
+        self._listSlidePhase = 2
+        self._listSlideFrame = 0
+        self._listSlideDoneCb = on_done
+        try:
+            self._listSlideTimer.start(20, False)
+        except Exception as e:
+            my_log("list slide-out start failed: {}".format(e))
+            if on_done:
+                on_done()
+
+    def _listSlideTick(self):
+        if self._listSlidePhase == 0:
+            try: self._listSlideTimer.stop()
+            except Exception: pass
+            return
+        self._listSlideFrame += 1
+        frames = 8
+        p = min(1.0, float(self._listSlideFrame) / float(frames))
+        if self._listSlidePhase == 1:
+            p_eased = 1.0 - (1.0 - p) ** 3
+            x = int(1920 * (1.0 - p_eased) - 6 * p_eased)
+        else:
+            p_eased = p * p
+            x = int(40 + 1920 * p_eased)
+        try:
+            inst = self["text_list"].instance
+            if inst:
+                inst.move(ePoint(x, 95))
+        except Exception:
+            pass
+        if self._listSlideFrame >= frames:
+            if self._listSlidePhase == 1:
+                try:
+                    inst = self["text_list"].instance
+                    if inst:
+                        inst.move(ePoint(40, 95))
+                except Exception:
+                    pass
+                self._listVisible = True
+                self._updateCatAccent()
+                self._updateScrollHints()
+            else:
+                try: self["text_list"].hide()
+                except Exception: pass
+                try:
+                    inst = self["text_list"].instance
+                    if inst:
+                        inst.move(ePoint(40, 95))
+                except Exception:
+                    pass
+                cb = self._listSlideDoneCb
+                self._listSlideDoneCb = None
+                if cb:
+                    try: cb()
+                    except Exception as e:
+                        my_log("list slide-out callback error: {}".format(e))
+            self._listSlidePhase = 0
+            try: self._listSlideTimer.stop()
+            except Exception: pass
+
+    def _updateCatAccent(self):
+        if self._display_mode != "list" or not getattr(self, "_listVisible", False):
+            try: self["catAccent"].hide()
+            except Exception: pass
+            return
+        try:
+            tl = self["text_list"]
+            row_y = tl.getRowY(tl.currentRow)
+        except Exception:
+            row_y = None
+        if row_y is None:
+            try: self["catAccent"].hide()
+            except Exception: pass
+            return
+        y = 95 + row_y + LIST_CELL_MARGIN
+        h = max(10, LIST_CELL_H - 2 * LIST_CELL_MARGIN)
+        self._moveResize("catAccent", 34, y, 6, h)
+        try: self["catAccent"].show()
+        except Exception: pass
+
+    def _updateScrollHints(self):
+        if self._display_mode != "list" or not getattr(self, "_listVisible", False):
+            try: self["catScrollUp"].hide()
+            except Exception: pass
+            try: self["catScrollDn"].hide()
+            except Exception: pass
+            return
+        try:
+            tl = self["text_list"]
+            per  = tl.itemsPerPage
+            cur  = tl.currentPage * per + tl.currentRow
+            tot  = tl.totalItems
+        except Exception:
+            return
+        try:
+            if cur > 0:
+                self["catScrollUp"].setText(u"▲")
+                self["catScrollUp"].show()
+            else:
+                self["catScrollUp"].hide()
+        except Exception:
+            pass
+        try:
+            if cur + 1 < tot:
+                self["catScrollDn"].setText(u"▼")
+                self["catScrollDn"].show()
+            else:
+                self["catScrollDn"].hide()
+        except Exception:
+            pass
+
+    def _shakeList(self):
+        if self._display_mode != "list" or not getattr(self, "_listVisible", False):
+            return
+        self._catShakeFrames = 8
+        try: self._catShakeTimer.start(20, False)
+        except Exception as e:
+            my_log("list shake start failed: {}".format(e))
+
+    def _catShakeTick(self):
+        if self._catShakeFrames <= 0:
+            try:
+                inst = self["text_list"].instance
+                if inst:
+                    inst.move(ePoint(40, 95))
+            except Exception:
+                pass
+            try: self._catShakeTimer.stop()
+            except Exception: pass
+            return
+        self._catShakeFrames -= 1
+        amps = (6, -6, 4, -4, 2, -2, 1, -1)
+        idx = 8 - self._catShakeFrames - 1
+        offset = amps[idx] if 0 <= idx < len(amps) else 0
+        try:
+            inst = self["text_list"].instance
+            if inst:
+                inst.move(ePoint(40 + offset, 95))
+        except Exception:
+            pass
 
     def _moveResize(self, key, x, y, w, h):
         try:
@@ -465,7 +830,6 @@ class AdvancedArabicPlayerHome(Screen):
             else:
                 self._moveResize('cfocus%d' % logical_slot, 0, 0, 1, 1)
 
-    # ── Home ───────────────────────────────────────────────────────────
     def _showHome(self):
         self._source = "home"
         self._display_mode = "home"
@@ -525,6 +889,8 @@ class AdvancedArabicPlayerHome(Screen):
 
     def _showHomeMode(self):
         self._focus_zone = "grid"
+        self._listVisible = False            # [catlist-effects]
+        self._hideCatOverlays()
         try: self._poster_pop_timer.stop()                    # [pop-anim]
         except Exception: pass
         self._poster_pop_p = 1.0
@@ -532,11 +898,10 @@ class AdvancedArabicPlayerHome(Screen):
             self._artworkPollTimer.start(1000, False)
         except Exception:
             pass
-        try:  # [PATCH G11] ePixmap ignored show()/hide() on this build; real widget + explicit
-              # pixmap load instead, matching backdropImg's already-working pattern
+        try:  # [PATCH G11]
             self["staticBackground"].instance.setPixmapFromFile(
                 os.path.join(PLUGIN_PATH, "images", "background.jpg"))
-            self["staticBackground"].show()  # [PATCH G9] only screen this is visible on
+            self["staticBackground"].show()  # [PATCH G9]
         except Exception as e:
             my_log("staticBackground show (home) failed: {}".format(e))
         self["backdropImg"].hide()
@@ -577,10 +942,22 @@ class AdvancedArabicPlayerHome(Screen):
         self["key_yellow"].setText("بحث")
         self["key_blue"].setText("الإعدادات")
         self._paintContinueRow()
+        self._zone_p = 1.0
+        self._zone_target = 1.0
+        self._applyZoneOffsets()
+        # [zone-slide-2 fix] re-show the direction hint on every return to
+        # home. Without this, the hint's own timer hides it on the first
+        # tick while a category list is open, and nothing ever brings it
+        # back when the user presses BACK — so the ▲ was missing every time
+        # you came back from a list to the grid.
+        self._updateNavHint()
 
     def _showPosterMode(self):
-        try: self["staticBackground"].hide()  # [PATCH G9] not shown on poster/carousel screens
+        try: self["staticBackground"].hide()  # [PATCH G9]
         except Exception as e: my_log("staticBackground hide (poster) failed: {}".format(e))
+        self._hideNavHint()                                    # [zone-slide-2]
+        self._listVisible = False                              # [catlist-effects]
+        self._hideCatOverlays()
         self["home_grid"].hide()
         self["homeSel"].hide()                                # [pop-out]
         try: self._pop_timer.stop()                           # [pop-anim]
@@ -1154,17 +1531,20 @@ class AdvancedArabicPlayerHome(Screen):
         self._updateIcons()
         if self._display_mode == "list":
             self._updateGridFooter()
+            if getattr(self, "_listVisible", False):
+                self._updateCatAccent()
+                self._updateScrollHints()
 
     # ── [pop-anim] home-grid helpers ────────────────────────────────────
     def _iconBasePos(self, row, col):
         """Top-left of the base (unzoomed) icon widget for cell (row, col).
-        Mirrors build_pixmap_widgets_xml():
-            px = x0 + c*cell_w + margin + border_w
-            py = y0 + r*cell_h + margin + border_w + icon_pad_top
-        """
+        Mirrors build_pixmap_widgets_xml(), plus the live grid Y offset so
+        icons slide together with the home_grid listbox during the
+        strip⇄grid transition."""
         bx = (self._HOME_GRID_X + HOME_CENTER_OFFSET_X
               + col * HOME_CELL_W + HOME_CELL_MARGIN + HOME_BORDER_W)
-        by = (self._HOME_GRID_Y + row * HOME_CELL_H
+        by = (self._HOME_GRID_Y + self._grid_y_off
+              + row * HOME_CELL_H
               + HOME_CELL_MARGIN + HOME_BORDER_W + HOME_ICON_PAD_TOP)
         return bx, by
 
@@ -1256,7 +1636,8 @@ class AdvancedArabicPlayerHome(Screen):
         try:
             bx = (self._HOME_GRID_X + HOME_CENTER_OFFSET_X
                   + sel_c * HOME_CELL_W + HOME_CELL_MARGIN)
-            by = (self._HOME_GRID_Y + sel_r * HOME_CELL_H + HOME_CELL_MARGIN)
+            by = (self._HOME_GRID_Y + self._grid_y_off
+                  + sel_r * HOME_CELL_H + HOME_CELL_MARGIN)
             self._moveResize("homeSel",
                              bx - rpop, by - rpop,
                              HOME_CELL_INNER_W + 2 * rpop,
@@ -1371,7 +1752,13 @@ class AdvancedArabicPlayerHome(Screen):
 
     # [pop-anim] p in [0,1] interpolates the zoomed card from base size to +8%.
     # Called with zoom_index=None to reset every slot to base.
-    def _applyContinueLayout(self, zoom_index=None, p=1.0):
+    # [zone-slide-2] y_off shifts the whole strip vertically during the
+    # strip⇄grid transition. Callers that don't pass one get the current
+    # live offset, so _paintContinueRow / _moveContinueSel / _resetContinueZoom
+    # keep working untouched.
+    def _applyContinueLayout(self, zoom_index=None, p=1.0, y_off=None):
+        if y_off is None:
+            y_off = self._strip_y_off
         _bar_h = sc(6)
         _zoom_factor = 0.08 * p
         for i in range(CONT_SLOTS):
@@ -1380,7 +1767,7 @@ class AdvancedArabicPlayerHome(Screen):
                 zw = int(CONT_W * (1 + _zoom_factor))
                 zh = int(CONT_H * (1 + _zoom_factor))
                 zx = base_x - (zw - CONT_W) // 2
-                zy = CONT_Y - (zh - CONT_H) // 2
+                zy = CONT_Y - (zh - CONT_H) // 2 + y_off
                 self._moveResize("cont%d" % i, zx, zy, zw, zh)
                 self._moveResize("contbadge%d" % i, zx, zy + zh - sc(28), zw, sc(28))
                 _bx = zx + sc(6)
@@ -1391,11 +1778,11 @@ class AdvancedArabicPlayerHome(Screen):
                 try: self["contSel"].show()
                 except Exception: pass
             else:
-                self._moveResize("cont%d" % i, base_x, CONT_Y, CONT_W, CONT_H)
+                self._moveResize("cont%d" % i, base_x, CONT_Y + y_off, CONT_W, CONT_H)
                 self._moveResize("contbadge%d" % i, base_x,
-                                 CONT_Y + CONT_H - sc(28), CONT_W, sc(28))
+                                 CONT_Y + y_off + CONT_H - sc(28), CONT_W, sc(28))
                 _bx = base_x + sc(6)
-                _by = CONT_Y + CONT_H - 26 - _bar_h - sc(6)
+                _by = CONT_Y + y_off + CONT_H - 26 - _bar_h - sc(6)
                 _bw = CONT_W - sc(12)
             pct = self._cont_pct.get(i, 0) if i < len(self._cont_items) else 0
             try:
@@ -1675,8 +2062,13 @@ class AdvancedArabicPlayerHome(Screen):
         if self._display_mode == "home":
             if self._focus_zone == "row" and self._cont_items:
                 item = self._cont_items[min(self._cont_index, len(self._cont_items) - 1)]
+                # [zone-slide] jump to grid endpoint before opening so returning
+                # from the detail screen lands the user on the grid, not the strip.
                 self._focus_zone = "grid"
-                self._resetContinueZoom()
+                self._zone_p = 1.0
+                self._zone_target = 1.0
+                self._applyZoneOffsets()
+                self._hideNavHint()        # [zone-slide-2]
                 if item:
                     self._openItem(item)
                 return
@@ -1724,7 +2116,9 @@ class AdvancedArabicPlayerHome(Screen):
             pg = self["home_grid"]
             if self._cont_items and pg.currentRow == 0 and pg.currentPage == 0:
                 self._focus_zone = "row"
+                self._startZoneAnim(0.0)   # [zone-slide] grid out, strip in
                 self._moveContinueSel()
+                self._updateNavHint()      # [zone-slide-2]
                 return
             pg.moveUp()
             return
@@ -1737,6 +2131,8 @@ class AdvancedArabicPlayerHome(Screen):
         if self._display_mode == "home" and self._focus_zone == "row":
             self._focus_zone = "grid"
             self._resetContinueZoom()
+            self._startZoneAnim(1.0)       # [zone-slide] strip out, grid in
+            self._updateNavHint()          # [zone-slide-2]
             return
         if self._display_mode == "home":
             self["home_grid"].moveDown()
@@ -1868,6 +2264,7 @@ class AdvancedArabicPlayerHome(Screen):
                     self["pic_%d_%d" % (i, _c)].hide()
             self["home_grid"].hide()
             self["homeSel"].hide()                            # [pop-out]
+            self._hideNavHint()                               # [zone-slide-2 fix]
             try: self._pop_timer.stop()                       # [pop-anim]
             except Exception: pass
             try: self._cont_pop_timer.stop()                  # [pop-anim]
@@ -1877,6 +2274,9 @@ class AdvancedArabicPlayerHome(Screen):
             self._poster_pop_p = 1.0
             self["text_list"].show()
             self["text_list"].setList(items)
+            # [catlist-effects] slide in from the right with a slight overshoot
+            self._listVisible = False
+            self._slideListIn()
             try:
                 _ri = getattr(self, "_list_return_index", None)
                 if _ri is not None and self._source == "categories":
@@ -1963,6 +2363,7 @@ class AdvancedArabicPlayerHome(Screen):
         except Exception as e:
             plugin_health.record(self._site, "down", str(e))
             callInMainThread(self._setStatus, "فشل: {}".format(str(e)[:60]), True)
+            callInMainThread(self._shakeList)          # [catlist-effects]
 
     def _onCategoryLoaded(self, items):
         if not items:
@@ -2100,6 +2501,7 @@ class AdvancedArabicPlayerHome(Screen):
             if self._cont_items:
                 self._focus_zone = "row"
                 self._moveContinueSel()
+                self._updateNavHint()      # [zone-slide-2]
             return
         if self._display_mode == "list":
             self._showLibrary("favorites")
@@ -2120,11 +2522,21 @@ class AdvancedArabicPlayerHome(Screen):
             else:
                 self._showSiteCategories()
         elif self._source != "home":
-            self._showHome()
+            # [catlist-effects] slide the list out first, then go home
+            if (self._display_mode == "list"
+                    and getattr(self, "_listVisible", False)):
+                def _after_out():
+                    self._listVisible = False
+                    self._showHome()
+                self._slideListOut(_after_out)
+            else:
+                self._showHome()
         else:
             if self._focus_zone == "row":
                 self._focus_zone = "grid"
                 self._resetContinueZoom()
+                self._startZoneAnim(1.0)   # [zone-slide] strip out, grid in
+                self._updateNavHint()      # [zone-slide-2]
                 return
             self.close()
 
@@ -2143,6 +2555,14 @@ class AdvancedArabicPlayerHome(Screen):
         except: pass
         try: self._poster_pop_timer.stop()                   # [pop-anim]
         except: pass
+        try: self._zone_anim_timer.stop()                    # [zone-slide]
+        except: pass
+        try: self._navHintTimer.stop()                       # [zone-slide-2]
+        except: pass
+        try: self._listSlideTimer.stop()                     # [catlist-effects]
+        except: pass
+        try: self._catShakeTimer.stop()                      # [catlist-effects]
+        except: pass
         try: plugin_imagecache.cancelAsyncImages()
         except: pass
 
@@ -2153,4 +2573,4 @@ def _get_favorite_items_list():
 
 
 def _get_extractor(site):
-    return get_extractor(site)
+    return get_extractor(site)                    
