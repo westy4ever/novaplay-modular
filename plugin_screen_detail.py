@@ -13,6 +13,17 @@ MODULAR EXTRACTION of AdvancedArabicPlayerDetail with:
     matches an available variant, auto-play it instead of showing the
     quality menu. Saved by plugin_screen_player when the user picks a
     quality from the in-player menu.
+  * [detail-reveal] staggered slide-in on screen open: poster from the
+    left, info panel from the right, plot + menu from the bottom, each
+    eased. Skipped for chained-episode opens (episode_index >= 0).
+  * [detail-stagger] menu rows appear one (or a few) at a time on load
+    and on quality-choices swap — makes even a slow response feel live.
+  * [detail-accent] gold accent bar parked beside the selected server.
+    [PATCH 112] For long lists the bar tracks the real visible-window
+    row index (native eListbox behaviour) instead of sliding
+    proportionally — and never overshoots the menu box on the last item.
+  * [detail-progress] indeterminate cyan bar sweeping under the menu
+    box while a stream is being extracted, hidden when it resolves.
 """
 
 import os
@@ -28,7 +39,7 @@ from Screens.ChoiceBox import ChoiceBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
-from enigma import eTimer, ePicLoad
+from enigma import eTimer, ePicLoad, ePoint, eSize
 
 from plugin_common import my_log, PLUGIN_PATH, _TYPE_LABELS
 from extractors import get_extractor
@@ -100,12 +111,64 @@ class AdvancedArabicPlayerDetail(Screen):
                 backgroundColor="#161B22"
                 backgroundColorSelected="#21262D" />
 
+        <widget name="menuAccent"   position="48,712"  size="6,87"  backgroundColor="#FFD740" transparent="0" cornerRadius="3" zPosition="5" />
+        <widget name="menuProgress" position="45,1036" size="180,4" backgroundColor="#00E5FF" transparent="0" cornerRadius="2" zPosition="5" />
+
         <widget name="key_red"    position="45,1042"  size="330,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="4" />
         <widget name="key_yellow" position="385,1042" size="330,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
         <widget name="key_blue"   position="725,1042" size="330,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
         <widget name="status"     position="1065,1042" size="795,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="4" />
     </screen>
     """
+
+    # [detail-reveal] design positions for every widget that participates
+    # in the entry animation. Each group slides from an offset toward its
+    # design position with an ease-out cubic curve. Groups have staggered
+    # start frames so the reveal cascades.
+    # (name, ((widget_key, design_x, design_y), ...), off_x, off_y, delay, duration)
+    _REVEAL_GROUPS = (
+        ("poster", (
+            ("poster_box", 45, 30),
+            ("poster", 68, 52),
+            ("posterYear", 76, 56),
+            ("posterRating", 325, 58),
+        ), -320, 0, 0, 8),
+        ("info", (
+            ("info_box", 495, 30),
+            ("badge", 525, 52),
+            ("title", 525, 93),
+            ("meta", 525, 189),
+            ("facts", 525, 255),
+            ("source", 525, 300),
+            ("proxy_warning", 1355, 52),
+        ), 220, 0, 2, 8),
+        ("menu", (
+            ("menu_box", 45, 652),
+            ("section", 75, 663),
+            ("menu", 60, 708),
+        ), 0, 320, 3, 8),
+        ("plot", (
+            ("plot_box", 495, 450),
+            ("plot_title", 525, 465),
+            ("plot", 525, 504),
+        ), 220, 0, 4, 8),
+    )
+
+    # [detail-accent] geometry of the menu widget, used to compute where
+    # the accent bar should sit relative to the selected row.
+    _MENU_X = 60
+    _MENU_Y = 708
+    _MENU_W = 1800
+    _MENU_H = 320
+    _MENU_ROW_H = 95
+
+    # [detail-progress] geometry of the indeterminate bar
+    _PROG_X0 = 45
+    _PROG_Y  = 1036
+    _PROG_W  = 180
+    _PROG_H  = 4
+    _PROG_SPAN = 1830 - 180   # bar travels this far before reversing
+    _PROG_STEP = 40
 
     def __init__(self, session, item, site="egydead", m_type="movie",
                  episode_chain=None, episode_index=-1, auto_server_idx=None):
@@ -140,6 +203,30 @@ class AdvancedArabicPlayerDetail(Screen):
         self._auto_menu_timer = None
         self._osd_poster = (item.get("poster") or item.get("image") or "")
 
+        # [detail-reveal] animation state
+        self._reveal_timer = eTimer()
+        self._reveal_timer.callback.append(self._revealTick)
+        self._reveal_frame = 0
+        self._reveal_running = False
+
+        # [detail-stagger] menu rows appearing one step at a time
+        self._stagger_timer = eTimer()
+        self._stagger_timer.callback.append(self._staggerTick)
+        self._stagger_items = []
+        self._stagger_idx = 0
+        self._stagger_step = 1
+
+        # [detail-accent] tracks the last item count so the accent bar can
+        # hide itself when the menu is empty
+        self._menu_item_count = 0
+
+        # [detail-progress] indeterminate bar state
+        self._progress_timer = eTimer()
+        self._progress_timer.callback.append(self._progressTick)
+        self._progress_x = self._PROG_X0
+        self._progress_dir = 1
+        self._progress_active = False
+
         self["bg"]     = Label("")
         self["poster_box"] = Label("")
         self["info_box"] = Label("")
@@ -158,6 +245,10 @@ class AdvancedArabicPlayerDetail(Screen):
         self["plot"]   = Label("")
         self["section"] = Label("جاري التحضير...")
         self["menu"]   = StreamList()
+        self["menuAccent"]   = Label("")
+        self["menuProgress"] = Label("")
+        self["menuAccent"].hide()
+        self["menuProgress"].hide()
         self["key_red"] = Label("المفضلة")
         self["key_yellow"] = Label("تحديث TMDb")
         self["key_blue"] = Label("تحميل")
@@ -165,6 +256,16 @@ class AdvancedArabicPlayerDetail(Screen):
 
         self._downloads = []
         self._active_download_task = None
+
+        # [detail-accent] hook the selection-changed pipeline. If Enigma2
+        # wires StreamList.selectionChanged (it does for eListbox parents),
+        # this fires on every arrow-key move; otherwise the arrow-key
+        # handlers below also call _updateMenuAccent explicitly, so it's
+        # covered either way.
+        try:
+            self["menu"].onSelectionChanged.append(self._updateMenuAccent)
+        except Exception:
+            pass
 
         self.picLoad = ePicLoad()
         self.picLoad.PictureData.get().append(self._paintPoster)
@@ -175,14 +276,231 @@ class AdvancedArabicPlayerDetail(Screen):
             "red":    self._toggleFavorite,
             "yellow": self._refreshTMDb,
             "blue":   self._openDownloads,
-            "up":     lambda: self["menu"].up(),
-            "down":   lambda: self["menu"].down(),
+            "up":     self._navMenuUp,
+            "down":   self._navMenuDown,
             "left":   lambda: self["menu"].pageUp(),
             "right":  lambda: self["menu"].pageDown(),
         }, -1)
 
         self.onLayoutFinish.append(self._load)
         self.onExecBegin.append(self._refreshPoster)
+        self.onClose.append(self._onCloseCleanup)
+
+    # ── [detail-accent] navigation helpers ─────────────────────────────
+    def _navMenuUp(self):
+        try:
+            self["menu"].up()
+        except Exception:
+            pass
+        self._updateMenuAccent()
+
+    def _navMenuDown(self):
+        try:
+            self["menu"].down()
+        except Exception:
+            pass
+        self._updateMenuAccent()
+
+    # ── [detail-common] move+resize helper ─────────────────────────────
+    def _moveResize(self, key, x, y, w, h):
+        try:
+            inst = self[key].instance
+            if inst:
+                inst.move(ePoint(int(x), int(y)))
+                inst.resize(eSize(max(1, int(w)), max(1, int(h))))
+        except Exception as e:
+            my_log("detail moveResize error for {}: {}".format(key, e))
+
+    # ── [detail-reveal] staggered slide-in on open ────────────────────
+    def _startReveal(self):
+        # chained episode → instant, no cascade
+        if self._episode_index >= 0:
+            return
+        self._reveal_running = True
+        self._reveal_frame = 0
+        for _name, widgets, ox, oy, _d, _dur in self._REVEAL_GROUPS:
+            for key, dx, dy in widgets:
+                try:
+                    inst = self[key].instance
+                    if inst:
+                        inst.move(ePoint(int(dx + ox), int(dy + oy)))
+                except Exception:
+                    pass
+        try:
+            self._reveal_timer.start(20, False)
+        except Exception as e:
+            my_log("reveal timer start failed: {}".format(e))
+            self._reveal_running = False
+
+    def _revealTick(self):
+        if getattr(self, "_closed", False):
+            try: self._reveal_timer.stop()
+            except Exception: pass
+            self._reveal_running = False
+            return
+        self._reveal_frame += 1
+        all_done = True
+        for _name, widgets, ox, oy, delay, dur in self._REVEAL_GROUPS:
+            local = self._reveal_frame - delay
+            if local < 0:
+                all_done = False
+                continue
+            p = min(1.0, float(local) / float(dur))
+            if p < 1.0:
+                all_done = False
+            p_eased = 1.0 - (1.0 - p) ** 3
+            xoff = int(ox * (1.0 - p_eased))
+            yoff = int(oy * (1.0 - p_eased))
+            for key, dx, dy in widgets:
+                try:
+                    inst = self[key].instance
+                    if inst:
+                        inst.move(ePoint(dx + xoff, dy + yoff))
+                except Exception:
+                    pass
+        if all_done:
+            self._reveal_running = False
+            try: self._reveal_timer.stop()
+            except Exception: pass
+
+    # ── [detail-stagger] progressive menu population ──────────────────
+    def _setMenu(self, items):
+        """Central setList — updates the accent bar's item count."""
+        try:
+            self._menu_item_count = len(items)
+            self["menu"].setList(items)
+        except Exception as e:
+            my_log("setMenu error: {}".format(e))
+            return
+        self._updateMenuAccent()
+
+    def _setMenuStaggered(self, items):
+        """Reveal menu rows a few at a time so a slow response feels live.
+        Lists longer than 16 items advance in groups of 3 to cap the
+        animation at ~400 ms regardless of size."""
+        items = list(items)
+        self._stagger_items = items
+        n = len(items)
+        self._stagger_step = 1 if n <= 8 else (2 if n <= 16 else 3)
+        self._menu_item_count = n
+        first = min(self._stagger_step, n)
+        self._stagger_idx = first
+        try: self._stagger_timer.stop()
+        except Exception: pass
+        try:
+            self["menu"].setList(items[:first])
+        except Exception as e:
+            my_log("stagger initial setList error: {}".format(e))
+            return
+        self._updateMenuAccent()
+        if first < n:
+            try:
+                self._stagger_timer.start(40, False)
+            except Exception as e:
+                my_log("stagger timer start failed: {}".format(e))
+
+    def _staggerTick(self):
+        if getattr(self, "_closed", False):
+            try: self._stagger_timer.stop()
+            except Exception: pass
+            return
+        n = len(self._stagger_items)
+        if self._stagger_idx >= n:
+            try: self._stagger_timer.stop()
+            except Exception: pass
+            return
+        self._stagger_idx = min(self._stagger_idx + self._stagger_step, n)
+        try:
+            self["menu"].setList(self._stagger_items[:self._stagger_idx])
+        except Exception as e:
+            my_log("stagger setList error: {}".format(e))
+            try: self._stagger_timer.stop()
+            except Exception: pass
+            return
+        self._updateMenuAccent()
+        if self._stagger_idx >= n:
+            try: self._stagger_timer.stop()
+            except Exception: pass
+
+    # ── [detail-accent] gold bar next to the selected server row ──────
+    def _updateMenuAccent(self):
+        if getattr(self, "_closed", False):
+            return
+        total = getattr(self, "_menu_item_count", 0)
+        if not total:
+            try: self["menuAccent"].hide()
+            except Exception: pass
+            return
+        try:
+            idx = self["menu"].getCurrentIndex()
+        except Exception:
+            idx = 0
+        idx = max(0, min(int(idx), total - 1))
+
+        row_h = self._MENU_ROW_H                       # 95
+        bar_h = row_h - 8                              # 87
+        visible_rows = max(1, self._MENU_H // row_h)   # 3
+
+        if total <= visible_rows:
+            # Short list — bar sits next to the selected row exactly
+            y_off = idx * row_h
+        else:
+            # [PATCH 112] True row tracking: the eListbox scrolls by whole
+            # rows, so the visible-window row index is idx minus the scroll
+            # offset. The bar is always visually on a real row (0, 1, or 2),
+            # matching native Enigma2 widget behaviour. Because effective_row
+            # is clamped to visible_rows-1 the bar can never overshoot the
+            # menu box.
+            scroll_off = max(0, idx - (visible_rows - 1))
+            effective_row = idx - scroll_off       # 0, 1, or 2
+            y_off = effective_row * row_h
+
+        bar_x = self._MENU_X - 12                      # 48
+        bar_y = self._MENU_Y + y_off + 4               # 712 .. 902
+        self._moveResize("menuAccent", bar_x, bar_y, 6, bar_h)
+        try: self["menuAccent"].show()
+        except Exception: pass
+
+    # ── [detail-progress] indeterminate bar while extracting ──────────
+    def _startProgress(self):
+        try: self._progress_timer.stop()
+        except Exception: pass
+        self._progress_active = True
+        self._progress_x = self._PROG_X0
+        self._progress_dir = 1
+        try:
+            self._moveResize("menuProgress",
+                             self._progress_x, self._PROG_Y,
+                             self._PROG_W, self._PROG_H)
+            self["menuProgress"].show()
+            self._progress_timer.start(25, False)
+        except Exception as e:
+            my_log("progress start failed: {}".format(e))
+
+    def _stopProgress(self):
+        self._progress_active = False
+        try: self._progress_timer.stop()
+        except Exception: pass
+        try: self["menuProgress"].hide()
+        except Exception: pass
+
+    def _progressTick(self):
+        if not self._progress_active or getattr(self, "_closed", False):
+            try: self._progress_timer.stop()
+            except Exception: pass
+            return
+        limit_r = self._PROG_X0 + self._PROG_SPAN
+        limit_l = self._PROG_X0
+        self._progress_x += self._progress_dir * self._PROG_STEP
+        if self._progress_x >= limit_r:
+            self._progress_x = limit_r
+            self._progress_dir = -1
+        elif self._progress_x <= limit_l:
+            self._progress_x = limit_l
+            self._progress_dir = 1
+        self._moveResize("menuProgress",
+                         self._progress_x, self._PROG_Y,
+                         self._PROG_W, self._PROG_H)
 
     def _format_server_item(self, s):
         name = s.get("name", "Server")
@@ -245,6 +563,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 return
             self["status"].setText("Extracting stream...")
             self["status"].show()
+            self._startProgress()             # [detail-progress]
             threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
         elif self._episodes:
             if idx >= len(self._episodes): return
@@ -266,6 +585,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 return
             self["status"].setText("Extracting stream...")
             self["status"].show()
+            self._startProgress()             # [detail-progress]
             threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
 
     def _promptMagnetAction(self, server):
@@ -293,6 +613,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 token = self._extract_token
             self["status"].setText("TorrServer: Starting Stream...")
             self["status"].show()
+            self._startProgress()             # [detail-progress]
             threading.Thread(target=self._bgTorrServerMagnet, args=(magnet_link, server, token), daemon=True).start()
         elif action == "download":
             self._initiateTransmissionDownload(magnet_link, title)
@@ -314,6 +635,12 @@ class AdvancedArabicPlayerDetail(Screen):
 
     def _load(self):
         item_snapshot = self._item
+        # [detail-reveal] kick off the entry animation on the main thread
+        # before we hand off to the loading worker
+        try:
+            self._startReveal()
+        except Exception as e:
+            my_log("startReveal failed: {}".format(e))
         threading.Thread(target=self._bgLoad, args=(self._site, item_snapshot, self._m_type), daemon=True).start()
 
     def _bgLoad(self, site, item, m_type):
@@ -371,11 +698,12 @@ class AdvancedArabicPlayerDetail(Screen):
             self._quality_choices = []
             self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
-            self["menu"].setList(items)
+            self._setMenu(items)
             self["status"].setText(self._status_hint("اختار سيرفر — OK"))
             return
         self._closed = True
         self._proxy_warning_shown = False
+        self._stopProgress()
         try:
             self.picLoad.PictureData.get().remove(self._paintPoster)
         except Exception: pass
@@ -384,6 +712,17 @@ class AdvancedArabicPlayerDetail(Screen):
                 if os.path.exists(p): os.remove(p)
             except Exception: pass
         self.close()
+
+    def _onCloseCleanup(self):
+        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer"):
+            try:
+                timer = getattr(self, t, None)
+                if timer:
+                    timer.stop()
+            except Exception:
+                pass
+        try: self.picLoad.PictureData.get().remove(self._paintPoster)
+        except Exception: pass
 
     def _paintPoster(self, picData=None):
         ptr = self.picLoad.getData()
@@ -487,10 +826,11 @@ class AdvancedArabicPlayerDetail(Screen):
         item_type = data.get("type") or self._item.get("type")
         episode_has_servers = (item_type == "episode" and self._servers)
 
+        # [detail-stagger] menu population is now progressive
         if episode_has_servers:
             self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
-            self["menu"].setList(items)
+            self._setMenuStaggered(items)
             self["status"].setText(self._status_hint("اختار سيرفر — OK"))
         elif self._episodes:
             _all_seasons = all(e.get("type") in ("series", "season") for e in self._episodes)
@@ -499,20 +839,20 @@ class AdvancedArabicPlayerDetail(Screen):
             _ok_hint = "اختار موسم — OK" if _all_seasons else "اختار حلقة — OK"
             self["section"].setText(_single_line_text("{}: {}  |  {}".format(_list_label, len(self._episodes), _pick_hint), width=90))
             items = [self._format_episode_item(ep) for ep in self._episodes]
-            self["menu"].setList(items)
+            self._setMenuStaggered(items)
             self["status"].setText(self._status_hint(_ok_hint))
         elif self._servers:
             self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
-            self["menu"].setList(items)
+            self._setMenuStaggered(items)
             self["status"].setText(self._status_hint("اختار سيرفر — OK"))
         elif is_series_item:
             self["section"].setText("الحلقات المتاحة: 0")
-            self["menu"].setList([("لا توجد حلقات متاحة", "", "", "")])
+            self._setMenu([("لا توجد حلقات متاحة", "", "", "")])
             self["status"].setText("لا توجد حلقات")
         else:
             self["section"].setText("السيرفرات المتاحة: 0")
-            self["menu"].setList([("لا توجد سيرفرات متاحة", "", "", "")])
+            self._setMenu([("لا توجد سيرفرات متاحة", "", "", "")])
             self["status"].setText("لا توجد سيرفرات")
 
         self._downloads = data.get("downloads") or []
@@ -689,6 +1029,8 @@ class AdvancedArabicPlayerDetail(Screen):
                 else:
                     callInMainThread(self._onStreamFound, url, qual, final_ref, server, variants)
             else:
+                # [detail-progress] extraction failed — hide the sweep bar
+                callInMainThread(self._stopProgress)
                 if get_curl_failed_needs_proxy():
                     plugin_health.record(self._site, "blocked")
                     if not self._proxy_warning_shown:
@@ -708,6 +1050,7 @@ class AdvancedArabicPlayerDetail(Screen):
                     callInMainThread(self["status"].setText, "فشل استخراج الرابط — جرب سيرفر تاني")
         except Exception as e:
             my_log("Detail _bgExtract CRITICAL ERROR: {}: {}\n{}".format(type(e).__name__, e, traceback.format_exc()))
+            callInMainThread(self._stopProgress)          # [detail-progress]
             if not getattr(self, "_closed", False):
                 callInMainThread(self["status"].setText, "خطأ في النظام: {}".format(str(e)[:30]))
         finally:
@@ -759,6 +1102,7 @@ class AdvancedArabicPlayerDetail(Screen):
             video_exts = ('.mpg', '.vob', '.m4v', '.mkv', '.avi', '.divx', '.dat', '.flv', '.mp4', '.mov', '.wmv', '.asf', '.3gp', '.3g2', '.mpeg', '.mpe', '.rm', '.rmvb', '.ogm', '.ogv', '.m2ts', '.mts', '.webm', '.ts')
 
             for attempt in range(20):
+                if getattr(self, "_closed", False): return
                 try:
                     req = _ur.Request(get_url, data=get_payload, headers={"Content-Type": "application/json"})
                     with _ur.urlopen(req, timeout=15) as resp:
@@ -804,6 +1148,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 time.sleep(2)
             else:
                 callInMainThread(self["status"].setText, "TorrServer: Timeout fetching metadata.")
+                callInMainThread(self._stopProgress)      # [detail-progress]
                 return
 
             encoded_path = quote(file_path, safe='/')
@@ -816,6 +1161,7 @@ class AdvancedArabicPlayerDetail(Screen):
         except Exception as e:
             my_log("TorrServer Error: {}".format(e))
             callInMainThread(self["status"].setText, "TorrServer Error: {}".format(str(e)[:30]))
+            callInMainThread(self._stopProgress)          # [detail-progress]
         finally:
             # [PATCH 80] every early return above used to leave _extracting stuck True
             if token is not None:
@@ -828,6 +1174,10 @@ class AdvancedArabicPlayerDetail(Screen):
 
     def _onQualityChoices(self, url, qual, final_ref, variants, server):
         if getattr(self, "_closed", False): return
+        # [detail-progress] resolving to a menu means "no immediate play" —
+        # stop the sweep so it doesn't sit over the resolved quality list
+        self._stopProgress()
+
         # [B3] if a stored quality preference matches an available variant,
         # auto-play it directly instead of showing the menu
         try:
@@ -893,7 +1243,8 @@ class AdvancedArabicPlayerDetail(Screen):
             quality_labels.append(("{}. {} {}".format(i + 1, badge, label), "", ""))
 
         self["section"].setText(_single_line_text("الجودات المتاحة: {}  |  اختر الجودة المطلوبة".format(len(choices)), width=90))
-        self["menu"].setList(quality_labels)
+        # [detail-stagger] quality menu pops in one row at a time
+        self._setMenuStaggered(quality_labels)
         self["status"].setText(self._status_hint("اختار جودة — OK"))
 
     def _playNextEpisode(self, next_ep):
@@ -933,6 +1284,7 @@ class AdvancedArabicPlayerDetail(Screen):
             token = self._extract_token
         self["status"].setText("جاري تشغيل الحلقة التالية...")
         self["status"].show()
+        self._startProgress()          # [detail-progress]
         threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
 
     def _applyQualityCap(self, url):
@@ -993,6 +1345,8 @@ class AdvancedArabicPlayerDetail(Screen):
 
     def _onStreamFound(self, stream_url, quality, final_ref, server, variants=None):
         if getattr(self, "_closed", False): return
+        # [detail-progress] resolution done — the sweep has served its purpose
+        self._stopProgress()
         try:
             if server in self._servers:
                 self._last_server_idx = self._servers.index(server)
@@ -1149,9 +1503,11 @@ class AdvancedArabicPlayerDetail(Screen):
         if action == "watch":
             self["status"].setText("جاري تجهيز الرابط للمشاهدة...")
             self["status"].show()
+            self._startProgress()          # [detail-progress]
             threading.Thread(target=self._bgResolveAndWatch, args=(entry,), daemon=True).start()
         elif action == "download":
             self["status"].setText("جاري تجهيز رابط التحميل...")
+            self._startProgress()          # [detail-progress]
             threading.Thread(target=self._bgResolveAndDownload, args=(entry,), daemon=True).start()
 
     def _bgResolveAndWatch(self, entry):
@@ -1178,6 +1534,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 variants = []
 
             if not resolved_url:
+                callInMainThread(self._stopProgress)      # [detail-progress]
                 callInMainThread(self["status"].setText, "تعذر تجهيز الرابط للمشاهدة - جرب جودة أخرى")
                 return
 
@@ -1189,6 +1546,7 @@ class AdvancedArabicPlayerDetail(Screen):
             callInMainThread(self._onStreamFound, resolved_url, label, referer, server, variants)
         except Exception as e:
             my_log("resolve-and-watch error: {}".format(e))
+            callInMainThread(self._stopProgress)          # [detail-progress]
             callInMainThread(self["status"].setText, "فشل تجهيز الرابط للمشاهدة")
 
     def _bgResolveAndDownload(self, entry):
@@ -1212,6 +1570,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 referer = result[2] if result and len(result) >= 3 and result[2] else entry["url"]
 
             if not resolved_url:
+                callInMainThread(self._stopProgress)      # [detail-progress]
                 callInMainThread(self["status"].setText, "تعذر تجهيز رابط التحميل - جرب جودة أخرى")
                 return
 
@@ -1235,17 +1594,20 @@ class AdvancedArabicPlayerDetail(Screen):
             threading.Thread(target=_progress_loop, daemon=True).start()
 
             try:
+                callInMainThread(self._stopProgress)      # [detail-progress]
                 dest = download_manager(task, title_hint=title_hint)
                 progress_timer_stop.set()
                 callInMainThread(self["status"].setText, "تم الحفظ: {}".format(os.path.basename(dest)))
             except Exception as e:
                 progress_timer_stop.set()
+                callInMainThread(self._stopProgress)      # [detail-progress]
                 if task.status == "cancelled":
                     return
                 my_log("Download failed: {}".format(e))
                 callInMainThread(self["status"].setText, "فشل التحميل: {}".format(str(e)[:40]))
         except Exception as e:
             my_log("Download setup error: {}".format(e))
+            callInMainThread(self._stopProgress)          # [detail-progress]
             callInMainThread(self["status"].setText, "خطأ في التحميل: {}".format(str(e)[:40]))
         finally:
             self._active_download_task = None

@@ -5,43 +5,37 @@ MODULAR EXTRACTION of AdvancedArabicPlayerSimplePlayer plus _play /
 _build_remote_play_candidates / service capture-restore. Full feature
 set with ALL session patches baked in:
 
-  * tracker via novaplay_tracker module attributes; Fix X: tracker
-    stops BEFORE the save/clear block (the EOF clear stays cleared)
-  * Fix Y: _next_open_timer NOT stopped in __stop (the deferred
-    next-episode open survives player teardown)
+  * tracker via novaplay_tracker module attributes
+  * Fix Y: _next_open_timer NOT stopped in __stop
   * Fix Z: double evEOF does not exit from under a visible card
-  * Fix W: single TMDB fetch per backdrop selection (merge lives in
-    plugin_screen_home.py)
-  * OSD poster: 132x198 floating ABOVE the panel (no seekbar overlap),
-    paints from imagecache → util-cache bridge → raw cache → placeholder
-  * auto-next card: portrait 100x150 poster slot; poster fallback
-    chain (episode → series/player poster → util cache → async) PLUS
-    a cache poll in the countdown tick so a late download replaces
-    the placeholder mid-countdown
-  * number keys 0-9 = proportional seeks (KEY_9 was unbound → red X)
-  * record: decodes the proxy URL back to the upstream stream so the
-    HLS/direct dispatch sees the real extension
-  * start_proxy() guard; '#' header merge + value unquoting
-  * real seekbar; pillarbox aspect; REC blink; sleep timer; player
-    MENU on menu/showMenu/mainMenu; Subtitle Studio v3
-  * Fix 1-4: OSD video info badge, subtitle indicator, clock, colored elapsed
-  * Fix C: Pick line to sync in Subtitle Studio
-  * v4.4: quality variants + mid-playback quality switching
-  * v4.5: skip intro + watched badge at EOF + single-source-of-truth delay
-    + failed-quality-switch revert dialog
-  * [PATCH 29] real system-aspect probes via eAVSwitch with three-way
-    restore-on-exit (fake-mode entry, normal exit, crash close)
-  * [PATCH 32] per-site "candidate that worked" memory — the winning
-    candidate label is stored per host and moved to the front of the
-    chain on the next playback, saving the 12s+ timeout hop
-  * [PATCH 33] verifySeek trusts the demuxer's PTS over the commanded
-    target when they disagree (fixes the 720p _h resume inflation)
-  * [PATCH 65-B3] per-title quality preference: when the user picks a
-    quality from the in-player menu and the switch CONFIRMS, the
-    picked label is saved to qpref_<title>; the detail screen reads
-    it back and auto-selects the matching variant on next episode.
-  * [PATCH 65-A3] next-episode countdown reads next_episode_delay
-    from config (clamped 5-60s) instead of the fixed 10s constant.
+  * OSD poster: 132x198 floating ABOVE the panel
+  * auto-next card: portrait 100x150 with fallback chain
+  * number keys 0-9 = proportional seeks
+  * record: decodes the proxy URL back to the upstream stream
+  * [PATCH 29] eAVSwitch aspect probes with restore-on-exit
+  * [PATCH 32] per-site "candidate that worked" memory
+  * [PATCH 33] verifySeek trusts the demuxer's PTS
+  * [PATCH 65-B3] per-title quality preference
+  * [PATCH 65-A3] next-episode countdown from config
+
+[player-anim]
+  * OSD slide-in/out (eased, exponential smoothing)
+  * Seek-arrow flash overlay
+  * Auto-next card slide-in/out from the right
+  * Quality-switch wipe (mask the service restart)
+  * Aspect-bar slide-in on 4:3 / 14:9 cycle
+  * Studio-panel drop-down
+  * Sync-offset toast on the right edge
+
+[player-ux]
+  * state glyph ▶/⏸/⏳/⚠ beside elapsed
+  * watched at 90%
+  * "✓ Saved at hh:mm" toast on exit
+  * hold-to-accelerate seek
+  * MENU = skip hint 3s into an extraction
+  * retry dialog when all candidates fail
+  * near-end exit prompt (next / mark / save / cancel)
+  * disk-space guard before recording
 """
 
 import os
@@ -105,13 +99,9 @@ except Exception:
 
 
 # ── [B3] quality-preference key ─────────────────────────────────────────
-# Same function as plugin_screen_detail.py's copy — both resolve to the
-# same config key so the player can SAVE and the detail screen can READ
-# without a cross-module import.
 def _quality_pref_key(title):
     """Normalize a title into a config key for its per-title quality
-    preference. Series episode titles reduce to the series base so an
-    entire show shares one preference."""
+    preference. Series episode titles reduce to the series base."""
     t = str(title or "").strip()
     t = re.sub(r"\bS\d{1,2}E\d{1,2}\b.*$", "", t, flags=re.I)
     t = re.sub(r"\b\d{1,2}x\d{1,2}\b.*$", "", t)
@@ -291,6 +281,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         <widget name="seekbar" position="180,912" size="1480,12" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="6" />
         <widget name="prog_bar"  position="1660,906" size="100,26" font="Regular;20" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_elapsed"  position="180,938" size="320,44" font="Regular;36" foregroundColor="#FFD740" transparent="1" zPosition="12" />
+        <widget name="osd_state"    position="510,938" size="80,44" font="Regular;36" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" valign="center" />
         <widget name="status"       position="640,938" size="640,44" font="Regular;36" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" />
         <widget name="osd_hints"    position="1220,938" size="520,44" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_divider"  position="160,982" size="1600,2" backgroundColor="#1C2333" zPosition="11" />
@@ -305,6 +296,9 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         <widget name="autoNextText" position="1370,235" size="455,32" font="Regular;24" halign="left" foregroundColor="#E8E8E8" backgroundColor="transparent" zPosition="22" transparent="1" />
         <widget name="autoNextProgress" position="1370,282" size="455,16" zPosition="22" cornerRadius="8" backgroundColor="#1C2333" foregroundColor="#00E5FF" />
         <widget name="autoNextHelp" position="1370,310" size="455,24" font="Regular;20" halign="left" foregroundColor="#CFCFCF" backgroundColor="transparent" zPosition="22" transparent="1" />
+        <widget name="seekFlash"    position="660,430" size="600,140" font="Regular;64" foregroundColor="#F0F6FC" backgroundColor="#E60D1117" transparent="0" cornerRadius="20" halign="center" valign="center" zPosition="90" />
+        <widget name="qualityWipe"  position="0,0"   size="1920,0"  backgroundColor="#00E5FF" transparent="0" zPosition="89" />
+        <widget name="syncToast"    position="1550,760" size="280,64" font="Regular;34" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="14" halign="center" valign="center" zPosition="88" />
         <widget name="subBg1"   position="660,812" size="600,100" zPosition="7" backgroundColor="#80000000" transparent="0" cornerRadius="14" />
         <widget name="subBg2"   position="660,916" size="600,100" zPosition="7" backgroundColor="#80000000" transparent="0" cornerRadius="14" />
         <widget name="subLine1" position="210,812" size="1500,100" font="Regular;38" halign="center" valign="center" foregroundColor="#00FFFFFF" backgroundColor="transparent" zPosition="8" transparent="1" />
@@ -348,19 +342,49 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         "osd_shadow","overlay_bg","osd_topline","osd_botline",
         "osd_titlebar","osd_title","osd_durtext",
         "osdPosterBox","osdPoster",
-        "prog_bar","seekbar","osd_elapsed",
+        "prog_bar","seekbar","osd_elapsed","osd_state",
         "status","osd_hints","osd_divider",
         "osd_keybar","osd_keys",
         "osd_videinfo","osd_subinfo","osd_clock",
     ]
+
+    _OSD_DESIGN_Y = {
+        "osd_shadow": 856, "overlay_bg": 860, "osd_topline": 860,
+        "osd_botline": 1027, "osd_titlebar": 860,
+        "osdPosterBox": 606, "osdPoster": 610,
+        "osd_title": 868, "osd_durtext": 868, "prog_bar": 906,
+        "seekbar": 912, "osd_elapsed": 938, "osd_state": 938,
+        "status": 938, "osd_hints": 938, "osd_divider": 982,
+        "osd_keybar": 984, "osd_keys": 992,
+        "osd_videinfo": 868, "osd_subinfo": 870, "osd_clock": 868,
+    }
+    _OSD_SLIDE_OFFSET = 500
+
     _AUTONEXT_WIDGETS = ("autoNextPanel","autoNextAccent","autoNextPoster","autoNextTitle",
                           "autoNextEpisode","autoNextText","autoNextProgress","autoNextHelp")
+    _AUTONEXT_DESIGN_X = {
+        "autoNextPanel": 1110, "autoNextAccent": 1110,
+        "autoNextPoster": 1140, "autoNextTitle": 1370,
+        "autoNextEpisode": 1370, "autoNextText": 1370,
+        "autoNextProgress": 1370, "autoNextHelp": 1370,
+    }
+    _AUTONEXT_SLIDE_OFFSET = 850
+
     _STUDIO_KEYS = ("studioPanel","studioAccent","studioTitle","studioStatus",
                     "studioHelp","studioCard0","studioCard1","studioCard2",
                     "studioCard3","studioCard4",
                     "studioPreviewBg","studioPreview")
     _STUDIO_CARDS = ("studioCard0","studioCard1","studioCard2","studioCard3","studioCard4")
-    _AUTONEXT_SECONDS_DEFAULT = 10                    # [A3] fallback only
+    _STUDIO_DESIGN_Y = {
+        "studioPanel": 36, "studioAccent": 36,
+        "studioTitle": 52, "studioStatus": 52, "studioHelp": 178,
+        "studioCard0": 94, "studioCard1": 94, "studioCard2": 90,
+        "studioCard3": 94, "studioCard4": 94,
+        "studioPreviewBg": 212, "studioPreview": 216,
+    }
+    _STUDIO_SLIDE_PX = 320
+
+    _AUTONEXT_SECONDS_DEFAULT = 10
     _ASPECT_MODES = [("Full", 0), ("14:9", 120), ("4:3", 240)]
     _AV_PROBE_MODES = [
         ("System 4:3 — probe v0", 0),
@@ -370,6 +394,15 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         ("System probe v4", 4),
         ("System probe v5", 5),
     ]
+
+    _OSD_ANIM_MS       = 20
+    _OSD_ANIM_EASE     = 0.35
+    _AUTONEXT_ANIM_MS  = 20
+    _AUTONEXT_ANIM_EASE= 0.35
+    _SEEK_FLASH_MS     = 800
+    _EXTRACT_HINT_MS   = 3000
+    _QUALITY_WIPE_MS   = 25
+    _QUALITY_WIPE_FRAMES = 10
 
     def __init__(self, session, title, candidates, previous_service=None, resume_pos=0, item_url="",
                  next_episode=None, on_next=None, poster_url="", quality_variants=None):
@@ -384,6 +417,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self["seekbar"]      = ProgressBar()
         self["prog_bar"]     = Label("")
         self["osd_elapsed"]  = Label("")
+        self["osd_state"]    = Label("")
         self["osd_hints"]    = Label("")
         self["osd_divider"]  = Label("")
         self["osd_keybar"]   = Label("")
@@ -397,6 +431,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self["osd_subinfo"] = Label("")
         self["osd_clock"] = Label("")
         self["recBlink"]     = Label("● REC")
+        self["seekFlash"]    = Label("")
+        self["seekFlash"].hide()
+        self["qualityWipe"]  = Label("")
+        self["qualityWipe"].hide()
+        self["syncToast"]    = Label("")
+        self["syncToast"].hide()
         for k in self._AUTONEXT_WIDGETS:
             if k == "autoNextProgress":
                 self[k] = ProgressBar()
@@ -425,8 +465,6 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self["safeLeft"] = Label("")
         self["safeRight"] = Label("")
 
-        # [B3] stash the RAW (untruncated) title so the quality-pref key
-        # matches the one the detail screen reads back.
         self._raw_title = (title or "").strip()
 
         _raw = self._raw_title
@@ -468,8 +506,6 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._quality_prev_label = ""
         self._quality_prev_candidates = []
         self._quality_switch_in_flight = False
-        # [B3] stash the label of a user-picked quality until __onConfirmed
-        # fires; if the switch fails, this is cleared in _onQualityRetry.
         self._quality_pending_pref = ""
         self._poster_painted = False
         self._poster_final = False
@@ -503,6 +539,62 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._studioWin = 0
         self._studioItems = []
         self._studioChoiceKey = ""
+
+        # [player-anim] OSD slide state
+        self._osd_slide_p = 0.0
+        self._osd_slide_target = 0.0
+        self._osd_slide_timer = eTimer()
+        self._osd_slide_timer.callback.append(self._osdSlideTick)
+
+        # [player-anim] auto-next slide state
+        self._autonext_slide_p = 0.0
+        self._autonext_slide_target = 0.0
+        self._autonext_slide_timer = eTimer()
+        self._autonext_slide_timer.callback.append(self._autonextSlideTick)
+
+        # [player-anim] seek flash
+        self._seek_flash_timer = eTimer()
+        self._seek_flash_timer.callback.append(self._hideSeekFlash)
+
+        # [player-anim] quality wipe
+        self._quality_wipe_frame = 0
+        self._quality_wipe_target = 0
+        self._quality_wipe_cb = None
+        self._quality_wipe_timer = eTimer()
+        self._quality_wipe_timer.callback.append(self._qualityWipeTick)
+
+        # [player-ux] extraction skip hint
+        self._skip_hint_timer = eTimer()
+        self._skip_hint_timer.callback.append(self._showSkipHint)
+        self._skip_hint_shown = False
+
+        # [player-anim] aspect-bar slide state
+        self._aspect_anim_from = 0
+        self._aspect_anim_to = 0
+        self._aspect_anim_p = 1.0
+        self._aspect_anim_timer = eTimer()
+        self._aspect_anim_timer.callback.append(self._aspectAnimTick)
+
+        # [player-anim] studio-panel slide state
+        self._studio_slide_p = 1.0
+        self._studio_slide_target = 1.0
+        self._studio_slide_timer = eTimer()
+        self._studio_slide_timer.callback.append(self._studioSlideTick)
+
+        # [player-anim] sync toast
+        self._sync_toast_x_from = 1550
+        self._sync_toast_x_target = 1550
+        self._sync_toast_p = 0.0
+        self._sync_toast_frame = 0
+        self._sync_toast_slide_timer = eTimer()
+        self._sync_toast_slide_timer.callback.append(self._syncToastSlideTick)
+        self._sync_toast_timer = eTimer()
+        self._sync_toast_timer.callback.append(self._hideSyncToast)
+
+        # [player-ux] hold-to-accelerate seek
+        self._hold_dir = 0
+        self._hold_count = 0
+        self._hold_last_t = 0.0
 
         self._seek_timer = eTimer()
         self._seek_timer.callback.append(self.__doSeek)
@@ -538,6 +630,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._stall_kick_timer = eTimer()
         self._stall_kick_timer.callback.append(self.__stallKickBack)
         self._autosub_gen = 0
+        self._watched_at_90_fired = False
 
         for k in self._STUDIO_KEYS + self._AUTONEXT_WIDGETS:
             try: self[k].hide()
@@ -615,6 +708,310 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             v = self._AUTONEXT_SECONDS_DEFAULT
         return max(5, min(60, v))
 
+    # ── [player-anim] OSD slide helpers ─────────────────────────────────
+    def _designX(self, key):
+        try:
+            inst = self[key].instance
+            if inst:
+                return inst.position().x()
+        except Exception:
+            pass
+        return 0
+
+    def _moveResizeY(self, key, design_y, offset, w=None, h=None):
+        try:
+            inst = self[key].instance
+            if not inst:
+                return
+            inst.move(ePoint(int(self._designX(key)),
+                             int(design_y + offset)))
+            if w is not None and h is not None:
+                inst.resize(eSize(int(w), int(h)))
+        except Exception as e:
+            my_log("moveResizeY error for {}: {}".format(key, e))
+
+    def _startOSDSlide(self, target):
+        self._osd_slide_target = target
+        try:
+            self._osd_slide_timer.start(self._OSD_ANIM_MS, False)
+        except Exception as e:
+            my_log("OSD slide start failed: {}".format(e))
+
+    def _osdSlideTick(self):
+        diff = self._osd_slide_target - self._osd_slide_p
+        if abs(diff) < 0.02:
+            self._osd_slide_p = self._osd_slide_target
+            self._applyOSDSlide()
+            try: self._osd_slide_timer.stop()
+            except Exception: pass
+            if self._osd_slide_p <= 0.01 and not self._osd_visible:
+                for w in self._OSD_WIDGETS:
+                    try: self[w].hide()
+                    except Exception: pass
+            return
+        self._osd_slide_p += diff * self._OSD_ANIM_EASE
+        self._applyOSDSlide()
+
+    def _applyOSDSlide(self):
+        offset = int((1.0 - self._osd_slide_p) * self._OSD_SLIDE_OFFSET)
+        for w in self._OSD_WIDGETS:
+            dy = self._OSD_DESIGN_Y.get(w)
+            if dy is None:
+                continue
+            self._moveResizeY(w, dy, offset)
+
+    # ── [player-anim] auto-next card slide helpers ──────────────────────
+    def _startAutoNextSlide(self, target):
+        self._autonext_slide_target = target
+        try:
+            self._autonext_slide_timer.start(self._AUTONEXT_ANIM_MS, False)
+        except Exception as e:
+            my_log("auto-next slide start failed: {}".format(e))
+
+    def _autonextSlideTick(self):
+        diff = self._autonext_slide_target - self._autonext_slide_p
+        if abs(diff) < 0.02:
+            self._autonext_slide_p = self._autonext_slide_target
+            self._applyAutoNextSlide()
+            try: self._autonext_slide_timer.stop()
+            except Exception: pass
+            if self._autonext_slide_p <= 0.01:
+                for w in self._AUTONEXT_WIDGETS:
+                    try: self[w].hide()
+                    except Exception: pass
+            return
+        self._autonext_slide_p += diff * self._AUTONEXT_ANIM_EASE
+        self._applyAutoNextSlide()
+
+    def _applyAutoNextSlide(self):
+        offset = int((1.0 - self._autonext_slide_p) * self._AUTONEXT_SLIDE_OFFSET)
+        for w in self._AUTONEXT_WIDGETS:
+            dx = self._AUTONEXT_DESIGN_X.get(w)
+            if dx is None:
+                continue
+            try:
+                inst = self[w].instance
+                if inst:
+                    pos = inst.position()
+                    inst.move(ePoint(int(dx + offset), int(pos.y())))
+            except Exception:
+                pass
+
+    # ── [player-anim] seek flash ────────────────────────────────────────
+    def _showSeekFlash(self, direction, delta_secs, target_secs):
+        try:
+            if direction > 0:
+                arrow = u"▶▶"
+            else:
+                arrow = u"◀◀"
+            _th = target_secs // 3600
+            _tm = (target_secs % 3600) // 60
+            _ts = target_secs % 60
+            tstr = u"{:02d}:{:02d}:{:02d}".format(_th, _tm, _ts)
+            self["seekFlash"].setText(u"{} {}s\n{}".format(arrow, int(abs(delta_secs)), tstr))
+            self["seekFlash"].show()
+            try:
+                self._seek_flash_timer.stop()
+            except Exception:
+                pass
+            self._seek_flash_timer.start(self._SEEK_FLASH_MS, True)
+        except Exception as e:
+            my_log("seekFlash error: {}".format(e))
+
+    def _hideSeekFlash(self):
+        try: self["seekFlash"].hide()
+        except Exception: pass
+
+    # ── [player-anim] quality switch wipe ───────────────────────────────
+    def _startQualityWipe(self, on_midpoint=None):
+        self._quality_wipe_cb = on_midpoint
+        self._quality_wipe_frame = 0
+        self._quality_wipe_target = 1
+        try:
+            self["qualityWipe"].show()
+            self._moveResizeBar("qualityWipe", 0, 0, 1920, 0)
+            self._quality_wipe_timer.start(self._QUALITY_WIPE_MS, False)
+        except Exception as e:
+            my_log("quality wipe start failed: {}".format(e))
+            if on_midpoint:
+                try: on_midpoint()
+                except Exception: pass
+
+    def _moveResizeBar(self, key, x, y, w, h):
+        try:
+            inst = self[key].instance
+            if inst:
+                inst.move(ePoint(int(x), int(y)))
+                inst.resize(eSize(int(w), int(h)))
+        except Exception:
+            pass
+
+    def _qualityWipeTick(self):
+        self._quality_wipe_frame += 1
+        frames = self._QUALITY_WIPE_FRAMES
+        p = min(1.0, float(self._quality_wipe_frame) / float(frames))
+        if self._quality_wipe_target == 1:
+            h = int(1080 * p)
+            self._moveResizeBar("qualityWipe", 0, 0, 1920, h)
+            if p >= 1.0:
+                if self._quality_wipe_cb:
+                    cb = self._quality_wipe_cb
+                    self._quality_wipe_cb = None
+                    try: cb()
+                    except Exception as e:
+                        my_log("quality wipe midpoint error: {}".format(e))
+                self._quality_wipe_frame = 0
+                self._quality_wipe_target = 0
+        else:
+            y = int(-1080 * p)
+            h = int(1080 * (1.0 - p))
+            self._moveResizeBar("qualityWipe", 0, y + 1080, 1920, h)
+            if p >= 1.0:
+                try:
+                    self._quality_wipe_timer.stop()
+                    self["qualityWipe"].hide()
+                    self._moveResizeBar("qualityWipe", 0, 0, 1920, 0)
+                except Exception:
+                    pass
+
+    # ── [player-anim] aspect-bar slide ─────────────────────────────────
+    def _aspectAnimTick(self):
+        diff = 1.0 - self._aspect_anim_p
+        if diff < 0.02:
+            self._aspect_anim_p = 1.0
+            self._applyAspectBarWidth(self._aspect_anim_to)
+            try: self._aspect_anim_timer.stop()
+            except Exception: pass
+            if self._aspect_anim_to == 0:
+                try:
+                    self["aspect_bar_l"].hide()
+                    self["aspect_bar_r"].hide()
+                except Exception:
+                    pass
+            return
+        self._aspect_anim_p += 0.25
+        p_eased = 1.0 - (1.0 - min(1.0, self._aspect_anim_p)) ** 3
+        cur = int(self._aspect_anim_from
+                  + (self._aspect_anim_to - self._aspect_anim_from) * p_eased)
+        self._applyAspectBarWidth(cur)
+
+    def _applyAspectBarWidth(self, w):
+        try:
+            inst_l = self["aspect_bar_l"].instance
+            inst_r = self["aspect_bar_r"].instance
+            w = max(1, int(w))
+            if inst_l:
+                inst_l.resize(eSize(w, 1080))
+                inst_l.move(ePoint(0, 0))
+            if inst_r:
+                inst_r.resize(eSize(w, 1080))
+                inst_r.move(ePoint(1920 - w, 0))
+        except Exception:
+            pass
+
+    # ── [player-anim] studio-panel slide ───────────────────────────────
+    def _applyStudioSlide(self):
+        offset = int((1.0 - self._studio_slide_p) * -self._STUDIO_SLIDE_PX)
+        for k in self._STUDIO_KEYS:
+            dy = self._STUDIO_DESIGN_Y.get(k)
+            if dy is None:
+                continue
+            try:
+                inst = self[k].instance
+                if inst:
+                    pos = inst.position()
+                    inst.move(ePoint(int(pos.x()), int(dy + offset)))
+            except Exception:
+                pass
+
+    def _studioSlideTick(self):
+        diff = self._studio_slide_target - self._studio_slide_p
+        if abs(diff) < 0.02:
+            self._studio_slide_p = self._studio_slide_target
+            self._applyStudioSlide()
+            try: self._studio_slide_timer.stop()
+            except Exception: pass
+            if self._studio_slide_p <= 0.01:
+                for k in self._STUDIO_KEYS:
+                    try: self[k].hide()
+                    except Exception: pass
+            return
+        self._studio_slide_p += diff * 0.35
+        self._applyStudioSlide()
+
+    # ── [player-anim] sync-offset toast ────────────────────────────────
+    def _showSyncToast(self, text):
+        try:
+            self["syncToast"].setText(text)
+            self["syncToast"].show()
+            self._sync_toast_x_from = 1920 + 20
+            self._sync_toast_x_target = 1550
+            self._sync_toast_p = 0.0
+            try:
+                self["syncToast"].instance.move(ePoint(self._sync_toast_x_from, 760))
+            except Exception:
+                pass
+            self._sync_toast_frame = 0
+            try:
+                self._sync_toast_slide_timer.stop()
+                self._sync_toast_slide_timer.start(20, False)
+            except Exception:
+                pass
+            try:
+                self._sync_toast_timer.stop()
+                self._sync_toast_timer.start(1500, True)
+            except Exception:
+                pass
+        except Exception as e:
+            my_log("showSyncToast error: {}".format(e))
+
+    def _syncToastSlideTick(self):
+        self._sync_toast_frame += 1
+        p = min(1.0, self._sync_toast_frame / 6.0)
+        p_eased = 1.0 - (1.0 - p) ** 3
+        x = int(self._sync_toast_x_from
+                + (self._sync_toast_x_target - self._sync_toast_x_from) * p_eased)
+        try:
+            inst = self["syncToast"].instance
+            if inst:
+                inst.move(ePoint(x, 760))
+        except Exception:
+            pass
+        if p >= 1.0:
+            try: self._sync_toast_slide_timer.stop()
+            except Exception: pass
+
+    def _hideSyncToast(self):
+        try:
+            self["syncToast"].hide()
+        except Exception:
+            pass
+
+    # ── [player-ux] extraction skip hint ────────────────────────────────
+    def _armSkipHint(self):
+        self._skip_hint_shown = False
+        try:
+            self._skip_hint_timer.stop()
+            self._skip_hint_timer.start(self._EXTRACT_HINT_MS, True)
+        except Exception:
+            pass
+
+    def _disarmSkipHint(self):
+        try: self._skip_hint_timer.stop()
+        except Exception: pass
+        self._skip_hint_shown = False
+
+    def _showSkipHint(self):
+        if getattr(self, "_closed", False) or self._play_confirmed:
+            return
+        self._skip_hint_shown = True
+        try:
+            cur = self["status"].getText() or "جاري التشغيل..."
+            self["status"].setText(u"{}   —   MENU = تخطي".format(cur))
+            self.__showOSD(True)
+        except Exception:
+            pass
+
     # ─── OSD ────────────────────────────────────────────────────────────
     def __initOSD(self):
         for w in self._OSD_WIDGETS:
@@ -625,18 +1022,20 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             except: pass
 
     def __hideOSD(self):
-        self._osd_visible = False
-        try: self._osd_update_timer.stop()
-        except: pass
-        for w in self._OSD_WIDGETS:
-            try: self[w].hide()
+        if self._osd_visible:
+            self._osd_visible = False
+            try: self._osd_update_timer.stop()
             except: pass
+            self._startOSDSlide(0.0)
 
     def __showOSD(self, auto_hide=True):
         self._osd_visible = True
+        if self._osd_slide_p <= 0.01:
+            self._osd_slide_p = 0.0
         for w in self._OSD_WIDGETS:
             try: self[w].show()
             except: pass
+        self._startOSDSlide(1.0)
         try:
             self._paintOsdPoster()
         except Exception:
@@ -709,6 +1108,30 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             except Exception:
                 pass
 
+    # ── [player-ux] state glyph ─────────────────────────────────────────
+    def _stateGlyph(self):
+        """▶ playing · ⏸ paused · ⏳ buffering · ⚠ stalled/recovering"""
+        if getattr(self, "_stall_recovering", False):
+            return u"⚠", "#39FF6B6B"
+        if getattr(self, "_paused", False):
+            return u"⏸", "#39FFD740"
+        svc = None
+        try:
+            svc = self.session.nav.getCurrentService()
+        except Exception:
+            svc = None
+        if svc is None:
+            return u"⏳", "#8B949E"
+        try:
+            sk = svc.seek()
+            if sk:
+                r = sk.getPlayPosition()
+                if r and r[0] != 0:
+                    return u"⏳", "#8B949E"
+        except Exception:
+            pass
+        return u"▶", "#39D98A"
+
     def __updateOSD(self):
         if not self._osd_visible:
             try: self._osd_update_timer.stop()
@@ -733,6 +1156,18 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             except Exception:
                 pass
             self["osd_elapsed"].setText("{:02d}:{:02d}:{:02d}".format(he, me, se))
+
+            # [player-ux] state glyph
+            try:
+                glyph, gcolor = self._stateGlyph()
+                self["osd_state"].setText(glyph)
+                if parseColor is not None:
+                    try:
+                        self["osd_state"].instance.setForegroundColor(parseColor(gcolor))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             if self._total_secs > 0 and not self._osd_video_info:
                 try:
@@ -801,6 +1236,18 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 except Exception:
                     pass
                 self["prog_bar"].setText("{:.0f}%".format(pct * 100))
+
+                # [player-ux] watched-at-90%
+                if (not getattr(self, "_watched_at_90_fired", False)
+                        and pct >= 0.90):
+                    self._watched_at_90_fired = True
+                    try:
+                        from plugin_watched import mark_watched
+                        if self._item_url:
+                            mark_watched(self._item_url)
+                            my_log("watched-at-90%: marked {}".format(self._item_url[:60]))
+                    except Exception as e:
+                        my_log("watched-at-90% error: {}".format(e))
             else:
                 self["osd_durtext"].setText("")
                 self["prog_bar"].setText("")
@@ -978,41 +1425,47 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             if "#" in _u:
                 hdr = "#" + _u.split("#", 1)[1]
                 break
-        for t in ("_seek_timer", "_seek_verify_timer", "_retry_timer",
-                  "_force_confirmation_timer", "_stall_timer", "_stall_kick_timer"):
+
+        def _midpoint():
+            for t in ("_seek_timer", "_seek_verify_timer", "_retry_timer",
+                      "_force_confirmation_timer", "_stall_timer", "_stall_kick_timer"):
+                try:
+                    getattr(self, t).stop()
+                except Exception:
+                    pass
+            self._osd_video_info = ""
+            self._paused = False
+            self._play_confirmed = False
+            self._candidate_idx = -1
+            self._exhausted = False
+            self._resume_pos = int(pos)
+            self._quality_prev_url = getattr(self, "_quality_current_url", "")
+            self._quality_prev_label = getattr(self, "_quality_current_label", "")
+            self._quality_prev_candidates = list(self.candidates or [])
+            self._quality_switch_in_flight = True
+            self._quality_pending_pref = str(label or "").strip()
+            self._quality_current_url = url
+            self._quality_current_label = label
+            self._quality_switch_target_url = url
+            self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
+            _cands = _build_remote_play_candidates(url + hdr)
+            self.candidates = _cands[:5] if len(_cands) > 5 else _cands
+            self.candidates = self._reorderCandidatesByPref(self.candidates)
             try:
-                getattr(self, t).stop()
+                self._hideSeekFlash()
+                self.__hideOSD()
             except Exception:
                 pass
-        self._osd_video_info = ""
-        self._paused = False
-        self._play_confirmed = False
-        self._candidate_idx = -1
-        self._exhausted = False
-        self._resume_pos = int(pos)
-        self._quality_prev_url = getattr(self, "_quality_current_url", "")
-        self._quality_prev_label = getattr(self, "_quality_current_label", "")
-        self._quality_prev_candidates = list(self.candidates or [])
-        self._quality_switch_in_flight = True
-        # [B3] stash the picked label — saved only if __onConfirmed fires
-        self._quality_pending_pref = str(label or "").strip()
-        self._quality_current_url = url
-        self._quality_current_label = label
-        self._quality_switch_target_url = url
-        self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
-        _cands = _build_remote_play_candidates(url + hdr)
-        self.candidates = _cands[:5] if len(_cands) > 5 else _cands
-        self.candidates = self._reorderCandidatesByPref(self.candidates)
+            self.__playNext()
+
         try:
             self["status"].setText(u"🎛 تبديل الجودة: {}".format(label))
-            self.__showOSD(True)
         except Exception:
             pass
-        self.__playNext()
+        self._startQualityWipe(_midpoint)
 
     def _onQualityRetry(self, ans):
         self._quality_switch_in_flight = False
-        # [B3] the switch failed → the pending pref is stale, drop it
         self._quality_pending_pref = ""
         prev_cands = getattr(self, "_quality_prev_candidates", [])
         if ans and prev_cands:
@@ -1172,9 +1625,23 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if self._candidate_idx >= len(self.candidates):
             if not getattr(self, "_exhausted", False):
                 self._exhausted = True
+                self._disarmSkipHint()
                 self["status"].setText("تعذر تشغيل الرابط على كل المحاولات")
-                def _fail_callback(*args):
-                    self.__onExit(clear_position=False)
+                def _fail_callback(ans):
+                    if ans:
+                        self._exhausted = False
+                        self._candidate_idx = -1
+                        self._play_confirmed = False
+                        self._stall_last_pts = -1
+                        self._stall_count = 0
+                        self._stall_fail_count = 0
+                        first = (self.candidates[0][1] if self.candidates else "")
+                        if first:
+                            self.candidates = _build_remote_play_candidates(first)
+                            self.candidates = self._reorderCandidatesByPref(self.candidates)
+                        self.__playNext()
+                    else:
+                        self.__onExit(clear_position=False)
                 if getattr(self, "_quality_switch_in_flight", False):
                     self._quality_switch_in_flight = False
                     _tgt = getattr(self, "_quality_switch_target_url", "")
@@ -1186,7 +1653,10 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                         u"الجودة الجديدة غير متاحة (انتهت صلاحية الرابط)\nالرجوع للجودة السابقة؟",
                         MessageBox.TYPE_YESNO, timeout=10, default=True)
                 else:
-                    self.session.openWithCallback(_fail_callback, MessageBox, "تعذر تشغيل الرابط على كل المحاولات", MessageBox.TYPE_ERROR, timeout=5)
+                    self.session.openWithCallback(
+                        _fail_callback, MessageBox,
+                        u"تعذر تشغيل الرابط على كل المحاولات\n\nحاول مرة أخرى؟",
+                        MessageBox.TYPE_YESNO, timeout=8, default=True)
             self._is_advancing = False
             return
 
@@ -1214,6 +1684,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self.session.nav.playService(self.sref)
             self._retry_timer.start(12000, True)
             self._force_confirmation_timer.start(3000, True)
+            self._armSkipHint()
         except Exception as e:
             my_log("SimplePlayer fallback error: {}".format(e))
             self._is_advancing = False
@@ -1228,6 +1699,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._retry_timer.stop()
             self._force_confirmation_timer.stop()
         except: pass
+        self._disarmSkipHint()
         my_log("Play confirmed: {}".format(self._candidate_label))
         try:
             _pk = _candidate_pref_key(self._item_url)
@@ -1236,14 +1708,9 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 _set_config(_pk, self._candidate_label)
         except Exception:
             pass
-        # [B3] if this play followed a user-picked quality switch, save
-        # the label as the per-title preference so the next episode's
-        # detail screen auto-selects the matching variant.
         if getattr(self, "_quality_pending_pref", ""):
             try:
                 _qk = _quality_pref_key(getattr(self, "_raw_title", "") or self.title)
-                # [PATCH 97] "Quality N" labels are positional (numbered by order among the
-                # unlabeled URLs) - stored, they would match a DIFFERENT variant next episode
                 if _qk and not str(self._quality_pending_pref).lower().startswith("quality "):
                     _set_config(_qk, self._quality_pending_pref)
                     my_log("quality pref saved: {} = {}".format(_qk, self._quality_pending_pref))
@@ -1269,7 +1736,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         except Exception:
             pass
         try:
-            if not has_subtitle_for(self._item_url):          # [PATCH 88]
+            if not has_subtitle_for(self._item_url):
                 self.__startAutoSubtitle()
         except Exception:
             pass
@@ -1279,6 +1746,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self["osd_title"].setText(self.title)
         self["status"].setText(u"▶ Playing")
         self._total_secs = 0
+        self._watched_at_90_fired = False
         self.__showOSD(True)
 
     def __onFailed(self):
@@ -1329,8 +1797,6 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
 
     # ─── auto-next card ──────────────────────────────────────────────────
     def _showAutoNextCard(self, nxt):
-        # [A3] delay is read dynamically so a settings change takes
-        # effect on the very next episode without restarting Enigma2.
         _delay = self._nextDelaySecs()
         self._autonext_nxt = nxt
         self._autonext_secs = _delay
@@ -1371,6 +1837,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self["autoNextProgress"].setValue(_delay)
         except Exception:
             pass
+        self._autonext_slide_p = 0.0
+        for w in self._AUTONEXT_WIDGETS:
+            try:
+                inst = self[w].instance
+                if inst:
+                    dx = self._AUTONEXT_DESIGN_X.get(w, 1110)
+                    inst.move(ePoint(dx + self._AUTONEXT_SLIDE_OFFSET,
+                                     inst.position().y()))
+            except Exception:
+                pass
         for w in self._AUTONEXT_WIDGETS:
             try: self[w].show()
             except Exception: pass
@@ -1380,15 +1856,14 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         try: self._autonext_timer.stop()
         except Exception: pass
         self._autonext_timer.start(1000, False)
+        self._startAutoNextSlide(1.0)
 
     def _hideAutoNextCard(self):
         self._autonext_active = False
         self._autonext_poster_polls = 0
         try: self._autonext_timer.stop()
         except Exception: pass
-        for w in self._AUTONEXT_WIDGETS:
-            try: self[w].hide()
-            except Exception: pass
+        self._startAutoNextSlide(0.0)
 
     def __autonextTick(self):
         if not getattr(self, "_autonext_active", False):
@@ -1413,6 +1888,19 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         try:
             self["autoNextText"].setText("التشغيل تلقائياً بعد %d ثوانٍ" % self._autonext_secs)
             self["autoNextProgress"].setValue(self._autonext_secs)
+            if self._autonext_secs <= 3:
+                _c = "#39FF6B6B" if (self._autonext_secs % 2) else "#39E8E8E8"
+                try:
+                    if parseColor is not None:
+                        self["autoNextText"].instance.setForegroundColor(parseColor(_c))
+                except Exception:
+                    pass
+            else:
+                try:
+                    if parseColor is not None:
+                        self["autoNextText"].instance.setForegroundColor(parseColor("#39E8E8E8"))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1445,7 +1933,57 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._hideAutoNextCard()
             self.__onExit(clear_position=True)
             return
+        # [player-ux] near-end exit prompt
+        total = self._total_secs
+        try:
+            elapsed = (self._paused_elapsed if self._paused
+                       else current_play_secs())
+        except Exception:
+            elapsed = 0
+        near_end = (total > 0 and elapsed > 0
+                    and float(elapsed) / float(total) >= 0.90)
+
+        if near_end or (self._next_episode and self._next_prompt_enabled
+                        and total > 0 and elapsed > 0
+                        and float(elapsed) / float(total) >= 0.80):
+            items = []
+            if self._next_episode:
+                items.append((u"▶ الحلقة التالية — Next episode", "next"))
+            items.append((u"✓ وضع علامة مشاهدة وإنهاء", "mark"))
+            items.append((u"↵ حفظ الموقع والخروج", "save"))
+            items.append((u"✕ إلغاء", "cancel"))
+            self.session.openWithCallback(
+                self._onExitChoice, ChoiceBox,
+                title=u"قرب النهاية — ماذا تريد؟",
+                list=items)
+            return
         self.__onExit()
+
+    def _onExitChoice(self, choice):
+        if not choice:
+            return
+        action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
+        if action == "next":
+            try:
+                from plugin_watched import mark_watched
+                if self._item_url:
+                    mark_watched(self._item_url)
+            except Exception:
+                pass
+            self._hideAutoNextCard()
+            self.__nextAnswer(True, self._next_episode)
+        elif action == "mark":
+            try:
+                from plugin_watched import mark_watched
+                if self._item_url:
+                    mark_watched(self._item_url)
+            except Exception:
+                pass
+            self.__onExit(clear_position=True)
+        elif action == "save":
+            self.__onExit(clear_position=False)
+        elif action == "cancel":
+            return
 
     def __studioDedup(self, direction):
         try:
@@ -1469,13 +2007,30 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             return
         self._studioAdjust(direction)
 
+    # ── [player-ux] hold-to-accelerate seek ────────────────────────────
+    def _stepForHold(self, direction):
+        now = time.time()
+        if direction != getattr(self, "_hold_dir", 0) or \
+                (now - getattr(self, "_hold_last_t", 0.0)) > 1.2:
+            self._hold_dir = direction
+            self._hold_count = 1
+        else:
+            self._hold_count = min(self._hold_count + 1, 30)
+        self._hold_last_t = now
+        n = self._hold_count
+        if n <= 1:
+            return 10
+        if n <= 4:
+            return 30
+        return 60
+
     def __navLeftKey(self):
         if self._studioOverlayActive:
             if not self.__studioDedup(-1):
                 self._studioMove(-1)
             return
         if not self.__studioDedup(-1):
-            self.__seek(-10)
+            self.__seek(-self._stepForHold(-1))
 
     def __navRightKey(self):
         if self._studioOverlayActive:
@@ -1483,7 +2038,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 self._studioMove(+1)
             return
         if not self.__studioDedup(+1):
-            self.__seek(+10)
+            self.__seek(+self._stepForHold(+1))
 
     def __navUpKey(self):
         if self._studioOverlayActive:
@@ -1509,7 +2064,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if getattr(self, "_autonext_active", False):
             return
         if not self.__studioDedup(+1):
-            self.__seek(+10)
+            self.__seek(+self._stepForHold(+1))
 
     def __navSeekBackKey(self):
         if getattr(self, "_studioOverlayActive", False):
@@ -1519,7 +2074,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if getattr(self, "_autonext_active", False):
             return
         if not self.__studioDedup(-1):
-            self.__seek(-10)
+            self.__seek(-self._stepForHold(-1))
 
     def __togglePause(self):
         try:
@@ -1586,6 +2141,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             _th = target // 3600; _tm = (target % 3600) // 60; _ts = target % 60
             _arr = u"➡" if delta_secs > 0 else u"⬅"
             self["status"].setText(u"{} {:02d}:{:02d}:{:02d}".format(_arr, _th, _tm, _ts))
+            self._showSeekFlash(1 if delta_secs > 0 else -1, delta_secs, target)
             self.__showOSD(True)
             self._hide_timer.start(2500, True)
         except Exception as e:
@@ -1671,11 +2227,16 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._hideStudioOverlay()
         except Exception:
             pass
+        try:
+            self._disarmSkipHint()
+        except Exception:
+            pass
         stop_pos_tracker()
         try:
             self._restoreSystemAspect()
         except Exception:
             pass
+        _saved_secs = 0
         try:
             if self._item_url:
                 if clear_position:
@@ -1692,9 +2253,21 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                     secs = max(0, secs)
                     if secs > 30:
                         _save_position(self._item_url, secs, force=True)
+                        _saved_secs = int(secs)
                         my_log("Exit save: {}s".format(secs))
         except Exception as e:
             my_log("Exit save error: {}".format(e))
+        if _saved_secs > 30:
+            try:
+                _t = _saved_secs // 3600
+                _m = (_saved_secs % 3600) // 60
+                _s = _saved_secs % 60
+                _label = u"✓ Saved at {:02d}:{:02d}:{:02d}".format(_t, _m, _s) \
+                    if _t else u"✓ Saved at {:02d}:{:02d}".format(_m, _s)
+                self["seekFlash"].setText(_label)
+                self["seekFlash"].show()
+            except Exception:
+                pass
         try:
             self.session.nav.stopService()
         except: pass
@@ -1718,7 +2291,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                   "_osd_update_timer","_force_confirmation_timer","_restart_timer",
                   "_sleep_timer","_autonext_timer",
                   "_studioTimer","_rec_blink_timer",
-                  "_stall_timer","_stall_kick_timer"):
+                  "_stall_timer","_stall_kick_timer",
+                  "_osd_slide_timer","_autonext_slide_timer",
+                  "_seek_flash_timer","_quality_wipe_timer",
+                  "_skip_hint_timer",
+                  "_aspect_anim_timer","_studio_slide_timer",
+                  "_sync_toast_timer"):
             try:
                 timer = getattr(self, t, None)
                 if timer: timer.stop()
@@ -1803,119 +2381,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         except Exception as e:
             my_log("verifySeek error: {}".format(e))
 
-    def _playerMenu(self):
-        rec_on = (getattr(self, "_record_task", None) is not None
-                  and self._record_task.status == "downloading")
-        items = [
-            ("Subtitle — الترجمة", "subs"),
-            ("Audio track — الصوت", "audio"),
-            ("Stream info — معلومات", "info"),
-            ("Next-episode prompt — التالي تلقائياً: %s" % ("ON" if self._next_prompt_enabled else "OFF"), "nxtep"),
-            ("Sleep timer — مؤقت النوم: %s" % self._sleepLabel(), "sleep"),
-            ("%s Record stream — تسجيل البث" % ("● REC" if rec_on else "○"), "record"),
-            ("Stop recording — إيقاف التسجيل", "stoprec"),
-        ]
-        self.session.openWithCallback(self._onPlayerMenuChoice, ChoiceBox, "Player Menu", items)
-
-    def _onPlayerMenuChoice(self, choice):
-        if not choice:
-            return
-        action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
-        if action == "subs":
-            self._onSubtitles()
-        elif action == "audio":
-            self.__audioSelect()
-        elif action == "info":
-            self.__streamInfo()
-        elif action == "nxtep":
-            self._next_prompt_enabled = not self._next_prompt_enabled
-            _set_config("next_episode_prompt", "true" if self._next_prompt_enabled else "false")
-            self["status"].setText("Next-episode: %s" % ("ON" if self._next_prompt_enabled else "OFF"))
-            self.__showOSD(True)
-        elif action == "sleep":
-            self.__sleepMenu()
-        elif action == "record":
-            self.__recordCurrentStream()
-        elif action == "stoprec":
-            self.__stopRecording()
-
-    def _aspectLabel(self):
-        try:
-            idx = getattr(self, "_aspect_idx", 0)
-            n_fake = len(self._ASPECT_MODES)
-            if idx < n_fake:
-                return self._ASPECT_MODES[idx][0]
-            return self._AV_PROBE_MODES[idx - n_fake][0]
-        except Exception:
-            return "Full"
-
-    def __cycleAspect(self):
-        if getattr(self, "_studioOverlayActive", False):
-            return
-        if getattr(self, "_autonext_active", False):
-            return
-        total = len(self._ASPECT_MODES) + len(self._AV_PROBE_MODES)
-        self._aspect_idx = (getattr(self, "_aspect_idx", 0) + 1) % total
-        self._applyAspectMode()
-
-    def _applyAspectMode(self):
-        idx = getattr(self, "_aspect_idx", 0)
-        n_fake = len(self._ASPECT_MODES)
-        if idx < n_fake:
-            self._restoreSystemAspect()
-            label, bar = self._ASPECT_MODES[idx]
-            try:
-                if bar:
-                    self["aspect_bar_l"].instance.resize(eSize(bar, 1080))
-                    self["aspect_bar_l"].instance.move(ePoint(0, 0))
-                    self["aspect_bar_r"].instance.resize(eSize(bar, 1080))
-                    self["aspect_bar_r"].instance.move(ePoint(1920 - bar, 0))
-                    self["aspect_bar_l"].show()
-                    self["aspect_bar_r"].show()
-                else:
-                    self["aspect_bar_l"].hide()
-                    self["aspect_bar_r"].hide()
-            except Exception as e:
-                my_log("aspect error: {}".format(e))
-            self["status"].setText("Aspect: %s" % label)
-        else:
-            try:
-                self["aspect_bar_l"].hide()
-                self["aspect_bar_r"].hide()
-            except Exception:
-                pass
-            plabel, av_value = self._AV_PROBE_MODES[idx - n_fake]
-            ok = self._setSystemAspect(av_value)
-            self["status"].setText("Aspect PROBE: %s → %s" % (
-                plabel, "applied" if ok else "eAVSwitch FAILED"))
-        self.__showOSD(True)
-
-    def _setSystemAspect(self, value):
-        if eAVSwitch is None:
-            return False
-        try:
-            eAVSwitch.getInstance().setAspectRatio(int(value))
-            self._av_aspect_dirty = True
-            my_log("aspect: eAVSwitch.setAspectRatio({})".format(value))
-            return True
-        except Exception as e:
-            my_log("aspect: eAVSwitch error: {}".format(e))
-            return False
-
-    def _restoreSystemAspect(self):
-        if not getattr(self, "_av_aspect_dirty", False):
-            return
-        saved = getattr(self, "_saved_av_aspect", None)
-        if saved is None:
-            return
-        try:
-            if eAVSwitch is not None:
-                eAVSwitch.getInstance().setAspectRatio(int(saved))
-            my_log("aspect: system aspect restored to {}".format(saved))
-        except Exception as e:
-            my_log("aspect: restore error: {}".format(e))
-        self._av_aspect_dirty = False
-
+    # ── [player-ux] labelled audio-track entries ────────────────────────
     def __audioSelect(self):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
             return
@@ -1944,7 +2410,22 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                     name = tracks.getTrackName(i) or ""
                 except Exception:
                     name = ""
-                entries.append(("Track %d: %s%s" % (i + 1, name, " ▶" if i == cur else ""), i))
+                extra = ""
+                for probe in ("getTrackLanguage", "getTrackCodec"):
+                    try:
+                        fn = getattr(tracks, probe, None)
+                        if fn:
+                            v = fn(i)
+                            if v:
+                                extra = (extra + " · " + str(v)).strip(" ·")
+                    except Exception:
+                        pass
+                if extra:
+                    label = u"Track {} — {}{}{}".format(
+                        i + 1, name, (u" · " + extra) if name else u"", u" ▶" if i == cur else u"")
+                else:
+                    label = u"Track {}: {}{}".format(i + 1, name, u" ▶" if i == cur else u"")
+                entries.append((label, i))
             self.session.openWithCallback(self.__audioPicked, ChoiceBox, "Audio", entries)
         except Exception as e:
             my_log("audioSelect error: {}".format(e))
@@ -2032,6 +2513,22 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self["status"].setText("Recording already running")
             self.__showOSD(True)
             return
+        # [player-ux] disk-space guard
+        try:
+            _target = "/media/hdd"
+            if not os.path.exists(_target):
+                _target = "/"
+            st = os.statvfs(_target)
+            free_mb = (st.f_bavail * st.f_frsize) // (1024 * 1024)
+            if free_mb < 500:
+                self.session.open(
+                    MessageBox,
+                    u"مساحة القرص غير كافية للتسجيل\nالمتاح: {} MB (الحد الأدنى 500 MB)".format(free_mb),
+                    MessageBox.TYPE_WARNING, timeout=6)
+                self.__showOSD(True)
+                return
+        except Exception as e:
+            my_log("record disk-space check skipped: {}".format(e))
         url = ""
         referer = ""
         for cand in (self.candidates or []):
@@ -2140,9 +2637,133 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             state = get_subtitle_state()
             off = int(state.get("offset_ms") or 0)
             self["status"].setText("ترجمة: %+d ms" % off)
+            self._showSyncToast("%+d ms" % off)
         except Exception as e:
             my_log("subtitle delay error: {}".format(e))
         self.__showOSD(True)
+
+    def _playerMenu(self):
+        rec_on = (getattr(self, "_record_task", None) is not None
+                  and self._record_task.status == "downloading")
+        items = [
+            ("Subtitle — الترجمة", "subs"),
+            ("Audio track — الصوت", "audio"),
+            ("Stream info — معلومات", "info"),
+            ("Next-episode prompt — التالي تلقائياً: %s" % ("ON" if self._next_prompt_enabled else "OFF"), "nxtep"),
+            ("Sleep timer — مؤقت النوم: %s" % self._sleepLabel(), "sleep"),
+            ("%s Record stream — تسجيل البث" % ("● REC" if rec_on else "○"), "record"),
+            ("Stop recording — إيقاف التسجيل", "stoprec"),
+        ]
+        self.session.openWithCallback(self._onPlayerMenuChoice, ChoiceBox, "Player Menu", items)
+
+    def _onPlayerMenuChoice(self, choice):
+        if not choice:
+            return
+        action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
+        if action == "subs":
+            self._onSubtitles()
+        elif action == "audio":
+            self.__audioSelect()
+        elif action == "info":
+            self.__streamInfo()
+        elif action == "nxtep":
+            self._next_prompt_enabled = not self._next_prompt_enabled
+            _set_config("next_episode_prompt", "true" if self._next_prompt_enabled else "false")
+            self["status"].setText("Next-episode: %s" % ("ON" if self._next_prompt_enabled else "OFF"))
+            self.__showOSD(True)
+        elif action == "sleep":
+            self.__sleepMenu()
+        elif action == "record":
+            self.__recordCurrentStream()
+        elif action == "stoprec":
+            self.__stopRecording()
+
+    def _aspectLabel(self):
+        try:
+            idx = getattr(self, "_aspect_idx", 0)
+            n_fake = len(self._ASPECT_MODES)
+            if idx < n_fake:
+                return self._ASPECT_MODES[idx][0]
+            return self._AV_PROBE_MODES[idx - n_fake][0]
+        except Exception:
+            return "Full"
+
+    def __cycleAspect(self):
+        if getattr(self, "_studioOverlayActive", False):
+            return
+        if getattr(self, "_autonext_active", False):
+            return
+        total = len(self._ASPECT_MODES) + len(self._AV_PROBE_MODES)
+        self._aspect_idx = (getattr(self, "_aspect_idx", 0) + 1) % total
+        self._applyAspectMode()
+
+    def _applyAspectMode(self):
+        idx = getattr(self, "_aspect_idx", 0)
+        n_fake = len(self._ASPECT_MODES)
+        if idx < n_fake:
+            self._restoreSystemAspect()
+            label, bar = self._ASPECT_MODES[idx]
+            # [player-anim] slide the bars from 0 → bar width over 150 ms
+            self._aspect_anim_from = 0
+            self._aspect_anim_to = int(bar)
+            self._aspect_anim_p = 0.0
+            try:
+                self["aspect_bar_l"].show()
+                self["aspect_bar_r"].show()
+                self._aspect_anim_timer.start(20, False)
+            except Exception as e:
+                my_log("aspect slide start failed: {}".format(e))
+                try:
+                    if bar:
+                        self["aspect_bar_l"].instance.resize(eSize(bar, 1080))
+                        self["aspect_bar_l"].instance.move(ePoint(0, 0))
+                        self["aspect_bar_r"].instance.resize(eSize(bar, 1080))
+                        self["aspect_bar_r"].instance.move(ePoint(1920 - bar, 0))
+                        self["aspect_bar_l"].show()
+                        self["aspect_bar_r"].show()
+                    else:
+                        self["aspect_bar_l"].hide()
+                        self["aspect_bar_r"].hide()
+                except Exception:
+                    pass
+            self["status"].setText("Aspect: %s" % label)
+        else:
+            try:
+                self["aspect_bar_l"].hide()
+                self["aspect_bar_r"].hide()
+            except Exception:
+                pass
+            plabel, av_value = self._AV_PROBE_MODES[idx - n_fake]
+            ok = self._setSystemAspect(av_value)
+            self["status"].setText("Aspect PROBE: %s → %s" % (
+                plabel, "applied" if ok else "eAVSwitch FAILED"))
+        self.__showOSD(True)
+
+    def _setSystemAspect(self, value):
+        if eAVSwitch is None:
+            return False
+        try:
+            eAVSwitch.getInstance().setAspectRatio(int(value))
+            self._av_aspect_dirty = True
+            my_log("aspect: eAVSwitch.setAspectRatio({})".format(value))
+            return True
+        except Exception as e:
+            my_log("aspect: eAVSwitch error: {}".format(e))
+            return False
+
+    def _restoreSystemAspect(self):
+        if not getattr(self, "_av_aspect_dirty", False):
+            return
+        saved = getattr(self, "_saved_av_aspect", None)
+        if saved is None:
+            return
+        try:
+            if eAVSwitch is not None:
+                eAVSwitch.getInstance().setAspectRatio(int(saved))
+            my_log("aspect: system aspect restored to {}".format(saved))
+        except Exception as e:
+            my_log("aspect: restore error: {}".format(e))
+        self._av_aspect_dirty = False
 
     def _onSubtitles(self):
         studio_on = str(_get_config("substudio_mode", "false")).lower() == "true"
@@ -2277,6 +2898,14 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
                 self[k].show()
             except Exception:
                 pass
+        # [player-anim] drop the panel down from -320 → design
+        self._studio_slide_p = 0.0
+        self._studio_slide_target = 1.0
+        self._applyStudioSlide()
+        try:
+            self._studio_slide_timer.start(20, False)
+        except Exception:
+            pass
         self._studioRefresh()
 
     def _hideStudioOverlay(self):
@@ -2285,11 +2914,14 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self._studioTimer.start(100, False)
         except Exception:
             pass
-        for k in self._STUDIO_KEYS:
-            try:
-                self[k].hide()
-            except Exception:
-                pass
+        # [player-anim] slide the panel back off the top before hiding
+        self._studio_slide_target = 0.0
+        try:
+            self._studio_slide_timer.start(20, False)
+        except Exception:
+            for k in self._STUDIO_KEYS:
+                try: self[k].hide()
+                except Exception: pass
         try:
             from novaplay_substudio import STUDIO
             STUDIO.flush_style()
@@ -2381,7 +3013,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         STUDIO._last_rendered = None
         if base_path:
             update_subtitle_state(path=base_path, _orig_path=base_path,
-                                  offset_ms=new_off)      # [PATCH 88] st is a COPY
+                                  offset_ms=new_off)
             if st.get("item_url"):
                 try:
                     remember_subtitle(st["item_url"], base_path, new_off)
@@ -2691,4 +3323,4 @@ def _play(session, url, title, resume_pos=0, item_url="",
                          next_episode=next_episode, on_next=on_next,
                          poster_url=poster_url)
     except Exception as e:
-        my_log("[PLAY_ERROR] " + str(e))
+        my_log("[PLAY_ERROR] " + str(e))                                

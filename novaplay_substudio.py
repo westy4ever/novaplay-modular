@@ -19,10 +19,16 @@ Architecture:
 
 Arabic: rendered through the same eLabel path the whole UI already uses
 (Arabic labels work on this image — verified by every screen in it).
+
+[cue-rise] New cue text enters 8 px below its final slot and rises into
+place over ~100 ms, using the same exponential smoothing the OSD slide
+and home zone-slide use. Gives every cue change a sense of motion
+without needing per-frame alpha blending, which Enigma2 doesn't expose.
 """
 
 import os
 import re
+import time
 import bisect
 import json
 import logging
@@ -102,7 +108,7 @@ def parse_srt(path):
     except Exception as e:
         logger.warning(f"Failed to read subtitle file: {e}")
         return []
-    
+
     text = None
     for enc in ("utf-8-sig", "utf-8", "cp1256", "latin-1"):
         try:
@@ -110,14 +116,14 @@ def parse_srt(path):
             break
         except Exception:
             text = None
-    
+
     if text is None:
         logger.warning(f"Could not decode subtitle file: {path}")
         return []
-    
+
     # Normalize line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    
+
     cues = []
     for block in re.split(r"\n[ \t]*\n", text):
         lines = block.split("\n")
@@ -126,18 +132,18 @@ def parse_srt(path):
             i += 1
         if i >= len(lines):
             continue
-        
+
         m = _CUE_RE.search(lines[i])
         if not m:
             continue
-        
+
         try:
             start = _ts_ms(*m.groups()[:4])
             end = _ts_ms(*m.groups()[4:])
         except (ValueError, TypeError) as e:
             logger.warning(f"Skipping malformed timestamp: {e}")
             continue
-        
+
         # v3: positioning tags (X1:/X2:/Y1:/Y2:) may sit on the timing
         # line or the line right after it
         pos_line = lines[i]
@@ -161,10 +167,10 @@ def parse_srt(path):
                 body.append(l)
         if body and end > start:
             cues.append((start, end, body, pos, italic))
-    
+
     # Sort by start time
     cues.sort(key=lambda c: c[0])
-    
+
     # Remove duplicates (keep earliest)
     seen = set()
     unique_cues = []
@@ -173,7 +179,7 @@ def parse_srt(path):
         if key not in seen:
             seen.add(key)
             unique_cues.append(cue)
-    
+
     return unique_cues[:_MAX_CUES]
 
 
@@ -184,7 +190,7 @@ def _estimate_width(text, font_size):
     """
     text = str(text or "")
     total = 0.0
-    
+
     for ch in text:
         o = ord(ch)
         if ch.isspace():
@@ -196,21 +202,25 @@ def _estimate_width(text, font_size):
             total += font_size * 0.38
         else:
             total += font_size * 0.62
-    
+
     return int(total)
 
 
 class SubtitleStudio(object):
     """Main subtitle rendering engine."""
-    
+
     LINE_AREA_X = 210          # matches the skin's subLine geometry
     LINE_AREA_W = 1500
     DEFAULT_LINE_HEIGHT = 60
     BG_PADDING = 45
     MIN_BG_WIDTH = 160
     FALLBACK_LINE_HEIGHT = 60
-    _SHADOW_KEYS = tuple("subShadow%d_%d" % (li, di) 
+    _SHADOW_KEYS = tuple("subShadow%d_%d" % (li, di)
                           for li in range(2) for di in range(8))
+
+    # [cue-rise] new-cue animation: enter 8 px below and rise over ~100 ms
+    _RISE_PX = 8
+    _RISE_MS = 100
 
     def __init__(self):
         self._screen = None
@@ -224,7 +234,11 @@ class SubtitleStudio(object):
         self._preview_body = None
         self._font_state = None
         self._shadow_logged = False
-        
+
+        # [cue-rise] current rise offset in px (decreases to 0)
+        self._rise_y = 0
+        self._rise_started = 0.0
+
         self.style = {
             "size": 38,
             "color_idx": 0,
@@ -249,7 +263,7 @@ class SubtitleStudio(object):
                 self.register_font(self.style["font_path"])
         except Exception:
             pass
-        
+
         # Log native shadow status once
         logger.info(f"SubtitleStudio: native shadow = {_NATIVE_SHADOW}, font metrics = {_FONT_METRICS}")
 
@@ -294,41 +308,41 @@ class SubtitleStudio(object):
         try:
             size = _get_config("substudio_size", 38)
             self.style["size"] = int(size) if size and str(size).isdigit() else 38
-            
+
             color = _get_config("substudio_color", 0)
             self.style["color_idx"] = int(color) if color and str(color).isdigit() else 0
             self.style["color_idx"] %= len(_COLORS)
-            
+
             bg_val = _get_config("substudio_bg", "true")
             self.style["bg"] = str(bg_val).lower() in ("true", "1", "yes", "on")
-            
+
             alpha = _get_config("substudio_alpha", 128)
             self.style["bg_alpha"] = int(alpha) if alpha and str(alpha).isdigit() else 128
             self.style["bg_alpha"] = max(0, min(255, self.style["bg_alpha"]))
-            
+
             offy = _get_config("substudio_offy", 0)
             self.style["offset_y"] = int(offy) if offy and str(offy).lstrip('-').isdigit() else 0
-            
+
             spacing = _get_config("substudio_spacing", 28)
             self.style["spacing"] = int(spacing) if spacing and str(spacing).isdigit() else 28
-            
+
             font_name = _get_config("substudio_fontname", "Regular")
             self.style["font_name"] = str(font_name) if font_name else "Regular"
-            
+
             font_path = _get_config("substudio_fontpath", "")
             self.style["font_path"] = str(font_path) if font_path else ""
-            
+
             outline = _get_config("substudio_outline", "true")
             self.style["outline"] = str(outline).lower() in ("true", "1", "yes", "on")
-            
+
             outline_color = _get_config("substudio_outlinecolor", 0)
             self.style["outline_color_idx"] = int(outline_color) if outline_color and str(outline_color).isdigit() else 0
             self.style["outline_color_idx"] %= len(_COLORS)
-            
+
             align = _get_config("substudio_align", 1)
             self.style["align"] = int(align) if align and str(align).isdigit() else 1
             self.style["align"] %= 3
-            
+
             self.style["auto_wrap"] = str(_get_config("substudio_autowrap", "true")).lower() == "true"
             self.style["use_cue_pos"] = str(_get_config("substudio_cuepos", "true")).lower() == "true"
         except Exception as e:
@@ -420,6 +434,8 @@ class SubtitleStudio(object):
         self._preview_body = None
         self._current_cue_index = -1
         self._font_state = None
+        self._rise_y = 0
+        self._rise_started = 0.0
 
     _registered_fonts = set()
 
@@ -481,18 +497,19 @@ class SubtitleStudio(object):
         if not path.lower().endswith(".srt"):
             logger.debug(f"Not an SRT file: {path}")
             return False
-        
+
         cues = parse_srt(path)
         if not cues:
             logger.warning(f"No valid cues found in: {path}")
             return False
-        
+
         self._cues = cues
         self._starts = [c[0] for c in cues]
         self._path = path
         self._last_rendered = None
         self._preview_body = None
         self._current_cue_index = -1
+        self._rise_y = 0
         logger.info(f"Attached {len(cues)} cues from: {path}")
         return True
 
@@ -524,6 +541,7 @@ class SubtitleStudio(object):
         self._last_rendered = None
         self._preview_body = None
         self._current_cue_index = -1
+        self._rise_y = 0
         self._hide_lines()
         logger.debug("Subtitle detached")
 
@@ -638,7 +656,7 @@ class SubtitleStudio(object):
         scr = self._screen
         if scr is None or gFont is None:
             return
-        
+
         try:
             self._apply_font_all(None)
             logger.debug("Static layout applied")
@@ -695,6 +713,11 @@ class SubtitleStudio(object):
                     x = int(max(0, min(1920 - self.LINE_AREA_W, cx - self.LINE_AREA_W / 2.0)))
             except Exception:
                 pass
+        # [cue-rise] apply the current rise offset to BOTH lines so they
+        # arrive together; the offset is animating toward 0 on each
+        # subsequent update() call.
+        if self._rise_y:
+            y1 += self._rise_y
         y2 = y1 + line_h + gap
         # Font pass — ONLY when the font state actually changed.
         want = "Italic" if italic else None
@@ -766,9 +789,10 @@ class SubtitleStudio(object):
             if self._last_rendered is not None:
                 self._last_rendered = None
                 self._preview_body = None
+                self._rise_y = 0
                 self._hide_lines()
             return
-        
+
         p = pos_ms - self._offset_ms     # [PATCH 67] +offset = subtitles LATER, same as _shift_srt_text
         idx = bisect.bisect_right(self._starts, p) - 1
         active = None
@@ -781,21 +805,38 @@ class SubtitleStudio(object):
             if e < p - 8000:
                 break
             j -= 1
-        
+
         self._preview_body = active[2] if active else None
         key = None
         if active:
             key = (active[0], active[1], tuple(active[2]),
                    tuple(sorted((active[3] or {}).items())), bool(active[4]))
-        
+
+        now = time.time()
+
+        # [cue-rise] advance the current rise animation. If we're still
+        # rising, re-render in place (no cue change) so the label tracks
+        # the new Y on every tick, not just on cue changes.
+        if self._rise_y > 0 and active:
+            elapsed = (now - self._rise_started) * 1000.0
+            p_rise = min(1.0, elapsed / float(self._RISE_MS))
+            new_y = int((1.0 - p_rise) * self._RISE_PX)
+            if new_y != self._rise_y:
+                self._rise_y = new_y
+                self._render_cue(active[2], active[3], active[4])
+
         if key != self._last_rendered:
             self._last_rendered = key
             if active:
+                # [cue-rise] arm the rise animation on every new cue
+                self._rise_y = self._RISE_PX
+                self._rise_started = now
                 self._render_cue(active[2], active[3], active[4])
                 self._current_cue_index = idx if active else -1
             else:
                 self._hide_lines()
                 self._current_cue_index = -1
+                self._rise_y = 0
 
     def get_preview(self):
         """Current cue body for the overlay's live preview strip —
@@ -824,6 +865,7 @@ class SubtitleStudio(object):
         if 0 <= index < len(self._cues):
             cue = self._cues[index]
             self._last_rendered = None  # Force update
+            self._rise_y = 0            # no rise on an explicit jump
             self._render_cue(cue[2], cue[3], cue[4])
             self._current_cue_index = index
             return True

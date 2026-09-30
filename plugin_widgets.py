@@ -17,18 +17,26 @@ from plugin_gridlist import _has_arabic
 class StreamList(GUIComponent):
     GUI_WIDGET = eListbox
 
+    # Row height used by every setList / getRowY call. Kept as a class
+    # constant so the detail screen's accent bar can compute row positions
+    # without a magic number.
+    ROW_H = 95
+
     def __init__(self):
         GUIComponent.__init__(self)
         self.l = eListboxPythonMultiContent()
         self.l.setFont(0, gFont("Regular", 26))
         self.l.setFont(1, gFont("Regular", 22))
         self.l.setFont(2, gFont("Regular", 20))
-        self.l.setItemHeight(95)   # [PATCH 19] content is 75px tall; 95 = tight + 20px air
+        self.l.setItemHeight(self.ROW_H)   # [PATCH 19] content is 75px tall; 95 = tight + 20px air
         self.onSelectionChanged = []
 
     def selectionChanged(self):
         for cb in self.onSelectionChanged:
-            cb()
+            try:
+                cb()
+            except Exception:
+                pass
 
     def getCurrent(self):
         cur = self.l.getCurrentSelection()
@@ -39,6 +47,18 @@ class StreamList(GUIComponent):
         if idx < 0:
             idx = 0
         return idx
+
+    # [detail-accent] Y of a row relative to the listbox top. Returns None
+    # when the row index is invalid. The detail screen uses this to place
+    # its gold accent bar alongside the selected server row.
+    def getRowY(self, row_idx):
+        try:
+            row_idx = int(row_idx)
+        except Exception:
+            return None
+        if row_idx < 0:
+            return None
+        return row_idx * self.ROW_H
 
     def setList(self, items):
         res = []
@@ -99,7 +119,7 @@ class StreamList(GUIComponent):
 
     def postWidgetCreate(self, instance):
         instance.setContent(self.l)
-        instance.setItemHeight(95)
+        instance.setItemHeight(self.ROW_H)
         try: instance.setSelectionEnable(True)
         except: pass
 
