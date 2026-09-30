@@ -161,8 +161,10 @@ class ImdbSuExtractor(BaseExtractor):
             season_num = parts[4]
             ep_num = parts[5]
 
+            show_data = self._tmdb_request("/tv/{}".format(tmdb_id))
+            imdb_id = show_data.get("imdb_id") or tmdb_id
             servers = [
-                {"name": "IMDB.su", "url": "https://imdb.su/embed/tv/{}/{}/{}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
+                {"name": "IMDB.su", "url": "https://imdb.su/embed/tv/{}/{}/{}".format(imdb_id, season_num, ep_num), "quality": "HD"},
             ]
 
             ep_data = self._tmdb_request("/tv/{}/season/{}/episode/{}".format(tmdb_id, season_num, ep_num))
@@ -177,11 +179,11 @@ class ImdbSuExtractor(BaseExtractor):
 
         elif url.startswith("imdb_su_movie_"):
             tmdb_id = url.replace("imdb_su_movie_", "")
-            servers = [
-                {"name": "IMDB.su", "url": "https://imdb.su/embed/movie/{}".format(tmdb_id), "quality": "HD"},
-            ]
-
             movie_data = self._tmdb_request("/movie/{}".format(tmdb_id))
+            imdb_id = movie_data.get("imdb_id") or tmdb_id
+            servers = [
+                {"name": "IMDB.su", "url": "https://imdb.su/embed/movie/{}".format(imdb_id), "quality": "HD"},
+            ]
             return {
                 "title": movie_data.get("title") or movie_data.get("name") or "Movie",
                 "plot": movie_data.get("overview", ""),

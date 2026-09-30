@@ -28,6 +28,42 @@ Changes in this revision:
 Keep _SEARCH_SITE_ORDER and _HOME_SITE_ORDER deliberately separate
 (the two lists already disagree; reordering search priority shouldn't
 reshuffle the home grid, and vice versa).
+
+NEW (mycima):
+  * Added MyCimaExtractor — the Cimawbas / سيما وبس source
+    (vid.mycima.cc). PHP Melody engine, same family as MyWecima.
+  * Pinned into BOTH _HOME_SITE_ORDER (right after mywecima, so it sits
+    with its sibling on the grid rather than being appended to the tail)
+    and _SEARCH_SITE_ORDER (so "search all" fans out to it). Distinct
+    content pool from mywecima, so no duplication concern.
+
+NEW (cimawebas):
+  * Added CimaWebasExtractor — cimawebas.com (سـيمـا وبس), a
+    WordPress 7.x site running the NovaCinemaPlus theme. Different
+    engine (WordPress + ncp-* markup) and different content pool than
+    the existing "mycima" extractor (PHP Melody, vid.mycima.cc), so
+    unlike "mycima" it IS opted into both orders below: no duplication
+    concern, and search-all should fan out to it.
+
+NEW (cwb):
+  * Added CimaWbasCwbExtractor — cwb.cam (CimaWbas / سيما وبس), a
+    PHP Melody site running the MitaTag template. This is a THIRD,
+    entirely separate site in the same brand family:
+        vid.mycima.cc   →  MyCimaExtractor      (PHP Melody, 3arbserv)
+        cimawebas.com   →  CimaWebasExtractor   (WordPress, NovaCinemaPlus)
+        cwb.cam         →  CimaWbasCwbExtractor (PHP Melody, MitaTag)
+    Different domain, different template, different slug scheme
+    (Arabic-transliterated `aflam-*` / `mslslat-*`), different URL
+    shapes (`view.php?vid=` alias for `watch.php?vid=`; series live at
+    `moslslat-view.php?name=`). No content overlap that matters, so it
+    is opted into both _HOME_SITE_ORDER and _SEARCH_SITE_ORDER.
+
+⚠️  There are now THREE extractors whose names contain "cima"/"cwb":
+        mycima       →  vid.mycima.cc
+        cimawebas    →  cimawebas.com
+        cwb          →  cwb.cam
+    The registry keys, class names, and target domains are all
+    distinct — see the table above. Do not confuse them.
 """
 
 import threading
@@ -53,6 +89,9 @@ from .torrentio import TorrentioExtractor
 from .vidsrc import VidsrcExtractor
 from .imdbsu import ImdbSuExtractor
 from .mywecima import MyWecimaExtractor
+from .mycima import MyCimaExtractor
+from .cimawebas import CimaWebasExtractor
+from .cimawbas_cwb import CimaWbasCwbExtractor
 from .alooytv import AlooyTvExtractor
 from .aflaam import AflaamExtractor
 from .onlyflix import OnlyFlixExtractor
@@ -80,27 +119,37 @@ _SITE_REGISTRY = {
     "vidsrc":          {"class": VidsrcExtractor, "title": "Vidsrc", "tagline": "Movies & TV Shows in HD", "short": "أفلام ومسلسلات أجنبية بجودة عالية"},
     "imdb_su":         {"class": ImdbSuExtractor, "title": "IMDB.su", "tagline": "أفلام ومسلسلات شاهد مباشر"},
     "mywecima":        {"class": MyWecimaExtractor, "title": "MyWecima", "tagline": "ماي سيما — أفلام ومسلسلات مترجمة بجودة عالية", "short": "أفلام ومسلسلات مترجمة"},
+    "mycima":          {"class": MyCimaExtractor, "title": "MyCima", "tagline": "سيما وبس — أفلام ومسلسلات مترجمة", "short": "سيما وبس — أفلام ومسلسلات"},
+    "cimawebas":       {"class": CimaWebasExtractor, "title": "CimaWebas", "tagline": "سيما وبس — أفلام ومسلسلات وأنمي بجودة عالية", "short": "سيما وبس — أفلام ومسلسلات"},
+    "cwb":             {"class": CimaWbasCwbExtractor, "title": "CimaWbas (cwb)", "tagline": "سيما وبس cwb.cam — أفلام ومسلسلات بجودة عالية", "short": "سيما وبس cwb — أفلام ومسلسلات"},
     "alooytv":         {"class": AlooyTvExtractor, "title": "AlooyTV", "tagline": "الوي تي في - أفلام ومسلسلات مترجمة", "short": "الوي تي في - أفلام ومسلسلات"},
     "aflaam":          {"class": AflaamExtractor, "title": "Aflaam", "tagline": "افلام — مشاهدة وتحميل الأفلام والمسلسلات", "short": "افلام — أفلام ومسلسلات"},
     "onlyflix":        {"class": OnlyFlixExtractor, "title": "OnlyFlix", "tagline": "OnlyFlix — أفلام ومسلسلات أجنبية بجودة عالية", "short": "أفلام ومسلسلات أجنبية"},
 }
 
 # Aggregated-search priority.
+# "mycima", "cimawebas", and "cwb" are all listed here — each is a
+# distinct site with a distinct content pool (different engine, different
+# domain, different catalogue), so search-all should fan out to all three.
 _SEARCH_SITE_ORDER = (
     "egydead", "egydead_coupons", "egybest", "akwam", "akwams", "arabseed",
     "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx",
-    "shaheed", "shahid4u", "arablionz", "mywecima", "alooytv", "aflaam",
-    "onlyflix",
+    "shaheed", "shahid4u", "arablionz", "mywecima", "mycima",
+    "cimawebas", "cwb",
+    "alooytv", "aflaam", "onlyflix",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
 
-# Home-grid tile order — matches plugin.py's current home list EXACTLY,
-# and deliberately separate from _SEARCH_SITE_ORDER (see module docstring).
+# Home-grid tile order — deliberately separate from _SEARCH_SITE_ORDER
+# (see module docstring). The three cima-family sites (mywecima, mycima,
+# cimawebas, cwb) are pinned together so they appear as a sibling cluster
+# on the grid rather than being appended to the tail.
 _HOME_SITE_ORDER = (
     "egydead", "egydead_coupons", "egybest", "akwam", "akwams", "arabseed",
     "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
-    "fasel", "faselhdx", "arablionz", "mywecima", "alooytv", "aflaam",
-    "onlyflix",
+    "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
+    "cimawebas", "cwb",
+    "alooytv", "aflaam", "onlyflix",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
 
@@ -117,11 +166,9 @@ def get_extractor(site_name):
     """Return the singleton extractor instance for a site key.
 
     Per-class singletons keep instance-level caches (TopCinema's
-    _resolved_base, EgyDead's mirror-probe TTL, akwam's base...) alive
-    across screen transitions. The old per-call `entry["class"]()`
-    discarded them on EVERY call — TopCinema re-probed its domains
-    (~2.3s) on each of categories/detail/server-resolution: 10 probes
-    in one six-minute session."""
+    _resolved_base, EgyDead's mirror-probe TTL, akwam's base, Cwb's
+    base-cache TTL...) alive across screen transitions. The old per-call
+    `entry["class"]()` discarded them on EVERY call."""
     entry = _SITE_REGISTRY.get(site_name)
     if not entry or not isinstance(entry, dict) or "class" not in entry:
         try:

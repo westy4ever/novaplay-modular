@@ -926,6 +926,44 @@ def resolve_masukestin(url):
         return None
 
 
+def resolve_fastvip(url, referer=None):
+    try:
+        import base64
+        from urllib.parse import unquote
+        m = re.search(r"mycimafsd=([A-Za-z0-9%_\-]+)", url)
+        if m:
+            b64 = unquote(m.group(1))
+            decoded = base64.b64decode(b64 + "=" * (-len(b64) % 4)).decode("utf-8")
+            if decoded.startswith("http"):
+                url = decoded
+        
+        req_referer = "https://fastvip.space/"
+        html, _ = fetch(url, referer=req_referer)
+        if not html: return None
+        
+        texts = [html] + _unpack_all(html)
+        for txt in texts:
+            stream = find_m3u8(txt) or find_mp4(txt)
+            if stream:
+                stream = _correct_stream_url(stream)
+                
+                # If it's an HLS master playlist, fetch and parse it for real variants!
+                if ".m3u8" in stream:
+                    try:
+                        body, _ = fetch(stream, referer=req_referer)
+                        if body and "#EXT-X-STREAM-INF" in body:
+                            variants = _parse_hls_master_variants(stream, body)
+                            if variants:
+                                _quality_tls.variants = [u for _, u in variants]
+                                log("resolve_fastvip: expanded master playlist into {} variant(s)".format(len(variants)))
+                                return variants[0][1] + "|Referer=" + req_referer
+                    except Exception:
+                        pass
+                
+                return stream + "|Referer=" + req_referer
+    except Exception: pass
+    return None
+
 def resolve_streamwish(url):
     try:
         html, _ = fetch(url, referer=url)
@@ -2475,6 +2513,8 @@ HOST_RESOLVERS = {
     "masukestin":  resolve_masukestin,
     "masukestin.com": resolve_masukestin,
     "vidtube":     resolve_vidtube,
+    "fastvip.space":       resolve_fastvip,
+    "akhbarworld.online":  resolve_fastvip,
     "streamwish":  resolve_streamwish,
     "wishfast":    resolve_streamwish,
     "filelion":    resolve_streamwish,
