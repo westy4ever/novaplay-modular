@@ -405,7 +405,7 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
     _QUALITY_WIPE_FRAMES = 10
 
     def __init__(self, session, title, candidates, previous_service=None, resume_pos=0, item_url="",
-                 next_episode=None, on_next=None, poster_url="", quality_variants=None):
+                 next_episode=None, on_next=None, poster_url="", quality_variants=None, server_url=""):
         Screen.__init__(self, session)
         self["overlay_bg"]   = Label("")
         self["status"]       = Label("جاري التشغيل...")
@@ -486,6 +486,10 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         self._restored_previous = False
         self._resume_pos = int(resume_pos or 0)
         self._item_url  = item_url or ""
+        # [server-rank] host of the ORIGINAL server/embed link this stream
+        # came from -- credited/blamed once playback is actually confirmed
+        # or exhausted, not merely extracted.
+        self._server_url = server_url or ""
         try:
             self.candidates = self._reorderCandidatesByPref(self.candidates)
         except Exception:
@@ -1625,6 +1629,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if self._candidate_idx >= len(self.candidates):
             if not getattr(self, "_exhausted", False):
                 self._exhausted = True
+                try:
+                    from plugin_server_rank import record_host_result, record_title_failed
+                    record_host_result(self._server_url, False)
+                    record_title_failed(self._item_url, self._server_url)
+                except Exception as e:
+                    my_log("server-rank record (exhausted) failed (non-fatal): {}".format(e))
                 self._disarmSkipHint()
                 self["status"].setText("تعذر تشغيل الرابط على كل المحاولات")
                 def _fail_callback(ans):
@@ -1701,6 +1711,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         except: pass
         self._disarmSkipHint()
         my_log("Play confirmed: {}".format(self._candidate_label))
+        try:
+            from plugin_server_rank import record_host_result, record_title_working
+            record_host_result(self._server_url, True)
+            record_title_working(self._item_url, self._server_url)
+        except Exception as e:
+            my_log("server-rank record (confirmed) failed (non-fatal): {}".format(e))
         try:
             _pk = _candidate_pref_key(self._item_url)
             if _pk and self._candidate_label and \
@@ -3290,7 +3306,7 @@ def _candidate_pref_key(item_url):
 
 def _play(session, url, title, resume_pos=0, item_url="",
           next_episode=None, on_next=None, poster_url="",
-          quality_variants=None):
+          quality_variants=None, server_url=""):
     try:
         svc_url = str(url).strip()
         is_remote = svc_url.startswith("http://") or svc_url.startswith("https://")
@@ -3301,7 +3317,8 @@ def _play(session, url, title, resume_pos=0, item_url="",
                          resume_pos=resume_pos, item_url=item_url,
                          next_episode=next_episode, on_next=on_next,
                          poster_url=poster_url,
-                         quality_variants=quality_variants)
+                         quality_variants=quality_variants,
+                         server_url=server_url)
             return
         sref = eServiceReference(4097, 0, svc_url)
         if sys.version_info[0] == 3:
@@ -3321,6 +3338,7 @@ def _play(session, url, title, resume_pos=0, item_url="",
                          _build_remote_play_candidates(svc_url), previous_service,
                          resume_pos=resume_pos, item_url=item_url,
                          next_episode=next_episode, on_next=on_next,
-                         poster_url=poster_url)
+                         poster_url=poster_url,
+                         server_url=server_url)
     except Exception as e:
         my_log("[PLAY_ERROR] " + str(e))                                

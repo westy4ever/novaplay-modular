@@ -239,8 +239,74 @@ def _quality_rank(server_name):
     return 9
 
 
-def _sort_servers(servers):
-    return sorted(servers or [], key=lambda s: (_quality_rank(s.get("name", "")), s.get("name", "").lower()))
+def _sort_servers(servers, title_key=None):
+    """[server-rank] Order a title's server list so links already
+    confirmed to work for THIS title come first, grouped with their
+    same-host "variant" quality links, in the order they were first
+    confirmed working -- confirming a second host appends it after the
+    first, never replacing it. Hosts that failed to play for this title
+    sink to the bottom. Everything else falls back to global per-host
+    reliability, then quality, then name."""
+    servers = servers or []
+    try:
+        from plugin_server_rank import host_score, _host_of, get_title_working, get_title_failed
+    except Exception:
+        host_score = None
+        _host_of = None
+        get_title_working = None
+        get_title_failed = None
+
+    def _host(s):
+        if _host_of is None:
+            return ""
+        try:
+            return _host_of(s.get("url", ""))
+        except Exception:
+            return ""
+
+    def _reliability(s):
+        if host_score is None:
+            return 0.5
+        try:
+            return host_score(s.get("url", ""))
+        except Exception:
+            return 0.5
+
+    def _quality_key(s):
+        return (_quality_rank(s.get("name", "")), s.get("name", "").lower())
+
+    working_hosts = []
+    failed_hosts = set()
+    if title_key and get_title_working is not None:
+        try:
+            working_hosts = get_title_working(title_key)
+        except Exception:
+            working_hosts = []
+    if title_key and get_title_failed is not None:
+        try:
+            failed_hosts = get_title_failed(title_key)
+        except Exception:
+            failed_hosts = set()
+
+    working_set = set(working_hosts)
+    working_buckets = dict((h, []) for h in working_hosts)
+    neutral, failed = [], []
+    for s in servers:
+        h = _host(s)
+        if h and h in working_set:
+            working_buckets[h].append(s)
+        elif h and h in failed_hosts:
+            failed.append(s)
+        else:
+            neutral.append(s)
+
+    ordered = []
+    for h in working_hosts:
+        ordered.extend(sorted(working_buckets[h], key=_quality_key))
+    neutral.sort(key=lambda s: (-_reliability(s),) + _quality_key(s))
+    failed.sort(key=_quality_key)
+
+    return ordered + neutral + failed
 
 
 def _decorate_item_title(item, site=None):

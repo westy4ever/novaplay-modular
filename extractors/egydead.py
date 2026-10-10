@@ -1176,30 +1176,30 @@ class EgyDeadExtractor(BaseExtractor):
         # Content pages live at bare paths on the mirror.
         if mtype == "movie":
             return [
-                {"title": "🎬 English Movies",        "url": self._full_url("category/english-movies/"),      "type": "category", "_action": "category"},
-                {"title": "🇪🇬 Arabic Movies",          "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/"),       "type": "category", "_action": "category"},
-                {"title": "🌏 Asian Movies",           "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/"),     "type": "category", "_action": "category"},
-                {"title": "🇹🇷 Turkish Movies",         "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/"),      "type": "category", "_action": "category"},
-                {"title": "🇮🇳 Indian Movies",          "url": self._full_url("category/hindi-movies/"),     "type": "category", "_action": "category"},
-                {"title": "🎭 Cartoon Movies",         "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/"),      "type": "category", "_action": "category"},
-                {"title": "🎌 Anime Movies",           "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/"),       "type": "category", "_action": "category"},
-                {"title": "📽️ Documentary Movies",    "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%88%d8%ab%d8%a7%d8%a6%d9%82%d9%8a%d8%a9/"),    "type": "category", "_action": "category"},
-                {"title": "🎬 All Movies",             "url": self._full_url("category/movies/"),             "type": "category", "_action": "category"},
+                {"title": "🎬 افلام اجنبي",        "url": self._full_url("category/english-movies/"),      "type": "category", "_action": "category"},
+                {"title": "🇪🇬 افلام عربي",          "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/"),       "type": "category", "_action": "category"},
+                {"title": "🌏 افلام اسيوية",           "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/"),     "type": "category", "_action": "category"},
+                {"title": "🇹🇷 افلام تركية",         "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/"),      "type": "category", "_action": "category"},
+                {"title": "🇮🇳 افلام هندي",          "url": self._full_url("category/hindi-movies/"),     "type": "category", "_action": "category"},
+                {"title": "🎭 افلام كرتون",         "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d8%b1%d8%aa%d9%88%d9%86/"),      "type": "category", "_action": "category"},
+                {"title": "🎌 افلام انمي",           "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/"),       "type": "category", "_action": "category"},
+                {"title": "📽️ افلام وثائقية",    "url": self._full_url("category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%88%d8%ab%d8%a7%d8%a6%d9%82%d9%8a%d8%a9/"),    "type": "category", "_action": "category"},
+                {"title": "🎬 جميع الافلام",             "url": self._full_url("category/movies/"),             "type": "category", "_action": "category"},
             ]
 
         return [
-            {"title": "📺 Complete Series",      "url": self._full_url("serie/"),              "type": "category", "_action": "category"},
-            {"title": "📺 Complete Seasons",     "url": self._full_url("season/"),             "type": "category", "_action": "category"},
-            {"title": "📺 Episodes",             "url": self._full_url("episode/"),            "type": "category", "_action": "category"},
-            {"title": "📺 English Series",        "url": self._full_url("series-category/english-series/"),    "type": "category", "_action": "category"},
-            {"title": "🇪🇬 Arabic Series",         "url": self._full_url("series-category/arabic-series/"),     "type": "category", "_action": "category"},
-            {"title": "🇹🇷 Turkish Series",       "url": self._full_url("series-category/turkish-series/"),    "type": "category", "_action": "category"},
-            {"title": "🌏 Asian Series",          "url": self._full_url("series-category/asian-series/"),      "type": "category", "_action": "category"},
-            {"title": "🎌 Anime Series",          "url": self._full_url("series-category/anime-series/"),      "type": "category", "_action": "category"},
-            {"title": "🎠 Cartoon Series",        "url": self._full_url("series-category/cartoon-series/"),    "type": "category", "_action": "category"},
-            {"title": "🇮🇳 Indian Series",         "url": self._full_url("series-category/indian-series/"),     "type": "category", "_action": "category"},
-            {"title": "📽️ Documentary Series",    "url": self._full_url("series-category/documentary-series/"), "type": "category", "_action": "category"},
-            {"title": "📡 TV Shows",              "url": self._full_url("series-category/tv-shows/"),          "type": "category", "_action": "category"},
+            {"title": "📺 مسلسلات كاملة",      "url": self._full_url("serie/"),              "type": "category", "_action": "category"},
+            {"title": "📺 مواسم كاملة",     "url": self._full_url("season/"),             "type": "category", "_action": "category"},
+            {"title": "📺 حلقات",             "url": self._full_url("episode/"),            "type": "category", "_action": "category"},
+            {"title": "📺 مسلسلات اجنبي",        "url": self._full_url("series-category/english-series/"),    "type": "category", "_action": "category"},
+            {"title": "🇪🇬 مسلسلات عربي",         "url": self._full_url("series-category/arabic-series/"),     "type": "category", "_action": "category"},
+            {"title": "🇹🇷 مسلسلات تركية",       "url": self._full_url("series-category/turkish-series/"),    "type": "category", "_action": "category"},
+            {"title": "🌏 مسلسلات اسيوية",          "url": self._full_url("series-category/asian-series/"),      "type": "category", "_action": "category"},
+            {"title": "🎌 مسلسلات انمي",          "url": self._full_url("series-category/anime-series/"),      "type": "category", "_action": "category"},
+            {"title": "🎠 مسلسلات كرتون",        "url": self._full_url("series-category/cartoon-series/"),    "type": "category", "_action": "category"},
+            {"title": "🇮🇳 مسلسلات هندية",         "url": self._full_url("series-category/indian-series/"),     "type": "category", "_action": "category"},
+            {"title": "📽️ مسلسلات وثائقية",    "url": self._full_url("series-category/documentary-series/"), "type": "category", "_action": "category"},
+            {"title": "📡 برامج تلفزيونية",              "url": self._full_url("series-category/tv-shows/"),          "type": "category", "_action": "category"},
         ]
 
     def get_category_items(self, url, page=None):

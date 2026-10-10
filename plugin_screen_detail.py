@@ -159,7 +159,13 @@ class AdvancedArabicPlayerDetail(Screen):
     _MENU_X = 60
     _MENU_Y = 708
     _MENU_W = 1800
-    _MENU_H = 320
+    # [PATCH 115] confirmed live from screen recording: 4 server rows are
+    # actually visible on screen at once (e.g. "fastved / firestream /
+    # luluvdoo / rpmvip" all shown together), not 3 -- 320 // 95 was
+    # computing visible_rows=3, so the accent bar pinned itself one row
+    # too early and could never reach the real 4th row. 380 // 95 = 4,
+    # matching the real screen.
+    _MENU_H = 380
     _MENU_ROW_H = 95
 
     # [detail-progress] geometry of the indeterminate bar
@@ -423,42 +429,14 @@ class AdvancedArabicPlayerDetail(Screen):
             except Exception: pass
 
     # ── [detail-accent] gold bar next to the selected server row ──────
+    # [PATCH 117] removed: three rounds of trying to mirror this list's
+    # scroll behavior (page-snap windowing, confirmed non-trivial) never
+    # reliably matched the real widget across both directions, and the
+    # native row highlight (backgroundColorSelected) already marks the
+    # selected server correctly on its own. Left as a no-op (keeps the
+    # widget hidden) rather than ripping out every call site.
     def _updateMenuAccent(self):
-        if getattr(self, "_closed", False):
-            return
-        total = getattr(self, "_menu_item_count", 0)
-        if not total:
-            try: self["menuAccent"].hide()
-            except Exception: pass
-            return
-        try:
-            idx = self["menu"].getCurrentIndex()
-        except Exception:
-            idx = 0
-        idx = max(0, min(int(idx), total - 1))
-
-        row_h = self._MENU_ROW_H                       # 95
-        bar_h = row_h - 8                              # 87
-        visible_rows = max(1, self._MENU_H // row_h)   # 3
-
-        if total <= visible_rows:
-            # Short list — bar sits next to the selected row exactly
-            y_off = idx * row_h
-        else:
-            # [PATCH 112] True row tracking: the eListbox scrolls by whole
-            # rows, so the visible-window row index is idx minus the scroll
-            # offset. The bar is always visually on a real row (0, 1, or 2),
-            # matching native Enigma2 widget behaviour. Because effective_row
-            # is clamped to visible_rows-1 the bar can never overshoot the
-            # menu box.
-            scroll_off = max(0, idx - (visible_rows - 1))
-            effective_row = idx - scroll_off       # 0, 1, or 2
-            y_off = effective_row * row_h
-
-        bar_x = self._MENU_X - 12                      # 48
-        bar_y = self._MENU_Y + y_off + 4               # 712 .. 902
-        self._moveResize("menuAccent", bar_x, bar_y, 6, bar_h)
-        try: self["menuAccent"].show()
+        try: self["menuAccent"].hide()
         except Exception: pass
 
     # ── [detail-progress] indeterminate bar while extracting ──────────
@@ -813,7 +791,8 @@ class AdvancedArabicPlayerDetail(Screen):
             _pt = "\u200f" + _pt
         self["plot"].setText(_pt)
 
-        self._servers = _sort_servers([s for s in data.get("servers", []) if s.get("url")])
+        _title_key = (getattr(self, "_item", None) or {}).get("url", "")
+        self._servers = _sort_servers([s for s in data.get("servers", []) if s.get("url")], title_key=_title_key)
         self._episodes = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
         _chain_poster = data.get("poster") or self._item.get("poster") or ""
         if _chain_poster:
@@ -1031,12 +1010,26 @@ class AdvancedArabicPlayerDetail(Screen):
             else:
                 # [detail-progress] extraction failed — hide the sweep bar
                 callInMainThread(self._stopProgress)
+                # [server-rank] this server/host failed to resolve -- counts
+                # against it so it sinks toward the bottom of future lists.
+                try:
+                    from plugin_server_rank import record_host_result, record_title_failed
+                    record_host_result(server.get("url", ""), False)
+                    _rank_item = getattr(self, "_item", None) or {}
+                    record_title_failed(_rank_item.get("url", ""), server.get("url", ""))
+                except Exception as e:
+                    my_log("server-rank record (failure) failed (non-fatal): {}".format(e))
                 if get_curl_failed_needs_proxy():
                     try:
                         plugin_health.record(getattr(self, "_site", "unknown"), "blocked")
                     except Exception as e:
                         my_log("_bgExtract: plugin_health.record failed (non-fatal): {}".format(e))
-                    if not self._proxy_warning_shown:
+                    # [FIX] confirmed live: same stale-self pattern as the
+                    # _item/_site crashes fixed earlier -- self._proxy_warning_shown
+                    # can be missing on a stale background thread from a Detail
+                    # screen the user already backed out of. Default to "not
+                    # shown yet"; worst case is one extra popup, never a crash.
+                    if not getattr(self, "_proxy_warning_shown", False):
                         self._proxy_warning_shown = True
                         msg = "⚠️ curl_cffi فشل في تجاوز Cloudflare.\n"
                         msg += "الرجاء تفعيل الـ Proxy من الإعدادات (أزرق ← أحمر)."
@@ -1374,6 +1367,9 @@ class AdvancedArabicPlayerDetail(Screen):
             self["status"].setText("{} — غير متاح، جرب سيرفر آخر".format(server["name"]))
             return
         my_log("Stream found: {} [{}]".format(stream_url, quality))
+        # [server-rank] NOTE: success/failure recording moved to the player
+        # screen (__onConfirmed / exhausted in plugin_screen_player.py) --
+        # finding a stream URL here doesn't mean it actually played.
         _base_item = getattr(self, "_item", None) or {}
         try:
             history_entry = _entry_from_item(
@@ -1455,12 +1451,12 @@ class AdvancedArabicPlayerDetail(Screen):
 
                 def _on_resume(_ans, _u=url, _t=title, _iu=_item_url, _sp=_saved_pos,
                                _ne=self._next_episode, _cb=self._playNextEpisode,
-                               _po=self._osd_poster, _qv=_qv):
+                               _po=self._osd_poster, _qv=_qv, _su=server.get("url", "")):
                     if not _ans:
                         _save_position(_iu, 0)
                     _play(self.session, _u, _t, resume_pos=_sp if _ans else 0, item_url=_iu,
                           next_episode=_ne, on_next=_cb, poster_url=_po,
-                          quality_variants=_qv)
+                          quality_variants=_qv, server_url=_su)
                 self["status"].setText("جاري فتح المشغل...")
                 self.session.openWithCallback(_on_resume, MessageBox, resume_text, MessageBox.TYPE_YESNO, timeout=8, default=True)
             else:
@@ -1468,7 +1464,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 _play(self.session, url, title, resume_pos=0, item_url=_item_url,
                       next_episode=self._next_episode, on_next=self._playNextEpisode,
                       poster_url=self._osd_poster,
-                      quality_variants=_qv)
+                      quality_variants=_qv, server_url=server.get("url", ""))
             from extractors.base import get_proxy_used
             if get_proxy_used():
                 self["status"].setText("✓ Proxy  " + self["status"].getText())

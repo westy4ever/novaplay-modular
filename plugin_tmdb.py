@@ -494,3 +494,59 @@ def _tmdb_search_suggestions(query, limit=8):
         except Exception as e:
             _log("TMDb suggestions failed for {}: {}".format(media_kind, e))
     return suggestions[:limit]
+
+# ─── [tmdb-rating] shared lazy rating fill ──────────────────────────────────
+def fill_item_rating_async(item, on_done=None):
+    """[tmdb-rating] One-shot background TMDb lookup for an item whose
+    source extractor publishes no rating on its listing cards (EgyDead,
+    egydead_coupons, and any future site that omits one). Writes the
+    value into `item["rating"]` and invokes `on_done` on the main thread
+    when the mutation lands.
+
+    Contract:
+      * Guarded by item["_tmdb_rating_tried"] -- repeat calls for the
+        same item are no-ops, safe to call from every paint.
+      * Reuses _tmdb_search_metadata's long-lived JSON cache -- if the
+        item's poster or backdrop was already TMDb-resolved through
+        another path, this costs zero network.
+      * The caller is responsible for redrawing; `on_done` is invoked
+        via callInMainThread (lazy import to keep this module free of
+        Enigma2 dependencies at import time).
+      * Fails silently on any error -- a missing rating must never
+        break the caller's paint loop.
+    """
+    if not item:
+        return
+    if item.get("rating") or item.get("_tmdb_rating_tried"):
+        return
+    title = item.get("title", "")
+    if not title:
+        return
+    item["_tmdb_rating_tried"] = True
+    year = item.get("year", "")
+    m_type = item.get("type", "movie")
+
+    def _worker():
+        try:
+            meta = _tmdb_search_metadata(title, year, m_type)
+            if meta and meta.get("rating"):
+                item["rating"] = meta["rating"]
+                _log("fill_item_rating_async: '{}' -> {}".format(
+                    title[:40], meta["rating"]))
+                if on_done:
+                    try:
+                        from novaplay_thread import callInMainThread
+                        callInMainThread(on_done)
+                    except Exception:
+                        try:
+                            on_done()
+                        except Exception:
+                            pass
+        except Exception as e:
+            try:
+                _log("fill_item_rating_async error for {}: {}".format(title[:40], e))
+            except Exception:
+                pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+

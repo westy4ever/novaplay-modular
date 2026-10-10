@@ -102,7 +102,7 @@ from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
 from plugin_util import (_site_label, _site_tagline, _site_search_item,
     _wrap_ui_text, _single_line_text, _dedupe_items, _rank_search_items,
     _strip_arabic_from_english_title)
-from plugin_tmdb import _tmdb_enabled, _tmdb_search_metadata
+from plugin_tmdb import _tmdb_enabled, _tmdb_search_metadata, fill_item_rating_async
 from plugin_screen_detail import AdvancedArabicPlayerDetail
 from plugin_screen_search import AdvancedArabicPlayerSearch
 from novaplay_thread import callInMainThread
@@ -1219,6 +1219,10 @@ class AdvancedArabicPlayerHome(Screen):
             self["cfavMark%d" % widget_id].show()
         else:
             self["cfavMark%d" % widget_id].hide()
+        # [tmdb-rating] one-shot background fill (see poster-grid branch).
+        if not item.get("rating"):
+            fill_item_rating_async(item, on_done=self._onTmdbPosterReady)
+
         rating = item.get("rating", "")
         if rating:
             self["cratingBadge%d" % widget_id].setText(u"★ %s " % rating)
@@ -1524,6 +1528,13 @@ class AdvancedArabicPlayerHome(Screen):
                     yb.show()
                 else:
                     yb.hide()
+
+                # [tmdb-rating] one-shot background fill for items whose
+                # source site publishes no rating on its cards (EgyDead,
+                # egydead_coupons); the helper's own _tmdb_rating_tried
+                # guard makes every later paint a no-op.
+                if _in_grid and not item.get("rating"):
+                    fill_item_rating_async(item, on_done=self._onTmdbPosterReady)
 
                 rb = self["prat_%d_%d" % (r, c)]
                 _rt = str(item.get("rating") or "").strip()

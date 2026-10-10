@@ -648,7 +648,7 @@ class EgyDeadCouponsExtractor(BaseExtractor):
                 {"title": "🇪🇬 افلام عربي",         "url": self._full_url("/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/"),           "type": "category", "_action": "category"},
                 {"title": "🇮🇳 افلام هندي",         "url": self._full_url("/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a/"),           "type": "category", "_action": "category"},
                 {"title": "🎌 افلام انمي",          "url": self._full_url("/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/"),           "type": "category", "_action": "category"},
-                {"title": "🎬 All Movies",         "url": self._full_url("/%d8%a7%d9%81%d9%84%d8%a7%d9%85/"),                                  "type": "category", "_action": "category"},
+                {"title": "🎬 جميع الافلام",         "url": self._full_url("/%d8%a7%d9%81%d9%84%d8%a7%d9%85/"),                                  "type": "category", "_action": "category"},
             ]
 
         return [
@@ -664,7 +664,7 @@ class EgyDeadCouponsExtractor(BaseExtractor):
             {"title": "📺 مسلسلات رمضان 2024",   "url": self._full_url("/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2024/"), "type": "category", "_action": "category"},
             {"title": "📺 مسلسلات رمضان 2023",   "url": self._full_url("/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2023/"), "type": "category", "_action": "category"},
             {"title": "📺 مسلسلات رمضان 2022",   "url": self._full_url("/category/%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2022/"),                          "type": "category", "_action": "category"},
-            {"title": "📺 All Series",           "url": self._full_url("/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/"),                            "type": "category", "_action": "category"},
+            {"title": "📺 جميع المسلسلات",           "url": self._full_url("/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/"),                            "type": "category", "_action": "category"},
             {"title": "📡 برامج تلفزيونية",      "url": self._full_url("/category/%d8%a8%d8%b1%d8%a7%d9%85%d8%ac-%d8%aa%d9%84%d9%81%d8%b2%d9%8a%d9%88%d9%86%d9%8a%d8%a9/"), "type": "category", "_action": "category"},
             {"title": "🤼 عروض مصارعة",          "url": self._full_url("/category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%85%d8%b5%d8%a7%d8%b1%d8%b9%d8%a9/"),    "type": "category", "_action": "category"},
         ]
