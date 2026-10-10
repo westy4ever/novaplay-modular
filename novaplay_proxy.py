@@ -56,6 +56,12 @@ import urllib.request as _urlreq
 import urllib.error
 
 try:
+    from curl_cffi import requests as _cffi_requests
+    _HAS_CURL_CFFI = True
+except Exception:
+    _HAS_CURL_CFFI = False
+
+try:
     from urllib.parse import urlparse, parse_qs, quote, urljoin
 except ImportError:  # py2 fallback
     from urlparse import urlparse, parse_qs, urljoin
@@ -311,6 +317,52 @@ def attach_cookies(result):
         return result
 
 
+class _CurlCffiResponseAdapter(object):
+    def __init__(self, cffi_resp):
+        self._resp = cffi_resp
+        self._iter = cffi_resp.iter_content(chunk_size=65536)
+        self._buf = b""
+
+    def getcode(self):
+        return self._resp.status_code
+
+    def info(self):
+        return self._resp.headers
+
+    @property
+    def headers(self):
+        return self._resp.headers
+
+    def geturl(self):
+        try:
+            return str(self._resp.url)
+        except Exception:
+            return ""
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            chunks = [self._buf]
+            self._buf = b""
+            for c in self._iter:
+                chunks.append(c)
+            return b"".join(chunks)
+        while len(self._buf) < n:
+            try:
+                chunk = next(self._iter)
+            except StopIteration:
+                break
+            if chunk:
+                self._buf += chunk
+        out, self._buf = self._buf[:n], self._buf[n:]
+        return out
+
+    def close(self):
+        try:
+            self._resp.close()
+        except Exception:
+            pass
+
+
 # ─── HTTP handler ────────────────────────────────────────────────────────────
 class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
     # Deliberately left at HTTP/1.0 (default): keep-alive would require a
@@ -390,6 +442,31 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             if range_hdr:
                 headers["Range"] = range_hdr
 
+            cffi_headers = dict(headers)
+            cffi_headers.pop("Accept-Encoding", None)
+            cffi_headers.setdefault("Accept", "*/*")
+            # [FIX] confirmed live: s1.egybestvid.com (and likely other
+            # Arabic-audience CDN edges) gate on Accept-Language actually
+            # containing "ar" -- a plain "en-US,en;q=0.9" default (what a
+            # generic scraper/proxy sends) gets a flat nginx 403 on the
+            # manifest fetch even with a correct Referer and Origin, while
+            # the exact same request with "ar,en-US,en;q=0.9" succeeds.
+            # Confirmed via isolated testing: Accept value itself (*/* vs
+            # text/html) and Referer exactness (bare domain vs full embed
+            # URL) made no difference -- this header value alone did.
+            cffi_headers.setdefault("Accept-Language", "ar,en-US,en;q=0.9")
+            cffi_headers.setdefault("Sec-Fetch-Dest", "empty")
+            cffi_headers.setdefault("Sec-Fetch-Mode", "cors")
+            cffi_headers.setdefault("Sec-Fetch-Site", "same-site")
+            cffi_headers.setdefault("Sec-GPC", "1")
+            if "Origin" not in cffi_headers and headers.get("Referer"):
+                try:
+                    _oparts = headers["Referer"].split("/")
+                    if len(_oparts) >= 3:
+                        cffi_headers["Origin"] = _oparts[0] + "//" + _oparts[2]
+                except Exception:
+                    pass
+
             _log("Proxy: {} {}".format(method, stream_url[:120]))
             _PROXY_LAST_HIT = time.time()
             # [PATCH 87] no per-request reset: the player resets the counters per candidate
@@ -398,43 +475,86 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
 
             upstream = _urlreq.Request(stream_url, headers=headers)
             range_start, range_end, emulated_range = None, None, False
-            try:
-                resp = _urlreq.urlopen(upstream, timeout=30)
-            except urllib.error.HTTPError as http_err:
-                # [PATCH 105] some CDNs 403 any Range request while a plain GET works fine
-                # (confirmed on mxcontent.net). Retry once without Range and emulate the
-                # requested slice locally instead of giving up on this candidate.
-                m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip()) if range_hdr else None
-                if http_err.code == 403 and m:
-                    range_start = int(m.group(1))
-                    range_end = int(m.group(2)) if m.group(2) else None
-                    retry_headers = dict(headers)
-                    retry_headers.pop("Range", None)
-                    _log("Proxy: {} 403'd a Range request, retrying without Range ({})".format(
-                        stream_url[:90], range_hdr))
-                    try:
-                        resp = _urlreq.urlopen(_urlreq.Request(stream_url, headers=retry_headers), timeout=30)
-                        emulated_range = True
-                    except urllib.error.HTTPError as http_err2:
-                        resp = http_err2
+            resp = None
+
+            # [FIX] see the curl_cffi import note above -- try the
+            # fingerprint-safe client first. It doesn't raise on a non-2xx
+            # status (just returns it), so the [PATCH 105] Range-403-retry
+            # logic below is re-checked explicitly here rather than via
+            # exception handling, but does the exact same thing.
+            if _HAS_CURL_CFFI:
+                try:
+                    cffi_resp = _cffi_requests.get(
+                        stream_url, headers=cffi_headers, impersonate="chrome",
+                        timeout=30, stream=True, allow_redirects=True,
+                    )
+                    m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip()) if range_hdr else None
+                    if cffi_resp.status_code == 403 and m:
+                        range_start = int(m.group(1))
+                        range_end = int(m.group(2)) if m.group(2) else None
+                        retry_headers = dict(cffi_headers)
+                        retry_headers.pop("Range", None)
+                        _log("Proxy: {} 403'd a Range request (curl_cffi), retrying without Range ({})".format(
+                            stream_url[:90], range_hdr))
+                        try:
+                            cffi_resp.close()
+                        except Exception:
+                            pass
+                        try:
+                            cffi_resp = _cffi_requests.get(
+                                stream_url, headers=retry_headers, impersonate="chrome",
+                                timeout=30, stream=True, allow_redirects=True,
+                            )
+                            emulated_range = True
+                        except Exception as e:
+                            _bump("upstream_errors")
+                            _log("Proxy: curl_cffi range-stripped retry failed: {}".format(e))
+                            self._safe_send_error(502, str(e))
+                            return
+                    resp = _CurlCffiResponseAdapter(cffi_resp)
+                except Exception as e:
+                    _log("Proxy: curl_cffi upstream failed, falling back to urllib: {}".format(e))
+                    resp = None
+                    range_start, range_end, emulated_range = None, None, False
+
+            if resp is None:
+                try:
+                    resp = _urlreq.urlopen(upstream, timeout=30)
+                except urllib.error.HTTPError as http_err:
+                    # [PATCH 105] some CDNs 403 any Range request while a plain GET works fine
+                    # (confirmed on mxcontent.net). Retry once without Range and emulate the
+                    # requested slice locally instead of giving up on this candidate.
+                    m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip()) if range_hdr else None
+                    if http_err.code == 403 and m:
+                        range_start = int(m.group(1))
+                        range_end = int(m.group(2)) if m.group(2) else None
+                        retry_headers = dict(headers)
+                        retry_headers.pop("Range", None)
+                        _log("Proxy: {} 403'd a Range request, retrying without Range ({})".format(
+                            stream_url[:90], range_hdr))
+                        try:
+                            resp = _urlreq.urlopen(_urlreq.Request(stream_url, headers=retry_headers), timeout=30)
+                            emulated_range = True
+                        except urllib.error.HTTPError as http_err2:
+                            resp = http_err2
+                            _bump("upstream_errors")
+                            _log("Proxy: range-stripped retry also failed: HTTP {}".format(
+                                getattr(http_err2, "code", "?")))
+                        except Exception as e:
+                            _bump("upstream_errors")
+                            _log("Proxy: range-stripped retry failed: {}".format(e))
+                            self._safe_send_error(502, str(e))
+                            return
+                    else:
+                        resp = http_err
                         _bump("upstream_errors")
-                        _log("Proxy: range-stripped retry also failed: HTTP {}".format(
-                            getattr(http_err2, "code", "?")))
-                    except Exception as e:
-                        _bump("upstream_errors")
-                        _log("Proxy: range-stripped retry failed: {}".format(e))
-                        self._safe_send_error(502, str(e))
-                        return
-                else:
-                    resp = http_err
+                        _log("Proxy: upstream HTTP {} for {}".format(
+                            getattr(http_err, "code", "?"), stream_url[:100]))
+                except Exception as e:
                     _bump("upstream_errors")
-                    _log("Proxy: upstream HTTP {} for {}".format(
-                        getattr(http_err, "code", "?"), stream_url[:100]))
-            except Exception as e:
-                _bump("upstream_errors")
-                _log("Proxy: upstream connection error: {}".format(e))
-                self._safe_send_error(502, str(e))
-                return
+                    _log("Proxy: upstream connection error: {}".format(e))
+                    self._safe_send_error(502, str(e))
+                    return
 
             try:
                 self._relay(method, resp, stream_url, headers,

@@ -28,6 +28,7 @@ import re
 import json
 import hashlib
 import time
+import threading
 from urllib.parse import urlencode
 
 from extractors.base import fetch as base_fetch, log as _log
@@ -94,6 +95,36 @@ def _save_cached_meta(cache_path, data):
 
 # --- TMDB API Functions ---
 
+# [FIX] confirmed directly on a real device: rapid grid browsing fires a
+# TMDB lookup per visible title, and each title's own search can cost up
+# to ~28 HTTP requests in the worst case (7 title-cleaning variants x
+# with/without year x 2 languages) when TMDB genuinely has no match --
+# exactly the "not found" case grid browsing hits constantly for very
+# new or obscure titles. Scrolling through a few 40-item grid pages can
+# easily fire hundreds of requests within under a minute. Confirmed this
+# was the real cause of a run where EVERY single TMDB search failed,
+# including for long-established, famous titles (Avengers: Infinity War,
+# 2018) -- re-running the exact same request (same key, same query)
+# moments later succeeded cleanly, proving the failures were a transient
+# burst/rate-limit effect, not missing titles or a dead key. This
+# serializes every outbound TMDB request through one minimum spacing,
+# regardless of how many threads/titles are requesting concurrently, so
+# the plugin's own request rate stays well under whatever threshold
+# triggered this.
+_tmdb_rate_lock = threading.Lock()
+_tmdb_last_request_time = [0.0]
+_TMDB_MIN_REQUEST_INTERVAL = 0.15  # seconds between outbound TMDB requests
+
+
+def _tmdb_throttle():
+    with _tmdb_rate_lock:
+        now = time.monotonic()
+        wait = _TMDB_MIN_REQUEST_INTERVAL - (now - _tmdb_last_request_time[0])
+        if wait > 0:
+            time.sleep(wait)
+        _tmdb_last_request_time[0] = time.monotonic()
+
+
 def _tmdb_enabled():
     return bool((_get_config("tmdb_api_key", "") or "").strip())
 
@@ -115,6 +146,7 @@ def _tmdb_request(path, params=None):
         payload["language"] = language
         url = "{}{}?{}".format(_TMDB_API_BASE, path, urlencode(payload))
         try:
+            _tmdb_throttle()
             raw, _ = base_fetch(url, referer="https://www.themoviedb.org/", extra_headers={"Accept": "application/json"})
             if not raw:
                 _log("TMDb: empty HTTP body for {} [{}]".format(path, language))
@@ -287,6 +319,22 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         flags=re.I,
     ).strip()
     arabic_clean = re.sub(r"\s+", " ", arabic_clean).strip(" -|")
+    # [FIX] confirmed directly: the module's OWN docstring already says
+    # "leaving the year in the query text reliably produces zero results
+    # even for well-known films" and strips a bare trailing year for
+    # exactly that reason -- but that strip runs on the RAW title, before
+    # the Arabic wrapper (فيلم/مترجم/etc.) is removed. Every scraped title
+    # from this site family is "... YEAR مترجم", so the year is never
+    # actually the last token when that first strip runs, and it silently
+    # never fires. Confirmed on a real device: "Avengers: Infinity War"
+    # (a long-established, famous movie) got "zero results" every time
+    # because the query text sent was "Avengers Infinity War 2018", not
+    # "Avengers Infinity War" -- TMDb has no movie literally titled with
+    # a trailing year like that. Stripping it again here, now that
+    # "مترجم" etc. are gone and the year is genuinely trailing, fixes it:
+    # confirmed this exact cleaned string against the live TMDb API and
+    # it correctly found the movie.
+    arabic_clean = re.sub(r'\s*\b(19\d{2}|20\d{2})\s*$', '', arabic_clean).strip()
     _add_variant(arabic_clean)
     # Arabic ordinals (الثالث/الرابع...) survive every variant above —
     # add the bare-English-prefix variant: "Silo الموسم الثالث" → "Silo"

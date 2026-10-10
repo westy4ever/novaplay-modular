@@ -70,6 +70,36 @@ _EVICT_INTERVAL = 6 * 3600                  # at most one eviction pass per 6h
 _LAST_EVICT = [0.0]                         # [ts] — mutable without global
 
 
+# [FIX] downloadUrl() was sending a bare "Mozilla/5.0" User-Agent -- no
+# real browser ever sends just that string alone; it's a well-known bot
+# signature. CONFIRMED against the real, live device: every poster fetch
+# through this function failed with "HTTP Error 403: Forbidden" from
+# vid.mycima.cc, while plugin_util.py's _fetch_poster_bytes() -- used by
+# the detail screen's _downloadPoster(), confirmed successful in the same
+# real log, same site, same exact URLs -- uses the SAME urllib library and
+# the SAME bare-root Referer pattern this function already uses. The one
+# and only difference is the User-Agent: that helper sends SAFE_UA (a
+# real, full Chrome UA string), this one sent a bare "Mozilla/5.0". That
+# is the confirmed, complete root cause -- not a TLS-fingerprint/library
+# issue as first suspected, ruled out once _fetch_poster_bytes()'s actual
+# code was checked directly: same library, so a header-only fix is
+# correct and sufficient here.
+#
+# Imports the SAME constant _fetch_poster_bytes() already uses (defined
+# identically in 4 other files in this codebase: novaplay_proxy.py,
+# novaplay_subtitles.py, plugin_downloads.py, plugin_util.py) rather than
+# adding a 5th separately-hardcoded copy that could drift out of sync.
+# plugin_util.py only imports plugin_imagecache locally, inside a function
+# body, never at module level -- so this top-level import here does not
+# create a circular import.
+try:
+    from plugin_util import SAFE_UA as _IMAGE_FETCH_USER_AGENT
+except Exception:
+    _IMAGE_FETCH_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) "
+                               "Chrome/120.0.0.0 Safari/537.36")
+
+
 def ensureDir(path):
     try:
         if path and not os.path.exists(path):
@@ -233,7 +263,7 @@ def downloadUrl(url, timeout=8):
     url = _iri_to_uri(url)  # [PATCH IC1]
     try:
         req = urllib_request.Request(url)
-        req.add_header("User-Agent", "Mozilla/5.0")
+        req.add_header("User-Agent", _IMAGE_FETCH_USER_AGENT)
         try:
             parsed = urlparse(url)
             referer = "{}://{}/".format(parsed.scheme, parsed.netloc)
@@ -255,7 +285,7 @@ def downloadUrl(url, timeout=8):
             jpg_url = re.sub(r"\.webp(\?.*)?$", r".jpg\1", url, flags=re.I)
             if jpg_url != url:
                 req2 = urllib_request.Request(jpg_url)
-                req2.add_header("User-Agent", "Mozilla/5.0")
+                req2.add_header("User-Agent", _IMAGE_FETCH_USER_AGENT)
                 try:
                     parsed = urlparse(jpg_url)
                     referer = "{}://{}/".format(parsed.scheme, parsed.netloc)

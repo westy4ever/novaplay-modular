@@ -41,6 +41,16 @@ below the grid (y=980) in grid mode.
 [catlist-effects] Category list: mutual slide-in / slide-out,
 gold accent bar parked beside the selected row, ▲ / ▼ scroll hints,
 horizontal shake on fetch failure.
+
+[tmdb-poster-fallback] Grid/carousel/continue-strip items whose own
+site poster is a wrong (landscape) shape (mycima.py / cimawbas_cwb.py
+now leave item["poster"] empty for these, keeping the raw image in
+item["thumbnail"] instead) get a background TMDB lookup queued the
+first time they're drawn, reusing plugin_tmdb's own long-lived cache so
+a title only ever costs one real network lookup, not one per page view.
+The site's own (wrong-shaped) thumbnail is shown meanwhile rather than a
+blank placeholder, and gets swapped for the real TMDB poster the next
+time the artwork poll timer redraws once it's ready.
 """
 
 import os
@@ -100,6 +110,35 @@ from novaplay_thread import callInMainThread
 from novaplay_dualclock import format_dual_dates
 
 _SEARCH_SITE_ORDER = get_search_site_order()
+
+
+# ─── [site-label] helpers: render the site's own badge chip ─────────────────
+def _hex_to_argb(hexstr, default=0xFFFFD740):
+    """'#RRGGBB' (or '#RGB') -> Enigma2's 0xAARRGGBB int. Returns `default`
+    on any parse failure so a missing/invalid site colour still renders a
+    visible chip instead of an invisible one."""
+    h = (hexstr or "").lstrip("#").strip()
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return default
+    try:
+        return 0xFF000000 | int(h, 16)
+    except (ValueError, TypeError):
+        return default
+
+
+def _label_chip_width(text):
+    """Compact chip width that fits the text plus small padding. Mirrors
+    the site's inline .label chip (a small box sized to the text, not a
+    full-width bar). ~16px per char at 1080p is a safe middle ground
+    across Latin and Arabic glyphs."""
+    n = len(text or "")
+    return max(sc(64), n * sc(16) + sc(24))
+
+
+def _label_chip_height(is_big=False):
+    return sc(28) if is_big else sc(24)
 
 
 class AdvancedArabicPlayerHome(Screen):
@@ -821,8 +860,9 @@ class AdvancedArabicPlayerHome(Screen):
             self._moveResize('cfavMark%d' % widget_id, x + 10, y + 10, 42, 42)
             _yw = 58 if is_big else 52
             self._moveResize('cyearBadge%d' % widget_id, x + 12, y + 22, _yw, 28)
-            _lh = 26 if is_big else 22
-            self._moveResize('clabel%d' % widget_id, x + 10, y + h - 34 - _lh - 2, w - 20, _lh)
+            # [site-label] clabel geometry is now set per-slot inside
+            # _updateCarouselSlot, where the actual label text (and thus
+            # the chip width) is known.
             self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
             if logical_slot == self.carousel_center:
                 focus_extra = 7
@@ -1036,6 +1076,86 @@ class AdvancedArabicPlayerHome(Screen):
             return pos if 0 <= pos < total else -1
         return (self.index - self.carousel_center + slot) % total
 
+    # ── [tmdb-poster-fallback] shared helper ────────────────────────────
+    def _requestTmdbPosterAsync(self, item):
+        """For grid/carousel/continue-strip items whose own site poster
+        is a wrong (landscape) shape, mycima.py/cimawbas_cwb.py now leave
+        item["poster"] empty for exactly this case -- queues a background
+        TMDB lookup for a proper, portrait poster, reusing plugin_tmdb's
+        own long-lived cache (so a title only ever costs one real network
+        lookup, not one per page view, once cached). Matches the existing
+        threading.Thread + callInMainThread pattern already used for
+        carousel backdrop fetching (_bgFetchTmdbText) -- same
+        architecture, different target. _tmdb_poster_tried on the item
+        itself ensures this is only ever attempted once per item per
+        session, even if TMDB genuinely has no match for it.
+        """
+        if item.get("poster") or item.get("_tmdb_poster_tried"):
+            return
+        title = item.get("title", "")
+        if not title:
+            return
+        item["_tmdb_poster_tried"] = True
+        year = item.get("year", "")
+        m_type = item.get("type", "movie")
+        # [DIAG] two prior hypotheses for "grid poster never upgrades to
+        # TMDB" were both ruled out by directly reading the real code
+        # (setList/getPageItems return the same item references, and
+        # MemoizedPixmapCache correctly compares by path content, not just
+        # key presence) -- this function previously only logged on
+        # failure, so there was no way to tell from a real log whether it
+        # even runs for grid items, whether TMDB matches, or whether the
+        # redraw callback fires. Logging every step until the actual
+        # breakpoint is visible.
+        my_log("_requestTmdbPosterAsync: queued for '{}' (year={}, type={})"
+               .format(title[:40], year, m_type))
+
+        def _worker():
+            try:
+                meta = _tmdb_search_metadata(title, year, m_type)
+                if meta and meta.get("poster"):
+                    item["poster"] = meta["poster"]
+                    my_log("_requestTmdbPosterAsync: SUCCESS for '{}' -> {}"
+                           .format(title[:40], meta["poster"]))
+                    callInMainThread(self._onTmdbPosterReady)
+                else:
+                    my_log("_requestTmdbPosterAsync: no TMDB poster match for '{}'"
+                           .format(title[:40]))
+            except Exception as e:
+                my_log("_requestTmdbPosterAsync error for {}: {}".format(title[:40], e))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _onTmdbPosterReady(self):
+        """Redraw whichever view is currently showing, so a just-filled-in
+        TMDB poster gets picked up on the next paint rather than waiting
+        for the next scheduled artwork-poll tick."""
+        # [DIAG] see _requestTmdbPosterAsync above -- confirms this callback
+        # actually fires and which redraw path it takes.
+        my_log("_onTmdbPosterReady: fired, display_mode={} layout_style={}"
+               .format(self._display_mode, self._layout_style))
+        if self._display_mode == "poster":
+            if self._layout_style == "grid":
+                try:
+                    self._updatePosterPixmaps(getattr(self, "_poster_pop_p", 1.0))
+                    my_log("_onTmdbPosterReady: grid redraw completed")
+                except Exception as e:
+                    my_log("_onTmdbPosterReady grid redraw error: {}".format(e))
+            else:
+                try:
+                    for widget_id in range(self.carousel_slots):
+                        pos = self._carouselPositionForSlot(widget_id)
+                        self._updateCarouselSlot(widget_id, pos)
+                    my_log("_onTmdbPosterReady: carousel redraw completed")
+                except Exception as e:
+                    my_log("_onTmdbPosterReady carousel redraw error: {}".format(e))
+        elif self._display_mode == "home":
+            try:
+                self._refreshContinuePosters()
+                my_log("_onTmdbPosterReady: continue-strip redraw completed")
+            except Exception as e:
+                my_log("_onTmdbPosterReady continue redraw error: {}".format(e))
+
     def _updateCarouselSlot(self, widget_id, pos):
         total_items = len(self._items)
         if pos < 0 or pos >= total_items:
@@ -1068,7 +1188,13 @@ class AdvancedArabicPlayerHome(Screen):
             self["cposter%d" % widget_id].setText("الصفحة السابقة")
             return
         self["cposter%d" % widget_id].setText("")
+        # [tmdb-poster-fallback] no real (portrait) poster yet -- kick off
+        # a background TMDB lookup, and meanwhile show the site's own
+        # (wrong-shaped) thumbnail rather than a blank placeholder.
         url = item.get("poster") or ""
+        if not url and item.get("thumbnail"):
+            self._requestTmdbPosterAsync(item)
+            url = item["thumbnail"]
         path = plugin_imagecache.getCachedImage(url, target_size=(340, 510)) if url else ""
         if path:
             try:
@@ -1107,8 +1233,37 @@ class AdvancedArabicPlayerHome(Screen):
             self["cyearBadge%d" % widget_id].hide()
         _lb = str(item.get("label") or "").strip()
         if _lb:
-            self["clabel%d" % widget_id].setText(_lb)
-            self["clabel%d" % widget_id].show()
+            _cl = self["clabel%d" % widget_id]
+            _cl.setText(_lb)
+            _lc = item.get("label_color") or ""
+            if _lc:
+                _argb_bg = _hex_to_argb(_lc)
+                _argb_fg = 0xFFF0F6FC     # white on the site's own colour
+            else:
+                _argb_bg = 0xFFFFD740     # fallback gold
+                _argb_fg = 0xFF0D1117     # black on gold
+            try:
+                _inst = _cl.instance
+                if _inst is not None:
+                    _inst.setBackgroundColor(_argb_bg)
+                    _inst.setForegroundColor(_argb_fg)
+            except Exception:
+                pass
+            # [site-label] compact chip positioned directly under the
+            # year badge (top-left corner of the card). The year badge
+            # in _applyCarouselGeometry lives at (x + 12, y + 22) with
+            # size (58|52, 28); place the chip 4px below it, matching
+            # the poster-grid layout. Offsets are raw pixels to match
+            # the year badge's own raw offsets on top of the already-
+            # scaled _CAROUSEL_GEOMETRY base.
+            _is_big = (widget_id == self.carousel_center)
+            _sx, _sy, _sw, _sh = _CAROUSEL_GEOMETRY.get(widget_id, (0, 0, 1, 1))
+            _cw = _label_chip_width(_lb)
+            _ch = _label_chip_height(is_big=_is_big)
+            _cx = _sx + 12
+            _cy = _sy + 22 + 28 + 4
+            self._moveResize("clabel%d" % widget_id, _cx, _cy, _cw, _ch)
+            _cl.show()
         else:
             self["clabel%d" % widget_id].hide()
         _watched = False
@@ -1268,9 +1423,33 @@ class AdvancedArabicPlayerHome(Screen):
                     _zw, _zh = POSTER_W, POSTER_H
                     _zx, _zy = _base_x, _base_y
 
+                # [tmdb-poster-fallback] no real (portrait) poster yet --
+                # kick off a background TMDB lookup, and meanwhile show
+                # the site's own (wrong-shaped) thumbnail rather than a
+                # blank placeholder, so something recognizable is visible
+                # immediately instead of nothing. mycima.py/cimawbas_cwb.py
+                # leave item["poster"] empty specifically for this case,
+                # keeping the raw scraped image in item["thumbnail"].
                 url = item.get("poster") or ""
                 path = ""
                 if url:
+                    # [DIAG] one-time log the FIRST time this code path sees a
+                    # populated item["poster"] (i.e. after the TMDB mutation) --
+                    # confirms whether the mutation is actually visible here,
+                    # and whether the resulting image resolves to a real cache
+                    # hit or falls through to the placeholder/async-queue path.
+                    if not item.get("_poster_grid_seen_populated"):
+                        item["_poster_grid_seen_populated"] = True
+                        my_log("_updatePosterPixmaps: item '{}' poster is now populated: {}"
+                               .format(item.get("title", "")[:30], url))
+                    path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
+                    if not item.get("_poster_grid_seen_populated_pathlog"):
+                        item["_poster_grid_seen_populated_pathlog"] = True
+                        my_log("_updatePosterPixmaps: cache lookup for '{}' -> path={!r}"
+                               .format(item.get("title", "")[:30], path))
+                elif item.get("thumbnail"):
+                    self._requestTmdbPosterAsync(item)
+                    url = item["thumbnail"]
                     path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
                 if path and item.get("url"):
                     try:
@@ -1364,19 +1543,62 @@ class AdvancedArabicPlayerHome(Screen):
                     rb.hide()
 
                 _lb = str(item.get("label") or "").strip()
+                _compact_chip = False
                 if _lb and _in_grid:
                     badge.setText(_lb)
+                    _lc = item.get("label_color") or ""
+                    if _lc:
+                        _argb_bg = _hex_to_argb(_lc)
+                        _argb_fg = 0xFFF0F6FC
+                    else:
+                        _argb_bg = 0xFFFFD740
+                        _argb_fg = 0xFF0D1117
+                    try:
+                        _inst = badge.instance
+                        if _inst is not None:
+                            _inst.setBackgroundColor(_argb_bg)
+                            _inst.setForegroundColor(_argb_fg)
+                    except Exception:
+                        pass
+                    _compact_chip = True
                 elif _watched and _in_grid:
                     badge.setText(u"✓ شاهدته")
+                    try:
+                        _inst = badge.instance
+                        if _inst is not None:
+                            _inst.setBackgroundColor(0xFFFFD740)
+                            _inst.setForegroundColor(0xFF0D1117)
+                    except Exception:
+                        pass
                 elif saved_pos > 30 and _in_grid:
                     mm, ss = divmod(saved_pos, 60)
                     hh, mm = divmod(mm, 60)
                     tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
                     badge.setText("متابعة " + tstr)
+                    try:
+                        _inst = badge.instance
+                        if _inst is not None:
+                            _inst.setBackgroundColor(0xFFFFD740)
+                            _inst.setForegroundColor(0xFF0D1117)
+                    except Exception:
+                        pass
                 else:
                     badge.hide()
 
-                if _in_grid and (_lb or _watched or saved_pos > 30):
+                if _in_grid and _compact_chip:
+                    # [site-label] compact chip, left-aligned directly
+                    # under the year badge (top-left of the poster).
+                    _cw = _label_chip_width(_lb)
+                    _cx = _yb_x                              # same left edge as year
+                    _cy = _yb_y + POSTER_YEAR_H + sc(4)      # 4px below year
+                    try:
+                        badge.instance.move(ePoint(_cx, _cy))
+                        badge.instance.resize(eSize(_cw, POSTER_BADGE_H))
+                    except Exception:
+                        pass
+                    badge.show()
+                elif _in_grid and (_watched or saved_pos > 30):
+                    # resume markers keep the old full-width bottom band
                     try:
                         badge.instance.move(ePoint(_bot_x, _bot_y))
                         badge.instance.resize(eSize(_bot_w, POSTER_BADGE_H))
@@ -1686,7 +1908,13 @@ class AdvancedArabicPlayerHome(Screen):
             bar = self["contbar%d" % i]
             if i < len(self._cont_items):
                 item = self._cont_items[i]
+                # [tmdb-poster-fallback] same fallback as the poster grid --
+                # no real poster yet, kick off a background TMDB lookup and
+                # show the site's own (wrong-shaped) thumbnail meanwhile.
                 url = item.get("poster") or ""
+                if not url and item.get("thumbnail"):
+                    self._requestTmdbPosterAsync(item)
+                    url = item["thumbnail"]
                 path = plugin_imagecache.getCachedImage(url, target_size=(CONT_W, CONT_H)) if url else ""
                 if not path and url:
                     plugin_imagecache.requestImageAsyncPriority(url, target_size=(CONT_W, CONT_H))
@@ -2573,4 +2801,4 @@ def _get_favorite_items_list():
 
 
 def _get_extractor(site):
-    return get_extractor(site)                    
+    return get_extractor(site)

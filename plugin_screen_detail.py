@@ -1032,7 +1032,10 @@ class AdvancedArabicPlayerDetail(Screen):
                 # [detail-progress] extraction failed — hide the sweep bar
                 callInMainThread(self._stopProgress)
                 if get_curl_failed_needs_proxy():
-                    plugin_health.record(self._site, "blocked")
+                    try:
+                        plugin_health.record(getattr(self, "_site", "unknown"), "blocked")
+                    except Exception as e:
+                        my_log("_bgExtract: plugin_health.record failed (non-fatal): {}".format(e))
                     if not self._proxy_warning_shown:
                         self._proxy_warning_shown = True
                         msg = "⚠️ curl_cffi فشل في تجاوز Cloudflare.\n"
@@ -1047,12 +1050,27 @@ class AdvancedArabicPlayerDetail(Screen):
                     except Exception as e:
                         my_log("status widget update failed: {}".format(e))
                 else:
-                    callInMainThread(self["status"].setText, "فشل استخراج الرابط — جرب سيرفر تاني")
+                    # [FIX] confirmed real crash on a real device: a stale
+                    # background extraction thread (from a server the user
+                    # already navigated away from) reached this point after
+                    # the "status" widget was no longer valid, raising
+                    # KeyError: 'status' and killing the thread uncaught.
+                    # Matches the same try/except pattern already used two
+                    # branches above for "proxy_warning"/"status".
+                    try:
+                        callInMainThread(self["status"].setText, "فشل استخراج الرابط — جرب سيرفر تاني")
+                    except Exception as e:
+                        my_log("status widget update failed: {}".format(e))
         except Exception as e:
             my_log("Detail _bgExtract CRITICAL ERROR: {}: {}\n{}".format(type(e).__name__, e, traceback.format_exc()))
             callInMainThread(self._stopProgress)          # [detail-progress]
             if not getattr(self, "_closed", False):
-                callInMainThread(self["status"].setText, "خطأ في النظام: {}".format(str(e)[:30]))
+                # [FIX] same unguarded self["status"] access as above --
+                # same fix.
+                try:
+                    callInMainThread(self["status"].setText, "خطأ في النظام: {}".format(str(e)[:30]))
+                except Exception as e2:
+                    my_log("status widget update failed in error handler: {}".format(e2))
         finally:
             if token is not None:
                 with self._extract_lock:
@@ -1356,17 +1374,21 @@ class AdvancedArabicPlayerDetail(Screen):
             self["status"].setText("{} — غير متاح، جرب سيرفر آخر".format(server["name"]))
             return
         my_log("Stream found: {} [{}]".format(stream_url, quality))
-        history_entry = _entry_from_item(
-            dict(self._item, **(self._data or {})),
-            self._site,
-            self._m_type,
-            {
-                "server_name": server.get("name", ""),
-                "quality": quality or "",
-                "last_stream_url": stream_url,
-            }
-        )
-        _upsert_library_item("history", history_entry, limit=120)
+        _base_item = getattr(self, "_item", None) or {}
+        try:
+            history_entry = _entry_from_item(
+                dict(_base_item, **(self._data or {})),
+                self._site,
+                self._m_type,
+                {
+                    "server_name": server.get("name", ""),
+                    "quality": quality or "",
+                    "last_stream_url": stream_url,
+                }
+            )
+            _upsert_library_item("history", history_entry, limit=120)
+        except Exception as e:
+            my_log("_onStreamFound: history write failed (non-fatal): {}".format(e))
 
         title = getattr(self, "_raw_title", None) or re.sub(r"\s+", " ", self["title"].getText()).strip()
 
@@ -1418,7 +1440,7 @@ class AdvancedArabicPlayerDetail(Screen):
                 else:
                     _qv = None
 
-            _item_url = self._item.get("url", "")
+            _item_url = (getattr(self, "_item", None) or {}).get("url", "")
             _saved_pos = _get_saved_position(_item_url)
             if _saved_pos > 30:
                 if _saved_pos >= 3600:
