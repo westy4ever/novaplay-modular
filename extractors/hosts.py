@@ -205,7 +205,7 @@ def resolve_govid(url, referer=None):
             
         # Use govid.live as referer to bypass Cloudflare on all sites
         req_referer = "https://govid.live/"
-        html, _ = fetch(url, referer=req_referer)
+        html, _ = fetch(url, referer=req_referer, timeout=10, max_retries=0)
         
         if not html:
             return None
@@ -2798,6 +2798,22 @@ def _unpack_all(html):
 def resolve_generic_embed(url, referer=None):
     try:
         html, final = fetch(url, referer=referer or url)
+        # [FIX] some hosts (confirmed directly: vipserver.liiivideo.com)
+        # intermittently return a tiny, blocked/incomplete response (as
+        # little as 38 bytes) instead of the real page. Confirmed on this
+        # exact codebase: a fresh retry of the EXACT SAME URL moments
+        # later returned the full, real content (3704 bytes), and
+        # _unpack_all()/_best_media_url() both correctly extracted a real
+        # stream URL from it once given that real content -- the
+        # extraction logic itself was never the problem. A real embed
+        # page is never this small; one retry costs little and has
+        # already been proven, empirically, to succeed where the first
+        # attempt didn't.
+        if not html or len(html) < 200:
+            log("resolve_generic_embed: suspiciously short response ({} bytes) for {}, retrying once".format(
+                len(html) if html else 0, url[:80]))
+            time.sleep(1)
+            html, final = fetch(url, referer=referer or url)
         if not html:
             return None
         best = _best_media_url(html)
@@ -2820,13 +2836,13 @@ def resolve_generic_embed(url, referer=None):
                     if best:
                         return best
                 for iframe_url in extract_iframes(h2, final2 or js_redirect)[:3]:
-                    h3, _ = fetch(iframe_url, referer=js_redirect)
+                    h3, _ = fetch(iframe_url, referer=js_redirect, timeout=8, max_retries=0)
                     if h3:
                         best = _best_media_url(h3)
                         if best:
                             return best
         for iframe_url in extract_iframes(html, final or url)[:3]:
-            h2, _ = fetch(iframe_url, referer=referer or url)
+            h2, _ = fetch(iframe_url, referer=referer or url, timeout=8, max_retries=0)
             if h2:
                 best = _best_media_url(h2)
                 if best:
@@ -2862,7 +2878,7 @@ def resolve_host(url, referer=None):
 def resolve_iframe_chain(url, referer=None, depth=0, max_depth=8):
     if depth > max_depth:
         return None, ""
-    html, final_url = fetch(url, referer=referer)
+    html, final_url = fetch(url, referer=referer, timeout=8, max_retries=0)
     if not html:
         return None, ""
     active_url = final_url or url
@@ -3015,6 +3031,25 @@ def extract_stream(url):
     # Correct disguised extensions
     main_url = _correct_stream_url(main_url)
 
+    # [FIX] confirmed directly, live, on a real device: playmogo.com/d/<id>
+    # (an info/"download" page shape) returns a completely empty response
+    # (0 bytes) when fetched -- there is no page content at all for
+    # resolve_iframe_chain() below to search, so nothing can recover it once
+    # it reaches that fallback. playmogo.com/e/<id> -- the SAME id, same
+    # host, already registered in HOST_RESOLVERS -- is confirmed working via
+    # a real device log (a doodstream.com/e/<id> resolution for this exact
+    # id redirected to, and succeeded through, playmogo.com/e/<id>). This is
+    # a fact about playmogo.com itself, not any one site that happens to
+    # link to it, so it belongs here rather than duplicated per-extractor.
+    _pg_m = re.match(
+        r'^(https?://)(playmogo' + chr(92) + r'.com)/d/([A-Za-z0-9]+)',
+        main_url, re.I
+    )
+    if _pg_m:
+        _rewritten = '{}{}/e/{}'.format(_pg_m.group(1), _pg_m.group(2), _pg_m.group(3))
+        log('extract_stream: rewrote playmogo /d/ -> /e/: {} -> {}'.format(main_url, _rewritten))
+        main_url = _rewritten
+
     # ─── DIRECT STREAM URL (m3u8/mp4/etc) ───────────────────────────────────
     if main_url.startswith("http") and _looks_like_direct_media(main_url):
         ref = piped_headers.get("Referer")
@@ -3041,24 +3076,18 @@ def extract_stream(url):
         stream = resolve_host(main_url, referer=piped_headers.get("Referer"))
         if not stream:
             log("resolve_host failed, trying iframe chain")
-            stream, _ = resolve_iframe_chain(main_url, referer=piped_headers.get("Referer"))
+            stream, resolved_domain = resolve_iframe_chain(main_url, referer=piped_headers.get("Referer"))
+            if not stream:
+                log("extract_stream FAILED for: {}".format(main_url))
+                return None, "", main_url, []
 
-        if stream:
-            stream = _correct_stream_url(stream)
+        variants = get_last_quality_variants()
 
-            q = _quality_label_for(stream)      # [PATCH 93]
+    stream = _correct_stream_url(stream)
+    ref = piped_headers.get("Referer") or get_referer(stream)
+    q = _quality_label_for(stream)
 
-            variants = [(lbl, u) for lbl, u in get_last_quality_variants() if u != stream]
-            if not variants:
-                variants = [(lbl, u) for lbl, u in get_synthesized_variants(stream) if u != stream]
+    others = [(lbl, u) for lbl, u in variants if u != stream]
 
-            log("extract_stream SUCCESS: {} ({}), {} extra variant(s)".format(stream[:120], q, len(variants)))
-            return stream, q, main_url, variants
-
-    log("extract_stream FAILED for: {}".format(main_url))
-    # [PATCH 35] the failure path returns the documented 4-tuple. The
-    # referer slot carries main_url (pipe-stripped), matching every
-    # success path — the first version returned raw `url`, which could
-    # still contain a |Referer=... fragment.
-    return None, "", main_url, []
-    
+    log("extract_stream SUCCESS: {} ({}), {} extra variant(s)".format(stream[:120], q, len(others)))
+    return stream, q, ref, others

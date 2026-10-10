@@ -28,8 +28,9 @@ Fixes applied in this revision:
     posters to fail in the grid while ASCII-named ones worked.
   * _parse_movie_items() extracts the release/quality label
     (CAM, HDTS, HD, WEB-DL, مدبلج, بالمصري, الاخيرة, …) into the item
-    dict as "label".  The UI does not read it yet — it is available for
-    a future badge widget.
+    dict as "label", plus the site's own chip colour as "label_color".
+    plugin_screen_home.py renders both — the chip appears directly
+    under the year badge in the carousel and poster grid views.
 
 Fixes carried over from previous revisions:
   CRITICAL: _detect_quality_variants() was outdented to MODULE level and
@@ -565,12 +566,21 @@ class EgyDeadExtractor(BaseExtractor):
             # افلام اجنبي etc.); this one tells the viewer what copy they
             # are about to get.
             label = ""
+            label_color = ""
             label_match = re.search(
                 r'<span[^>]*class=["\'][^"\']*\blabel\b[^"\']*["\'][^>]*>(.*?)</span>',
                 li, re.S | re.I
             )
             if label_match:
                 label = self._strip_tags(label_match.group(1)).strip()
+                # [site-label] carry the site's own chip colour through to
+                # the UI so the plugin can render the same CAM=red /
+                # HD=green / مدبلج=purple chip the site does.
+                _cm = re.search(
+                    r'background-color\s*:\s*(#[0-9a-fA-F]{3,6})',
+                    label_match.group(0))
+                if _cm:
+                    label_color = _cm.group(1)
 
             ep_num = ""
             ep_match = re.search(r'<span[^>]*class=["\'][^"\']*number_episode[^"\']*["\'][^>]*>.*?<em>(\d+)</em>', li, re.S | re.I)
@@ -610,6 +620,7 @@ class EgyDeadExtractor(BaseExtractor):
                     "poster": poster,
                     "plot": quality,
                     "label": label,
+                    "label_color": label_color,
                     "year": year,
                     "type": item_type,
                     "_action": "details",
@@ -870,7 +881,24 @@ class EgyDeadExtractor(BaseExtractor):
 
                 name = self._strip_tags(name_match.group(1)) if name_match else "Watch Server {}".format(len(servers) + 1)
 
-                if self._is_megamax_iframe(video_url):            # [PATCH 99]
+                is_megamax_shaped = self._is_megamax_iframe(video_url)
+                is_known_direct_host = any(h in video_url.lower() for h in self._KNOWN_DIRECT_HOSTS)
+
+                if is_megamax_shaped or not is_known_direct_host:
+                    # [FIX] the is_megamax_shaped branch (the common case, cheap
+                    # and precise) handles MegaMax simply rotating its domain --
+                    # the URL still looks like ".../iframe/<token>". If MegaMax
+                    # ever changes the URL SHAPE too, that check stops matching
+                    # and this would silently fall through to generic embed
+                    # treatment and fail, exactly like the original domain-name
+                    # check did. Rather than guess at the new shape next time,
+                    # any watch-server URL that ISN'T one of the other named,
+                    # known hosts gets speculatively tried as MegaMax too --
+                    # _megamax_groups() only succeeds if the fetched page
+                    # actually parses as MegaMax's own Inertia.js JSON
+                    # structure (props.streams.data), so trying it against an
+                    # unrelated host just costs one harmless extra fetch and
+                    # falls through to the same generic treatment as before.
                     try:
                         mm_servers = self._megamax_servers(video_url)
                     except Exception as e:
@@ -915,9 +943,33 @@ class EgyDeadExtractor(BaseExtractor):
     }
     _MEGAMAX_ORDER = ("streamruby", "mixdrop", "voe", "streamhg", "earnvids", "doodstream", "byse", "vidara", "uqload")
 
+    _MEGAMAX_IFRAME_RE = re.compile(r'^https?://[^/]+/iframe/[A-Za-z0-9_-]+/?(?:\?.*)?$', re.I)
+
+    _KNOWN_DIRECT_HOSTS = (
+        "streamruby", "stmruby", "streamhg", "streamwish", "uqload",
+        "mixdrop", "byse", "doodstream", "vidara", "earnvids", "voe",
+        "cybervynx", "streamtape", "govid", "vidguard", "egybestvid",
+    )
+
     def _is_megamax_iframe(self, url):
+        # [FIX] confirmed live: MegaMax rotates its iframe host to a
+        # random-looking domain (e.g. "q7v3k8m2p1.top") to dodge
+        # adblock/detection lists -- it no longer reliably contains the
+        # literal "megamax." substring, so that check alone stopped
+        # matching and these servers silently fell through to the
+        # generic embed/iframe resolver (which can't parse MegaMax's
+        # Inertia.js page and always fails). The actual MegaMax
+        # resolution in _megamax_groups() already retries via the
+        # stable eg.megamax.cam host regardless of the original
+        # domain -- match on the distinctive "/iframe/<token>" URL
+        # shape instead, which survives the domain rotation. A false
+        # positive here is harmless: _megamax_servers() just returns
+        # an empty list and the caller falls back to treating the URL
+        # as a normal embed server, exactly as before this change.
         low = (url or "").lower()
-        return "megamax." in low and "/iframe/" in low
+        if "megamax." in low and "/iframe/" in low:
+            return True
+        return bool(self._MEGAMAX_IFRAME_RE.match(url or ""))
 
     @staticmethod
     def _parse_inertia_page(text):

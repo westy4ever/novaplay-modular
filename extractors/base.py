@@ -62,6 +62,69 @@ from .hosts import (
 )
 
 
+# ─── [NEW] shared poster-shape helper ────────────────────────────────────
+# Several PHP Melody / "Cimawbas"-family sites (confirmed: vid.mycima.cc,
+# cwb.cam) only ever provide a landscape (~16:9) video-thumbnail image, not
+# a proper portrait (~2:3) movie poster -- these sites are fundamentally
+# video-sharing platforms, not movie databases, so there is no taller
+# image to find; forcing this shape into a tall poster box just produces a
+# heavily cropped, often unrecognizable slice of the thumbnail. Confirmed
+# directly against real captured markup from vid.mycima.cc:
+#     style="width: 240px; height: 136px; object-fit: cover; ..."
+# Shared here (rather than duplicated per-extractor) since more than one
+# site in this codebase already needs it.
+# [FIX] the first version of this regex searched the WHOLE block for any
+# "width: Npx; height: Mpx" text, not just the actual <img> tag's own
+# style. Confirmed directly against real captured markup: cards carrying
+# a status ribbon (e.g. "مستمر" / "ongoing") have an embedded <style>
+# block for the ribbon badge itself -- `.ribon { ... width: 75px;
+# height: 75px }` -- which appears BEFORE the real <img> tag in the same
+# block and matched first, incorrectly. 16 of 65 real items in one actual
+# capture were missed this way before the fix. Anchored specifically to
+# an <img ...style="...">  tag's own style attribute instead, so an
+# unrelated CSS rule elsewhere in the block can never be mistaken for the
+# image's real dimensions.
+_IMG_STYLE_LANDSCAPE_RE = re.compile(
+    r'<img\b[^>]*\bstyle\s*=\s*["\'][^"\']*?'
+    r'width\s*:\s*(\d+)px\s*;\s*height\s*:\s*(\d+)px',
+    re.I
+)
+
+
+def is_landscape_shaped(html):
+    """
+    Detect a landscape (wider-than-tall) image from an <img> tag's own
+    inline `style="width: Npx; height: Mpx"` attribute -- the pattern
+    used by PHP Melody / "Cimawbas"-family templates for their thumbnail
+    images.
+
+    Takes any chunk of HTML/text (a single card's block during listing
+    extraction, or a whole page during detail-meta extraction, where no
+    single scoped block is available) and checks the FIRST <img> tag
+    with a matching style found in it.
+
+    Returns True only when that pattern is present and explicitly
+    declares width > height. Returns False (assume portrait/unknown --
+    conservative on purpose) for text with no such <img> style at all,
+    or where the declared size is square or already portrait, since a
+    false "landscape" verdict would wrongly discard a perfectly good
+    poster. Verified directly against real mycima markup -- including a
+    real card carrying an unrelated, square-dimensioned CSS rule before
+    the actual image, which an earlier version of this function
+    incorrectly matched instead of the real image.
+    """
+    if not html:
+        return False
+    m = _IMG_STYLE_LANDSCAPE_RE.search(html)
+    if not m:
+        return False
+    try:
+        w, h = int(m.group(1)), int(m.group(2))
+    except (TypeError, ValueError):
+        return False
+    return w > h
+
+
 class BaseExtractor(object):
     """Base class for all site extractors.
     Each site should implement:

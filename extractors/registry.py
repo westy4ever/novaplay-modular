@@ -64,6 +64,29 @@ NEW (cwb):
         cwb          →  cwb.cam
     The registry keys, class names, and target domains are all
     distinct — see the table above. Do not confuse them.
+
+NEW (egydead_ca):
+  * Added EgydeadCaExtractor — egydead.ca (ايجي ديد), a React /
+    React-Router SPA backed by a clean, directly-fetchable JSON API
+    (/api/v1/channel/2 for movies, /api/v1/channel/series for series,
+    /api/v1/titles/<id> for detail, /api/v1/watch/<id> for streams).
+    Nothing is HTML-scraped — every field comes from JSON. Its
+    egybestvid.com embeds resolve through the shared hosts.py dispatch
+    with no dedicated resolver needed.
+    Opted into BOTH orders, pinned right after "egydead_coupons" so the
+    egydead family stays clustered on the home grid.
+    ⚠️  search() is a deliberate no-op: no search endpoint was ever
+    confirmed for this site, so it returns [] rather than guessing at
+    an unconfirmed URL shape. Being in _SEARCH_SITE_ORDER means
+    "search all" will fan out to it and get an empty list back every
+    time. If that bothers you, drop "egydead_ca" from
+    _SEARCH_SITE_ORDER — it will still appear on the home grid via
+    _HOME_SITE_ORDER and remain fully browsable by category.
+    ⚠️  If the existing "egydead" entry already targets egydead.ca
+    (check egydead.py's MAIN_URL / DOMAINS), this new extractor
+    SUPERSEDES it and you should REPLACE the "egydead" entry rather
+    than keep both — otherwise you'll have the same site on the grid
+    twice under two different keys.
 """
 
 import threading
@@ -72,6 +95,7 @@ from .base import log as _reg_log
 
 from .egydead import EgyDeadExtractor
 from .egydead_coupons import EgyDeadCouponsExtractor
+from .egydead_ca import EgydeadCaExtractor
 from .egybest import EgyBestExtractor
 from .akwam import AkwamExtractor
 from .akwams import AkwamsExtractor
@@ -102,6 +126,7 @@ from .onlyflix import OnlyFlixExtractor
 _SITE_REGISTRY = {
     "egydead":         {"class": EgyDeadExtractor, "title": "EgyDead", "tagline": "واجهة حديثة وبوسترات ومكتبة متجددة", "short": "واجهة حديثة وبوسترات"},
     "egydead_coupons": {"class": EgyDeadCouponsExtractor, "title": "EgyDead Coupons", "tagline": "النسخة العربية - تصنيفات وأقسام مترجمة", "short": "النسخة العربية - تصنيفات مترجمة"},
+    "egydead_ca":      {"class": EgydeadCaExtractor, "title": "EgyDead (CA)", "tagline": "ايجي ديد - واجهة حديثة وأفلام ومسلسلات مترجمة", "short": "ايجي ديد - أفلام ومسلسلات"},
     "egybest":         {"class": EgyBestExtractor, "title": "EgyBest", "tagline": "ايجي بست - أفلام ومسلسلات مترجمة", "short": "ايجي بست - كل المحتوى"},
     "akwam":           {"class": AkwamExtractor, "title": "Akwam (Classic)", "tagline": "موقع اكوام الكلاسيكي - افلام ومسلسلات عربية واجنبية", "short": "موقع اكوام الكلاسيكي"},
     "akwams":          {"class": AkwamsExtractor, "title": "Akwams (Modern)", "tagline": "موقع اكوام الحديث - واجهة سريعة ومحتوى محدث", "short": "موقع اكوام الحديث"},
@@ -131,8 +156,12 @@ _SITE_REGISTRY = {
 # "mycima", "cimawebas", and "cwb" are all listed here — each is a
 # distinct site with a distinct content pool (different engine, different
 # domain, different catalogue), so search-all should fan out to all three.
+# "egydead_ca" is listed too, but note its search() is a confirmed no-op
+# (no endpoint was ever captured) — it contributes nothing to search
+# results and can be dropped from this tuple without losing anything.
 _SEARCH_SITE_ORDER = (
-    "egydead", "egydead_coupons", "egybest", "akwam", "akwams", "arabseed",
+    "egydead", "egydead_coupons", "egydead_ca", "egybest", "akwam", "akwams",
+    "arabseed",
     "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx",
     "shaheed", "shahid4u", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
@@ -143,9 +172,12 @@ _SEARCH_SITE_ORDER = (
 # Home-grid tile order — deliberately separate from _SEARCH_SITE_ORDER
 # (see module docstring). The three cima-family sites (mywecima, mycima,
 # cimawebas, cwb) are pinned together so they appear as a sibling cluster
-# on the grid rather than being appended to the tail.
+# on the grid rather than being appended to the tail. The three
+# egydead-family sites (egydead, egydead_coupons, egydead_ca) are pinned
+# together at the top for the same reason.
 _HOME_SITE_ORDER = (
-    "egydead", "egydead_coupons", "egybest", "akwam", "akwams", "arabseed",
+    "egydead", "egydead_coupons", "egydead_ca", "egybest", "akwam", "akwams",
+    "arabseed",
     "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
     "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",

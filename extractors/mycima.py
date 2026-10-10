@@ -113,7 +113,7 @@ import threading
 
 from .base import (
     BaseExtractor, fetch, log, urljoin,
-    _correct_stream_url,
+    _correct_stream_url, is_landscape_shaped,
 )
 
 try:
@@ -554,13 +554,43 @@ class MyCimaExtractor(BaseExtractor):
                 continue
 
             # Poster — see _pick_real_image for the lazy/placeholder dance.
+            # [NEW] this site's own images (confirmed via real captured
+            # markup) are landscape video-thumbnails (e.g. 240x136), not
+            # proper portrait movie posters -- always keep the raw image
+            # as `thumbnail` (a real, if wrong-shaped, image beats a blank
+            # placeholder as a last resort), but only populate `poster`
+            # itself when the source isn't landscape-shaped. An empty
+            # `poster` is what the existing plugin_tmdb.py merge logic
+            # (detail screen) and the grid's async TMDB fallback both key
+            # off of to substitute a proper portrait poster instead.
+            # [FIX] is_landscape_shaped() alone was missing a real, common
+            # case: confirmed directly against the REAL, LIVE site (not a
+            # stale capture) that many cards use a LAZY-LOADED <img>
+            # variant -- src is the template's own placeholder
+            # (melody-lzld.png), the real thumbnail lives in data-echo --
+            # and this variant carries NO width/height style at all, so
+            # the style-based check had nothing to find and silently
+            # returned False ("assume portrait") for every single one.
+            # Confirmed on the real device: every item in one real
+            # category listing used this lazy variant and slipped through
+            # undetected. Falls back to the same confirmed URL-path
+            # convention already used for the detail page's meta-tag case
+            # (which has no style context either) whenever the style
+            # check finds nothing -- both variants resolve to the same
+            # /uploads/thumbs/ path regardless of which <img> shape
+            # delivered it.
             poster = ""
+            thumbnail = ""
             raw = self._pick_real_image(block)
             if raw:
-                poster = self._full_url(raw)
+                thumbnail = self._full_url(raw)
+                is_landscape = (is_landscape_shaped(block)
+                                or "/uploads/thumbs/" in thumbnail.lower())
+                if not is_landscape:
+                    poster = thumbnail
             if _DEBUG_POSTER:
-                log("MyCima poster: raw={!r} url={!r} block-id={}".format(
-                    raw, poster, url.split("vid=")[-1][:16]))
+                log("MyCima poster: raw={!r} poster={!r} thumbnail={!r} block-id={}".format(
+                    raw, poster, thumbnail, url.split("vid=")[-1][:16]))
 
             # Rating — e.g. <span class="rating">7.6 <i ...></i></span>
             rating = ""
@@ -613,8 +643,8 @@ class MyCimaExtractor(BaseExtractor):
                 "title": display_title,
                 "url": url,
                 "poster": poster,
-                "thumbnail": poster,
-                "image": poster,
+                "thumbnail": thumbnail,
+                "image": thumbnail,
                 "plot": label,
                 "label": label,
                 "rating": rating,
@@ -841,10 +871,31 @@ class MyCimaExtractor(BaseExtractor):
         if ym:
             year = ym.group(1)
 
-        if _DEBUG_POSTER:
-            log("MyCima detail: poster={!r} title={!r}".format(poster, title))
+        # [NEW] same intent as _extract_cards()'s landscape check, but a
+        # DIFFERENT mechanism -- confirmed directly that the watch.php
+        # detail page has ZERO <img> tags with any width-style at all, so
+        # is_landscape_shaped()'s style-search has nothing to find here;
+        # the poster only ever arrives via a bare <meta content="URL">
+        # with no styling context whatsoever. Instead, this uses a
+        # confirmed fact specific to this site: the grid and detail pages
+        # serve the exact same underlying file for the same title (same
+        # hash, same /uploads/thumbs/ path) -- verified directly by
+        # comparing both for "The Uprising 2026". So any poster URL under
+        # that path is the same landscape thumbnail confirmed on the
+        # grid, and gets the same treatment. `thumbnail` always keeps the
+        # raw image as a last resort; only `poster` gets blanked, which
+        # is exactly what plugin_tmdb.py's existing fill-only-if-empty
+        # merge logic already needs to substitute a proper TMDB poster on
+        # the detail screen -- no change needed there at all.
+        thumbnail = poster
+        if poster and "/uploads/thumbs/" in poster.lower():
+            poster = ""
 
-        return title, poster, plot, year
+        if _DEBUG_POSTER:
+            log("MyCima detail: poster={!r} thumbnail={!r} title={!r}".format(
+                poster, thumbnail, title))
+
+        return title, poster, plot, year, thumbnail
 
     # ── Server extraction (watch / play page) ──────────────────────────
     def _decode_wecima_b64(self, raw):
@@ -941,9 +992,24 @@ class MyCimaExtractor(BaseExtractor):
             return
         if url in seen:
             return
-        seen.add(url)
         host_m = re.search(r'https?://([^/]+)', url)
         host = host_m.group(1) if host_m else ""
+        # [FIX] a URL pointing back to the SITE'S OWN domain (e.g. this
+        # site's own embed.php) was being accepted as a "server" just
+        # like a genuine third-party host -- confirmed directly on a real
+        # device: "1 watch server(s)" turned out to be
+        # "https://vid.mycima.cc/embed.php?vid=<hash>" itself, which is
+        # Cloudflare-walled and can never resolve without a proxy, so
+        # playback always failed. Worse, because *something* counted as
+        # found, the /play.php sibling-fallback (which found 6 real,
+        # working servers for a different title under the exact same
+        # circumstances) never even ran. A genuine server should always
+        # point to a different, third-party host -- never back to the
+        # site itself -- so self-references are rejected here instead of
+        # accepted as a false "success".
+        if any(m in host.lower() for m in self.VALID_HOST_MARKERS):
+            return
+        seen.add(url)
         name = label or self._host_display_name(host)
         servers.append({
             "name": "🎬 " + name,
@@ -1166,11 +1232,11 @@ class MyCimaExtractor(BaseExtractor):
             log("MyCima: get_page failed for {}".format(url))
             return result
 
-        title, poster, plot, year = self._extract_detail_meta(html)
+        title, poster, plot, year, thumbnail = self._extract_detail_meta(html)
         result["title"] = title
         result["poster"] = poster
-        result["thumbnail"] = poster
-        result["image"] = poster
+        result["thumbnail"] = thumbnail
+        result["image"] = thumbnail
         result["plot"] = plot
         result["year"] = year
         result["url"] = final_url or url
@@ -1197,18 +1263,39 @@ class MyCimaExtractor(BaseExtractor):
             if rev_html:
                 servers = self._extract_watch_servers(rev_html, reveal_url)
 
-        # If we landed on the poster-only play.php view, the server list
-        # lives on watch.php — try that as a last resort.
+        # [FIX] the site moved WHICH page hosts the live server list at least
+        # once already -- confirmed directly against real captures three days
+        # apart (2026-09-27 vs 2026-09-30): watch.php used to have the
+        # data-embed/list_servers block and play.php was the poster-only
+        # view; by 2026-09-30, watch.php only has a harmless "share/embed
+        # code" textarea widget (unrelated static text that happens to
+        # contain the word "iframe"), and the REAL server list -- 6 real
+        # servers, confirmed by actually running this exact extraction
+        # against the real page -- now lives on play.php instead. The old
+        # code here only ever re-derived watch.php as its last-resort
+        # fallback, which is not just wrong now, it's a wasted, redundant
+        # re-fetch of the exact same URL already tried in step 1 above.
+        # Tries whichever sibling page (play.php vs watch.php) we did NOT
+        # already start from, rather than hardcoding a direction -- robust
+        # either way if the site flips back, or if some pages on the site
+        # turn out to go the other way.
         if not servers:
             vid_m = re.search(r'[?&]vid=([A-Za-z0-9]+)', final_url or url)
             if vid_m:
-                watch_url = self._full_url("watch.php?vid=" + vid_m.group(1))
-                if watch_url != (final_url or url):
-                    log("MyCima: falling back to {}".format(watch_url))
-                    w_html, _ = fetch(watch_url, referer=final_url or url,
-                                      extra_headers=_PROBE_HEADERS)
-                    if w_html:
-                        servers = self._extract_watch_servers(w_html, watch_url)
+                vid = vid_m.group(1)
+                current_path = urlparse(final_url or url).path.lower()
+                for sib in ("play.php", "watch.php"):
+                    if sib in current_path:
+                        continue
+                    sib_url = self._full_url(sib + "?vid=" + vid)
+                    log("MyCima: no servers found, trying sibling page {}"
+                        .format(sib_url))
+                    sib_html, _ = fetch(sib_url, referer=final_url or url,
+                                        extra_headers=_PROBE_HEADERS)
+                    if sib_html:
+                        servers = self._extract_watch_servers(sib_html, sib_url)
+                    if servers:
+                        break
 
         result["servers"] = servers
         result["downloads"] = self._extract_download_links(html)

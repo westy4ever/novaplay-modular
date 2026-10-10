@@ -397,7 +397,8 @@ def _fetch_via_browser_proxy(url, referer=None, post_data=None):
     return None, url
 
 
-def fetch(url, referer=None, extra_headers=None, post_data=None):
+def fetch(url, referer=None, extra_headers=None, post_data=None,
+           timeout=None, max_retries=None):
     """
     Robust fetch with:
     - Referer defaults from the SINGLE referers.py table (was: two
@@ -413,14 +414,27 @@ def fetch(url, referer=None, extra_headers=None, post_data=None):
     set_proxy_used(False)
     set_curl_failed_needs_proxy(False)
 
-    max_retries = 2
+    # [FIX] optional fast-fail override for speculative candidate/
+    # iframe-follow fetches (dead mirrors used to eat up to ~93s
+    # each via the default 30s*3-attempt budget before the sweep
+    # could move to the next server). None preserves today's
+    # behavior exactly for every other caller.
+    max_retries = 2 if max_retries is None else max_retries
     use_cffi = False
     parsed_quick = urlparse(url)
     domain_quick = parsed_quick.netloc.lower()
     # cf_domains trimmed: themoviedb removed — TMDB needs no Chrome
     # impersonation; the plain urllib path is faster and lighter.
     cf_domains = ("egydead", "wecima", "mycima", "topcinema", "arabseed",
-                  "shaheed", "shahid", "fasel", "akwam", "akoam")
+                  "shaheed", "shahid", "fasel", "akwam", "akoam",
+                  "egybestvid")  # [FIX] confirmed directly: plain urllib gets
+                  # served a tiny (~38 byte) bot-challenge stub by this CDN's
+                  # embed-page host, inconsistently and without tripping
+                  # _is_cloudflare_challenge() -- so fetch() treated the stub
+                  # as a successful response and retries never escalated to
+                  # curl_cffi. A direct curl_cffi(impersonate="chrome") call
+                  # to the same URL got the full real page on the first try,
+                  # every time.
     if any(d in domain_quick for d in cf_domains):
         use_cffi = True
 
@@ -468,8 +482,24 @@ def fetch(url, referer=None, extra_headers=None, post_data=None):
                         cf_headers.update(extra_headers)
 
                     log("curl_cffi fetch: {} (attempt {})".format(url, attempt + 1))
-                    session = _get_curl_session()
-                    cffi_client = session if session is not None else _curl_requests
+                    # [FIX] confirmed directly: egybestvid.com's embed host
+                    # returns a real page to a one-off curl_cffi module-level
+                    # call, but a 38-byte "Video embed restricted for this
+                    # domain" stub to the SAME request (identical headers,
+                    # identical impersonate, with or without impersonate set
+                    # at Session construction) when made through a
+                    # curl_cffi Session object. Reproduced 4/4 times outside
+                    # the plugin entirely -- Session vs one-off is the only
+                    # variable that correlates with the outcome. Bypass the
+                    # persistent session for this host specifically rather
+                    # than risk the same issue on other sites that currently
+                    # rely on session cookie persistence.
+                    _no_session_domains = ("egybestvid",)
+                    if any(d in domain_quick for d in _no_session_domains):
+                        cffi_client = _curl_requests
+                    else:
+                        session = _get_curl_session()
+                        cffi_client = session if session is not None else _curl_requests
 
                     # [PATCH 66] str/bytes bodies (faselhd_rip AJAX, OpenSubtitles
                     # /download) used to fall into the GET branch
@@ -482,16 +512,23 @@ def fetch(url, referer=None, extra_headers=None, post_data=None):
                         if not isinstance(post_data, dict) and not any(
                                 k.lower() == "content-type" for k in cf_headers):
                             cf_headers["Content-Type"] = "application/x-www-form-urlencoded"
+                    # [FIX] declaring impersonate="chrome120" but then hand-setting
+                    # Accept-Encoding without "br" is a fingerprint mismatch real
+                    # Chrome never produces -- let curl_cffi's impersonation layer
+                    # fill this in itself (matches the browser header set exactly).
+                    cf_headers.pop("Accept-Encoding", None)
+
+                    _cffi_timeout = 30 if timeout is None else timeout
                     try:
                         if _pd is not None:
-                            r = cffi_client.post(url, data=_pd, headers=cf_headers, impersonate="chrome120", timeout=30)
+                            r = cffi_client.post(url, data=_pd, headers=cf_headers, impersonate="chrome120", timeout=_cffi_timeout)
                         else:
-                            r = cffi_client.get(url, headers=cf_headers, impersonate="chrome120", timeout=30)
+                            r = cffi_client.get(url, headers=cf_headers, impersonate="chrome120", timeout=_cffi_timeout)
                     except TypeError:
                         if _pd is not None:
-                            r = cffi_client.post(url, data=_pd, headers=cf_headers, timeout=30)
+                            r = cffi_client.post(url, data=_pd, headers=cf_headers, timeout=_cffi_timeout)
                         else:
-                            r = cffi_client.get(url, headers=cf_headers, timeout=30)
+                            r = cffi_client.get(url, headers=cf_headers, timeout=_cffi_timeout)
 
                     html = r.text
                     final_url = r.url
@@ -574,7 +611,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None):
             log("Fetching (attempt {}): {}".format(attempt + 1, encoded_url))
             req = Request(encoded_url, headers=headers, data=data)
 
-            with opener.open(req, timeout=TIMEOUT) as resp:
+            with opener.open(req, timeout=(TIMEOUT if timeout is None else timeout)) as resp:
                 raw = resp.read()
                 final_url = resp.geturl()
                 info = resp.info()

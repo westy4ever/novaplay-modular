@@ -220,6 +220,15 @@ class CimaWebasExtractor(BaseExtractor):
         "dressedoutrageousrun.com",
         "omoonsih.net",
         "mc.yandex.ru",
+        # [FIX] confirmed directly: these two slipped through the generic
+        # strategy-1b scan and were returned as fake "servers" -- a Google
+        # Fonts stylesheet link (present on every page via wp_head) and a
+        # WhatsApp share-button link (wa.me is WhatsApp's own click-to-chat
+        # short-link domain, distinct from whatsapp.com, which was already
+        # listed).
+        "fonts.googleapis.com",
+        "fonts.gstatic.com",
+        "wa.me",
     )
 
     # Known streaming hosts + direct-media CDN hosts. The CDN hosts are the
@@ -972,10 +981,23 @@ class CimaWebasExtractor(BaseExtractor):
         # media, even if it would slip through (defensive — the extension
         # check above already catches it).
 
-        # Unwrap `topcinemaa.com/play.php?to=<enc>` — purely cosmetic, but
-        # makes the name/host lookup land on the real host.
+        # [FIX] always unwrap `topcinemaa.com/play.php?to=<enc>` before the
+        # dedup check below -- the old condition ("only unwrap if the
+        # unwrapped version isn't already seen") was backwards. Confirmed
+        # directly: the real site offers both a direct server button
+        # (streamwish.fun/e/...) and a separate topcinemaa-wrapped button
+        # for the exact same stream. Processing the direct one first adds
+        # the unwrapped URL to `seen`; when the wrapped one is then
+        # processed, the old code's condition was false (resolved WAS
+        # already in seen), so it skipped the reassignment and left `url`
+        # as the original wrapped string -- which was never in `seen` --
+        # so the dedup check below passed and added a redundant duplicate
+        # "server" pointing at the identical stream. Always resolving to
+        # the unwrapped form first lets the existing `if url in seen`
+        # check do its job correctly regardless of which copy (direct or
+        # wrapped) is processed first.
         resolved = self._unwrap_player_proxy(url)
-        if resolved and resolved not in seen:
+        if resolved:
             url = resolved
 
         if url in seen:
@@ -1384,16 +1406,29 @@ class CimaWebasExtractor(BaseExtractor):
             result["type"] = m_type
 
         # ── 4. Servers ────────────────────────────────────────────────────
+        # [FIX] this used to try the LANDING page first -- but this module's
+        # own docstring already documents "the landing page has NO server
+        # list". Confirmed directly: strategy 1a (the real data-ncp-watch-
+        # server scan) correctly found 0 buttons on a real landing page, so
+        # the code fell through to the generic strategy-1b safety net,
+        # which picked up unrelated links (a Google Fonts stylesheet, a
+        # WhatsApp share button) as false-positive "servers". Because that
+        # result was non-empty, `if not servers and watch_html` never even
+        # ran -- so the real, correct server list on the watch page (11
+        # real servers, confirmed directly) was never reached at all. Now
+        # tries watch_html first, since that's the only page documented to
+        # ever actually have servers; landing_html is kept only as a
+        # last-resort fallback if the watch page itself came back empty.
         servers = []
-        if landing_html:
+        if watch_html:
+            servers = self._extract_watch_servers(watch_html, watch_final)
+            log("CimaWebas: get_page — {} server(s) found on watch page"
+                .format(len(servers)))
+
+        if not servers and landing_html:
             servers = self._extract_watch_servers(
                 landing_html, landing_final or clean_url)
             log("CimaWebas: get_page — {} server(s) found on landing"
-                .format(len(servers)))
-
-        if not servers and watch_html:
-            servers = self._extract_watch_servers(watch_html, watch_final)
-            log("CimaWebas: get_page — {} server(s) found on watch page"
                 .format(len(servers)))
 
         # Last-ditch: if we're on a landing URL and still nothing, try

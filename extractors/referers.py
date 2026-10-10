@@ -81,6 +81,7 @@ _REFERER_TABLE = {
     "miixdrop":      "https://mixdrop.to/",
     "earnvids":      None,
     "streamruby":    None,   # resolver carries its egydead referer list
+    "egybestvid":    "https://egybestvid.com/",
 }
 
 

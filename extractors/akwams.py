@@ -12,6 +12,7 @@ FIX: Pass embed URLs directly to UI to prevent background resolution timeouts.
 FIX: Added medixiru, audinifer, morencius to streaming hosts based on JSON log.
 FIX: Added proper pagination support for /page/N/ format.
 FIX: Added series/episode detection and extraction.
+FIX: Removed akwams.info domain (no longer functional).
 """
 
 import re
@@ -37,7 +38,6 @@ class AkwamsExtractor(BaseExtractor):
         "https://akwams.com.co/",
         "https://akwams.co/",
         "https://akwams.net/",
-        "https://akwams.info/",
     ]
     
     # Streaming host domains that appear on akwams watch pages
@@ -344,7 +344,7 @@ class AkwamsExtractor(BaseExtractor):
         base_host = re.search(r'https?://([^/]+)', self._get_base())
         base_host_str = base_host.group(1).lower() if base_host else "akwams.org"
         
-        def _add_server(url, name_hint=""):
+        def _add_server(url, name_hint="", quality=""):
             url = url.strip().replace("&amp;", "&")
             if not url or url in seen:
                 return
@@ -406,7 +406,8 @@ class AkwamsExtractor(BaseExtractor):
             servers.append({
                 "name": base_name,
                 "url": full_url,
-                "type": "embed"
+                "type": "embed",
+                "quality": quality
             })
         
         # 1. data-link / data-url / data-iframe / data-src attributes (used by akwams watch pages)
@@ -458,8 +459,86 @@ class AkwamsExtractor(BaseExtractor):
                 for m in re.finditer(pat, html, re.I):
                     _add_server(m.group(1).replace('\\/', '/'))
         
+
+        # 6. Quality-grouped download cards (akwams.org's real download
+        # page structure, confirmed live: a <h3> quality/source label
+        # (e.g. "سيرفرات تحميل WEB-DL") followed by a block of
+        # <div class="download-card"><a href="...">...</div> entries. A site
+        # with multiple real quality tiers has multiple such <h3>+cards
+        # blocks in sequence -- matched here by position (nearest preceding
+        # heading for each server link) rather than trying to match nested,
+        # balanced HTML tags via regex, which is unreliable. Confirmed
+        # directly: a real captured page for this site had exactly one such
+        # block (a single WEB-DL tier, no size info published at all for
+        # that title) -- this correctly produces one shared label for every
+        # server in that case, and correctly distinguishes separate labels
+        # for a title with genuinely multiple quality tiers.
+        quality_positions = []
+        for qm in re.finditer(r"<h3[^>]*>\s*([^<]+?)\s*</h3>", html, re.S):
+            label = qm.group(1).strip()
+            label = re.sub(r"^سيرفرات\s+تحميل\s+", "", label).strip() or label
+            quality_positions.append((qm.start(), label))
+        quality_positions.sort()
+
+        if quality_positions:
+            for cm in re.finditer(r"<div class=\"download-card\">.*?href=\"([^\"]+)\"", html, re.S):
+                card_pos = cm.start()
+                card_url = cm.group(1)
+                card_quality = ""
+                for qpos, qlabel in quality_positions:
+                    if qpos < card_pos:
+                        card_quality = qlabel
+                    else:
+                        break
+                _add_server(card_url, quality=card_quality)
+
         return servers
     
+    def _parse_download_servers(self, html):
+        """
+        Download-page quality-grouped server list -- a separate
+        "downloads" structure from result["servers"]/the watch-page
+        embeds, matching egydead.py's own result["downloads"] shape
+        and field names (resolution/size/quality/url) for UI
+        consistency, confirmed by reading that file directly. Reuses
+        the same quality-heading-by-position matching already proven
+        correct in _extract_servers_from_html's strategy 6. akwams.org
+        publishes no file-size info at all (confirmed live against a
+        real page), so "size" is always empty here, unlike egydead.py
+        which has real size text to capture.
+        """
+        downloads = []
+        if not html:
+            return downloads
+
+        quality_positions = []
+        for qm in re.finditer(r"<h3[^>]*>\s*([^<]+?)\s*</h3>", html, re.S):
+            label = qm.group(1).strip()
+            label = re.sub(r"^سيرفرات\s+تحميل\s+", "", label).strip() or label
+            quality_positions.append((qm.start(), label))
+        quality_positions.sort()
+
+        for cm in re.finditer(r"<div class=\"download-card\">.*?href=\"([^\"]+)\"", html, re.S):
+            card_pos = cm.start()
+            card_url = cm.group(1).strip().replace("&amp;", "&")
+            if not card_url:
+                continue
+            card_quality = ""
+            for qpos, qlabel in quality_positions:
+                if qpos < card_pos:
+                    card_quality = qlabel
+                else:
+                    break
+            host_m = re.search(r"https?://(?:www\.)?([^/]+)", card_url)
+            host_name = host_m.group(1) if host_m else "Server"
+            downloads.append({
+                "resolution": card_quality,
+                "size": "",
+                "quality": host_name,
+                "url": card_url,
+            })
+        return downloads
+
     def get_page(self, url, m_type=None):
         if not url or url.startswith("javascript"):
             return {"title": "Error", "servers": [], "items": [], "type": "movie"}
@@ -523,23 +602,51 @@ class AkwamsExtractor(BaseExtractor):
         # ── If no servers found, try fetching the /watch/ page explicitly ──
         if not servers:
             watch_url = None
-            
+
             # Look explicitly for a /watch/ link in the HTML (matches #watchBtn href)
             watch_link_match = re.search(r'href="([^"]+/watch/?)"', html, re.I)
             if watch_link_match:
                 watch_url = self._normalize_url(watch_link_match.group(1))
-            elif not url.rstrip('/').endswith('/watch'):
+            elif not url.rstrip("/").endswith("/watch"):
                 # Fallback: append /watch/ to the current URL
-                watch_url = url.rstrip('/') + '/watch/'
-            
+                watch_url = url.rstrip("/") + "/watch/"
+
             if watch_url and watch_url != url:
                 log("Akwams: No servers on detail page, trying watch page: {}".format(watch_url))
                 watch_html, _ = fetch(watch_url, referer=url)
                 if watch_html:
                     servers = self._extract_servers_from_html(watch_html, watch_url)
-        
+
+        # [FIX] confirmed directly, from the real site own JavaScript source
+        # (akwam.js / inline script on a real captured movie page): both the
+        # watch and download buttons navigate to the SAME predictable pattern
+        # -- the current page own URL with /watch or /download appended, behind
+        # a Telegram-popup marketing gate, not an AJAX call at all. The /watch/
+        # fallback above already existed and already works (confirmed: watch
+        # streams already played fine) -- but there was no equivalent /download/
+        # fallback anywhere, so a real, separate set of servers (confirmed via
+        # real captures tonight to resolve to MixDrop/DoodStream, both already
+        # supported by the shared hosts.py dispatch with zero new resolver code
+        # needed) was never discovered at all. Merged with, not replacing, the
+        # watch-page servers above, deduped by URL, since a real site may expose
+        # genuinely different servers on each of its two pages.
+        if not url.rstrip("/").endswith("/download"):
+            download_url = url.rstrip("/") + "/download/"
+            if download_url != url:
+                log("Akwams: Also trying download page for additional servers: {}".format(download_url))
+                download_html, _ = fetch(download_url, referer=url)
+                if download_html:
+                    download_servers = self._extract_servers_from_html(download_html, download_url)
+                    seen_urls = set(s["url"] for s in servers)
+                    for s in download_servers:
+                        if s["url"] not in seen_urls:
+                            seen_urls.add(s["url"])
+                            servers.append(s)
+                    result["downloads"] = self._parse_download_servers(download_html)
+
+        result.setdefault("downloads", [])
         result["servers"] = servers
-        
+
         # ── Extract episodes for series pages ──
         if is_series and not is_episode:
             episodes = []

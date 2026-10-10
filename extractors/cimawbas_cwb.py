@@ -57,7 +57,7 @@ import threading
 
 from .base import (
     BaseExtractor, fetch, log, urljoin,
-    _correct_stream_url,
+    _correct_stream_url, is_landscape_shaped,
 )
 
 try:
@@ -190,6 +190,14 @@ class CimaWbasCwbExtractor(BaseExtractor):
         # VidMoly CDN endpoints (HLS delivery)
         "vmbox.space", "hgplaycdn", "niramirus", "audinifer",
         "staticmoly", "vidmoly.me",
+        # [FIX] confirmed directly against real resolved stream URLs from
+        # a real cwb.cam episode: "hgplaycdn" and "hglamioz" carry the
+        # identical URL path structure, including the same marker string
+        # (".../kjhhiuahiuhgihdf/...") -- strongly indicating these are
+        # the same underlying CDN service on different edge domains, the
+        # same pattern as firestream.to's us-cdn-1/fr-cdn-1 split. "jodwish"
+        # has no such obvious sibling here; given its own entry.
+        "hglamioz", "jodwish",
         # Generic PHP Melody embeds
         "streamwish", "filemoon", "dood", "playmogo", "vidhide", "voe",
         "mixdrop", "luluvdo", "lulustream", "streamtape", "mp4upload",
@@ -519,13 +527,34 @@ class CimaWbasCwbExtractor(BaseExtractor):
             if not title:
                 continue
 
+            # [NEW] same landscape treatment as mycima.py's _extract_cards():
+            # keep the raw image as `thumbnail` (a real, if wrong-shaped,
+            # image beats no image at all as a last resort), only populate
+            # `poster` itself when the source isn't landscape-shaped. An
+            # empty `poster` is what plugin_tmdb.py's detail-screen merge
+            # and the grid's TMDB fallback both key off of.
+            # [FIX] same gap found and confirmed on the real, live mycima.py
+            # site: is_landscape_shaped() alone misses the lazy-loaded <img>
+            # variant (src is a template placeholder, the real thumbnail
+            # lives in data-echo, and this variant carries no width/height
+            # style at all). Not independently confirmed against a real
+            # cwb.cam capture, but applied for the same reason as the other
+            # consistency fixes carried over from mycima.py: both sites
+            # share the same underlying template, and the confirmed bug was
+            # in the SHARED style-only heuristic itself, not anything
+            # mycima-specific.
             poster = ""
+            thumbnail = ""
             raw = self._pick_real_image(block)
             if raw:
-                poster = self._full_url(raw)
+                thumbnail = self._full_url(raw)
+                is_landscape = (is_landscape_shaped(block)
+                                or "/uploads/thumbs/" in thumbnail.lower())
+                if not is_landscape:
+                    poster = thumbnail
             if _DEBUG_POSTER:
-                log("CimaWbasCwb poster: raw={!r} url={!r} block={}".format(
-                    raw, poster, url.split("=")[-1][:24]))
+                log("CimaWbasCwb poster: raw={!r} poster={!r} thumbnail={!r} block={}".format(
+                    raw, poster, thumbnail, url.split("=")[-1][:24]))
 
             rating = ""
             rating_m = re.search(
@@ -575,8 +604,8 @@ class CimaWbasCwbExtractor(BaseExtractor):
                 "title": display_title,
                 "url": url,
                 "poster": poster,
-                "thumbnail": poster,
-                "image": poster,
+                "thumbnail": thumbnail,
+                "image": thumbnail,
                 "plot": label,
                 "label": label,
                 "rating": rating,
@@ -780,10 +809,28 @@ class CimaWbasCwbExtractor(BaseExtractor):
         if ym:
             year = ym.group(1)
 
-        if _DEBUG_POSTER:
-            log("CimaWbasCwb detail: poster={!r} title={!r}".format(poster, title))
+        # [NEW] same intent as mycima.py's detail-page fix -- but flagged
+        # honestly: I have NOT directly confirmed cwb.cam's own thumbnail
+        # URL path convention the way I confirmed mycima's /uploads/thumbs/
+        # against real captured data. This is an INFERENCE based on both
+        # sites sharing the same PHP Melody template family (confirmed via
+        # matching markup signatures: pm-video-thumb, img-responsive,
+        # width:240px style) -- plausible since that path is typically
+        # baked into the underlying script itself, not customized per
+        # site, but worth verifying against a real cwb.cam capture before
+        # fully trusting this. `thumbnail` always keeps the raw image
+        # regardless, so nothing is lost even if this guess is wrong --
+        # at worst, the detail screen here just doesn't get the TMDB
+        # substitution mycima.py's detail screen does.
+        thumbnail = poster
+        if poster and "/uploads/thumbs/" in poster.lower():
+            poster = ""
 
-        return title, poster, plot, year
+        if _DEBUG_POSTER:
+            log("CimaWbasCwb detail: poster={!r} thumbnail={!r} title={!r}".format(
+                poster, thumbnail, title))
+
+        return title, poster, plot, year, thumbnail
 
     # ── Server extraction (watch / play page) ──────────────────────────
     def _decode_wecima_b64(self, raw):
@@ -843,6 +890,11 @@ class CimaWbasCwbExtractor(BaseExtractor):
             ("vidmoly", "VidMoly"),
             ("vmbox", "VidMoly"),
             ("hgplaycdn", "HGPlay"),
+            # [FIX] see _MEDIA_HOST_MARKERS -- same service as hgplaycdn,
+            # confirmed via the identical URL path/marker string on real
+            # resolved stream URLs from the same title.
+            ("hglamioz", "HGPlay"),
+            ("jodwish", "JodWish"),
             ("niramirus", "Niramirus"),
             ("audinifer", "Audinifer"),
             # ── Generic PHP Melody embeds ────────────────────────────
@@ -889,9 +941,20 @@ class CimaWbasCwbExtractor(BaseExtractor):
             return
         if url in seen:
             return
-        seen.add(url)
         host_m = re.search(r'https?://([^/]+)', url)
         host = host_m.group(1) if host_m else ""
+        # [FIX] same self-reference issue confirmed and fixed in mycima.py
+        # -- a URL pointing back to this site's own domain (e.g. its own
+        # embed.php) was being accepted as a "server" just like a genuine
+        # third-party host, even though a real server should always point
+        # elsewhere. Not independently confirmed against a real cwb.cam
+        # capture, but applied for the same reason as the other
+        # consistency fixes carried over from mycima.py: both sites share
+        # the same underlying template, and this class of bug is
+        # plausible here too.
+        if any(m in host.lower() for m in self.VALID_HOST_MARKERS):
+            return
+        seen.add(url)
         name = label or self._host_display_name(host)
         servers.append({
             "name": "🎬 " + name,
@@ -1128,11 +1191,11 @@ class CimaWbasCwbExtractor(BaseExtractor):
             log("CimaWbasCwb: get_page failed for {}".format(url))
             return result
 
-        title, poster, plot, year = self._extract_detail_meta(html)
+        title, poster, plot, year, thumbnail = self._extract_detail_meta(html)
         result["title"] = title
         result["poster"] = poster
-        result["thumbnail"] = poster
-        result["image"] = poster
+        result["thumbnail"] = thumbnail
+        result["image"] = thumbnail
         result["plot"] = plot
         result["year"] = year
         result["url"] = final_url or norm_url
@@ -1160,18 +1223,31 @@ class CimaWbasCwbExtractor(BaseExtractor):
             if rev_html:
                 servers = self._extract_watch_servers(rev_html, reveal_url)
 
-        # If we landed on the poster-only play.php view, the server list
-        # lives on watch.php — try that as a last resort.
+        # [FIX] same site-restructuring issue found and fixed in mycima.py:
+        # the old logic here only ever re-derived watch.php as a last
+        # resort (a comment that assumed play.php was the "poster-only"
+        # view) -- not confirmed against this specific site, but applying
+        # the same, more robust fix for consistency: try whichever sibling
+        # page (play.php vs watch.php) we did NOT already start from,
+        # rather than hardcoding a direction or wastefully re-fetching the
+        # exact same URL already tried above.
         if not servers:
             vid_m = re.search(r'[?&]vid=([A-Za-z0-9]+)', final_url or norm_url)
             if vid_m:
-                watch_url = self._full_url("watch.php?vid=" + vid_m.group(1))
-                if watch_url != (final_url or norm_url):
-                    log("CimaWbasCwb: falling back to {}".format(watch_url))
-                    w_html, _ = fetch(watch_url, referer=final_url or norm_url,
-                                      extra_headers=_PROBE_HEADERS)
-                    if w_html:
-                        servers = self._extract_watch_servers(w_html, watch_url)
+                vid = vid_m.group(1)
+                current_path = urlparse(final_url or norm_url).path.lower()
+                for sib in ("play.php", "watch.php"):
+                    if sib in current_path:
+                        continue
+                    sib_url = self._full_url(sib + "?vid=" + vid)
+                    log("CimaWbasCwb: no servers found, trying sibling page {}"
+                        .format(sib_url))
+                    sib_html, _ = fetch(sib_url, referer=final_url or norm_url,
+                                        extra_headers=_PROBE_HEADERS)
+                    if sib_html:
+                        servers = self._extract_watch_servers(sib_html, sib_url)
+                    if servers:
+                        break
 
         result["servers"] = servers
         result["downloads"] = self._extract_download_links(html)
