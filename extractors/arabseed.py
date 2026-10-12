@@ -46,6 +46,13 @@ class ArabseedExtractor(BaseExtractor):
     """Extractor for Arabseed - supports multiple domains"""
 
     MAIN_URL = _KNOWN_DOMAINS[0]
+    # [FIX arabseed-liv] class attribute, not just the module global, so a
+    # same-theme/different-catalog subclass (e.g. arabseed.living, which
+    # confirmed has its own independent movie/series listings -- not a
+    # mirror of this content) can swap in its own domain list and reuse
+    # every bit of parsing/decode logic below unchanged, instead of
+    # forking this whole ~1700-line file.
+    _known_domains = _KNOWN_DOMAINS
 
     def __init__(self):
         super(ArabseedExtractor, self).__init__()
@@ -67,7 +74,7 @@ class ArabseedExtractor(BaseExtractor):
         if self._resolved_base:
             return self._resolved_base
 
-        for domain in _KNOWN_DOMAINS:
+        for domain in self._known_domains:
             try:
                 log("ArabSeed: Probing domain {}".format(domain))
                 html, final_url = fetch(domain, referer=domain)
@@ -128,7 +135,7 @@ class ArabseedExtractor(BaseExtractor):
             # both live domains so links between arabseed.rent and
             # arabseed.wine get normalised.
             current_base = self._get_base()
-            for d in _KNOWN_DOMAINS:
+            for d in self._known_domains:
                 if path.startswith(d) and d != current_base:
                     path = current_base + path[len(d):]
                     break

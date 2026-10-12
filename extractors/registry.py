@@ -100,6 +100,7 @@ from .egybest import EgyBestExtractor
 from .akwam import AkwamExtractor
 from .akwams import AkwamsExtractor
 from .arabseed import ArabseedExtractor
+from .arabseed_liv import ArabseedLivExtractor
 from .faselhd_rip import FaselhdRipExtractor
 from .faselhd_hdx import FaselhdHdxExtractor
 from .shaheed import ShaheedExtractor
@@ -132,6 +133,7 @@ _SITE_REGISTRY = {
     "akwam":           {"class": AkwamExtractor, "title": "Akwam (Classic)", "tagline": "موقع اكوام الكلاسيكي - افلام ومسلسلات عربية واجنبية", "short": "موقع اكوام الكلاسيكي"},
     "akwams":          {"class": AkwamsExtractor, "title": "Akwams (Modern)", "tagline": "موقع اكوام الحديث - واجهة سريعة ومحتوى محدث", "short": "موقع اكوام الحديث"},
     "arabseed":        {"class": ArabseedExtractor, "title": "Arabseed", "tagline": "تصنيفات عربية وأجنبية وحلقات مرتبة", "short": "تصنيفات مرتبة"},
+    "arabseed_liv":    {"class": ArabseedLivExtractor, "title": "Arabseed.living", "tagline": "عرب سيد (living) - مكتبة مستقلة بنفس تصنيفات عرب سيد", "short": "مكتبة مستقلة"},
     "fasel":           {"class": FaselhdRipExtractor, "title": "FaselHD (RIP)", "tagline": "واجهة حديثة - سيرفرات متعددة بجودة عالية", "short": "واجهة حديثة - سيرفرات متعددة"},
     "faselhdx":        {"class": FaselhdHdxExtractor, "title": "FaselHD (HDX)", "tagline": "النسخة الكلاسيكية - دقة عالية وسيرفات متنوعة", "short": "النسخة الكلاسيكية - دقة عالية"},
     "shaheed":         {"class": ShaheedExtractor, "title": "Shaheed4u", "tagline": "تحديثات المسلسلات والأفلام الحصرية بجميع الجودات", "short": "أفلام ومسلسلات حصرية"},
@@ -163,7 +165,7 @@ _SITE_REGISTRY = {
 # results and can be dropped from this tuple without losing anything.
 _SEARCH_SITE_ORDER = (
     "egydead", "egydead_coupons", "egydead_ca", "egybest", "akwam", "akwams",
-    "arabseed",
+    "arabseed", "arabseed_liv",
     "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx",
     "shaheed", "shahid4u", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
@@ -179,7 +181,7 @@ _SEARCH_SITE_ORDER = (
 # together at the top for the same reason.
 _HOME_SITE_ORDER = (
     "egydead", "egydead_coupons", "egydead_ca", "egybest", "akwam", "akwams",
-    "arabseed",
+    "arabseed", "arabseed_liv",
     "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
     "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
