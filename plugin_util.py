@@ -249,18 +249,24 @@ def _sort_servers(servers, title_key=None):
     reliability, then quality, then name."""
     servers = servers or []
     try:
-        from plugin_server_rank import host_score, _host_of, get_title_working, get_title_failed
+        from plugin_server_rank import host_score, _host_path_of, get_title_working, get_title_failed
     except Exception:
         host_score = None
-        _host_of = None
+        _host_path_of = None
         get_title_working = None
         get_title_failed = None
 
     def _host(s):
-        if _host_of is None:
+        # [server-rank-wrapper-fix] per-title identity must match what
+        # record_title_working/record_title_failed key by (host+path, not
+        # bare host) -- otherwise every server behind a shared gateway
+        # host (e.g. ArabSeed's govid.live wrapper) collapses into one
+        # indistinguishable bucket and a confirmed-working server can
+        # never be told apart from the ones that failed next to it.
+        if _host_path_of is None:
             return ""
         try:
-            return _host_of(s.get("url", ""))
+            return _host_path_of(s.get("url", ""))
         except Exception:
             return ""
 

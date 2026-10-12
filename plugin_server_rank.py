@@ -86,6 +86,40 @@ def _host_of(url):
     return host
 
 
+def _host_path_of(url):
+    """[server-rank-wrapper-fix] Per-title identity key: host + path.
+
+    Several sites (ArabSeed confirmed, likely others) hand out EVERY
+    server for a title as the same gateway/wrapper host -- e.g. every
+    one of ArabSeed's 5 servers is a `govid.live/play/=<token>` link,
+    with the real destination (voe.sx, uqload.vc, vidara.to, ...) only
+    revealed after a network round-trip inside extract_stream(). Using
+    bare host() as the per-title identity collapses all of those
+    distinct servers into one indistinguishable "govid.live" bucket,
+    so a confirmed-working server can never be told apart from the
+    four that failed next to it -- it just never reaches the top of
+    the list again.
+
+    The wrapper token in the path is embedded statically per episode
+    (same data-link on every page load), so host+path stays just as
+    stable across revisits as host alone, while actually telling the
+    servers apart. Global, cross-title host_score()/record_host_result()
+    intentionally keep using plain host() -- that's a real-host
+    reliability signal and collapsing wrapper hosts there is fine (even
+    desired, since "govid.live" itself isn't informative on its own).
+    """
+    try:
+        p = urlparse(url or "")
+        host = (p.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if not host:
+            return ""
+        return host + (p.path or "")
+    except Exception:
+        return ""
+
+
 def _prune_titles(d):
     # dict preserves insertion order in py3 -- drop the oldest first.
     while len(d) > _MAX_TITLES:
@@ -131,13 +165,14 @@ def host_score(url):
 # ----------------------------------------------------------- per-title -----
 
 def record_title_working(title_key, url):
-    """Mark url's host as confirmed-working for this exact title. Hosts
-    are kept in first-confirmed order -- a new host is appended after
-    the existing ones, never replacing them. Also clears the host from
-    this title's failed list (a working result outweighs a past fail)."""
+    """Mark url's per-title identity (host+path -- see _host_path_of)
+    as confirmed-working for this exact title. Hosts are kept in
+    first-confirmed order -- a new host is appended after the existing
+    ones, never replacing them. Also clears the host from this title's
+    failed list (a working result outweighs a past fail)."""
     if not title_key:
         return
-    host = _host_of(url)
+    host = _host_path_of(url)
     if not host:
         return
     with _lock:
@@ -165,12 +200,13 @@ def get_title_working(title_key):
 
 
 def record_title_failed(title_key, url):
-    """Mark url's host as having failed to play for this exact title.
-    No-op if that host already proved it works for this same title --
-    one flaky failure shouldn't bury an otherwise-working server."""
+    """Mark url's per-title identity (host+path -- see _host_path_of)
+    as having failed to play for this exact title. No-op if that
+    identity already proved it works for this same title -- one flaky
+    failure shouldn't bury an otherwise-working server."""
     if not title_key:
         return
-    host = _host_of(url)
+    host = _host_path_of(url)
     if not host:
         return
     with _lock:
