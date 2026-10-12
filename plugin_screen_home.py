@@ -922,11 +922,6 @@ class AdvancedArabicPlayerHome(Screen):
         self._showHomeMode()
         self._onGridSelectionChanged()
 
-        blocked = plugin_health.blocked_sites()
-        if blocked:
-            self._setStatus("⚠ %d/%d محجوب — فعّل البروكسي" % (
-                len(blocked), len(site_items)), warning=True)
-
     def _showHomeMode(self):
         self._focus_zone = "grid"
         self._listVisible = False            # [catlist-effects]

@@ -698,6 +698,22 @@ class WecimaExtractor(BaseExtractor):
             return m.group(1)
         return ""
 
+    def _detail_genres(self, html):
+        """[PATCH 127] The genre/category line on a Wecima detail page --
+        confirmed against real captured markup:
+        <li><span>النوع</span> <p dir="auto">
+            <a class="unline" href="https://wecima.cx/genre/horror">رعب</a>
+        </p></li>
+        Multiple <a href=".../genre/...">  tags can exist in that same <li>
+        for multi-genre titles -- findall (not a single search) so all of
+        them are picked up, joined with the Arabic list separator."""
+        m = re.search(r'<span>النوع</span>.*?</li>', html or "", re.S)
+        if not m:
+            return ""
+        genres = re.findall(r'<a[^>]+href="[^"]*/genre/[^"]*"[^>]*>(.*?)</a>', m.group(0), re.S)
+        genres = [self._clean_html(g) for g in genres]
+        return "، ".join(g for g in genres if g)
+
     def _detail_rating(self, html):
         data = self._parse_json_ld(html)
         if data and isinstance(data, dict):
@@ -820,6 +836,7 @@ class WecimaExtractor(BaseExtractor):
         plot = self._detail_plot(html)
         year = self._detail_year(title, html)
         rating = self._detail_rating(html)
+        genres = self._detail_genres(html)
         servers = self._extract_servers(html)
         episodes = [] if servers else self._extract_episode_cards(html)
         # NEW: parse the site's own "Download--Wecima--Single" section (separate
@@ -840,6 +857,7 @@ class WecimaExtractor(BaseExtractor):
             "poster": poster,
             "rating": rating,
             "year": year,
+            "genres": genres,
             "servers": servers,
             "items": episodes,
             "downloads": downloads,

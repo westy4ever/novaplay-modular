@@ -44,16 +44,29 @@ else:
 class WecimaSarlExtractor(BaseExtractor):
     """Extractor for Wecima.style - wecima.style (formerly wecima.sarl)"""
 
-    # --- UPDATE: wecima.gripe is now the primary domain ---
+    # --- UPDATE: wecima.tattoo is now the primary domain ---
+    # [PATCH 128] confirmed directly against a real captured snapshot
+    # (2026-10-11): wecima.tattoo uses the exact same GridItem/
+    # Thumb--GridItem card markup, <ul id="watch"><li data-watch="...">
+    # watch-server list, and Download--Wecima--Single download section this
+    # extractor already parses -- it's the same underlying theme/site
+    # family under a new mirror domain, not a markup change. The one real
+    # difference: its data-watch and download href values are PLAIN,
+    # already-decoded https:// URLs, not the obfuscated-base64 scheme
+    # wecima.gripe used -- _decode_wecima_url() already has an early
+    # passthrough for anything starting with "http(s)://", so no
+    # decode-logic change was needed, only registering this domain.
     DOMAINS = [
-        "https://wecima.gripe/",      # primary domain (2026)
+        "https://wecima.tattoo/",     # primary domain (2026-10, confirmed working)
+        "https://wecima.gripe/",      # was primary; now intermittently down (502s)
         "https://wecima.style/",      # legacy, redirects to wecima.gripe
         "https://wecima.rent/",       # legacy, redirects to wecima.gripe
         "https://wecima.sarl/",       # old domain (now redirects)
         "https://wecima.bid/",        # old domain (now redirects)
     ]
     VALID_HOST_MARKERS = (
-        "wecima.gripe",               # --- UPDATE: wecima.gripe ---
+        "wecima.tattoo",              # --- UPDATE: wecima.tattoo ---
+        "wecima.gripe",
         "wecima.style",
         "wecima.rent",
         "wecima.sarl",
@@ -137,8 +150,9 @@ class WecimaSarlExtractor(BaseExtractor):
     def _looks_like_wecima_page(self, html):
         text = html or ""
         return (
-            # --- UPDATE: wecima.gripe ---
-            "wecima.gripe" in text.lower()
+            # --- UPDATE: wecima.tattoo ---
+            "wecima.tattoo" in text.lower()
+            or "wecima.gripe" in text.lower()
             or "wecima.style" in text.lower()
             or "wecima.rent" in text.lower()
             or "wecima.sarl" in text.lower()

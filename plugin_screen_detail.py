@@ -63,6 +63,72 @@ from novaplay_thread import callInMainThread
 
 _PLUGIN_VERSION = "4.1.0"
 
+# [detail-tmdb] how far past a plain contain-fit the real TMDb backdrop
+# photo is scaled up, to bring it closer to the poster instead of leaving
+# a big flat gap. 1.0 = pure contain (no crop at all, biggest gap). Each
+# step up trades a little more top/bottom crop for a narrower gap -- see
+# _generateBackdrop's is_landscape branch for the actual crop math.
+_BACKDROP_WIDTH_BOOST = 1.3
+
+# [detail-trailer] mirrors plugin_tmdb.py's own _CACHE_BASE_HDD/_TMP
+# pattern -- confirmed on the user's own device that /media/hdd is
+# mounted and already used for the poster/image cache, so resolved
+# trailers (an ffmpeg-muxed local mp4, tens of MB each -- categorically
+# bigger than a poster thumbnail) go there too rather than risking a
+# RAM-backed /tmp filling up and taking the box down. /tmp is only the
+# fallback for a device with no HDD mounted at all.
+_TRAILER_CACHE_BASE_HDD = "/media/hdd/AdvancedArabicPlayer/cache/trailers"
+_TRAILER_CACHE_BASE_TMP = "/tmp/ap_trailers"
+_TRAILER_CACHE_MAX_FILES = 8
+# [detail-trailer] Trailers are a quick preview, not the main feature, so
+# there's no reason to pull full/best resolution and burn data for it.
+# Capped at 480p -- plenty sharp on a TV-distance screen, far smaller/
+# faster to download than 1080p+.
+_TRAILER_MAX_HEIGHT = 480
+# [FIX] "audio only, no video" on a real device traced to the old format
+# selector's fallback branches accepting ANY bestvideo (no codec filter),
+# which for many YouTube titles is VP9/AV1-in-webm once mp4 isn't
+# available at the capped height. Set-top boxes almost universally have
+# H.264 hardware decode but often lack VP9/AV1 decode, so a VP9 video
+# track silently fails to render while the (software-decodable) audio
+# track plays fine -- exactly the symptom reported. Every fallback rung
+# below now stays pinned to avc1/h264 video; only the very last resort
+# drops that constraint, and bumping this each time the selector logic
+# changes forces a fresh download instead of replaying an old, possibly
+# video-less cached file under the previous format version.
+_TRAILER_CACHE_VERSION = 2
+
+
+def _trailer_cache_dir():
+    base = _TRAILER_CACHE_BASE_HDD if os.path.exists("/media/hdd") else _TRAILER_CACHE_BASE_TMP
+    try:
+        if not os.path.exists(base):
+            os.makedirs(base)
+    except Exception:
+        pass
+    return base
+
+
+def _evict_old_trailers(trailer_dir, keep=_TRAILER_CACHE_MAX_FILES):
+    """[detail-trailer] Keeps the trailer cache bounded -- oldest-mtime-
+    first eviction, same principle plugin_imagecache.py already uses for
+    the image cache. Trailers are kept (not deleted on screen close) so
+    re-opening the same title's detail screen plays instantly instead of
+    re-downloading, but unbounded growth isn't acceptable for files this
+    size."""
+    try:
+        files = [os.path.join(trailer_dir, f) for f in os.listdir(trailer_dir) if f.endswith(".mp4")]
+        if len(files) <= keep:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p))
+        for f in files[:-keep]:
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 
 # ── [B3] quality-preference key ─────────────────────────────────────
 def _quality_pref_key(title):
@@ -84,12 +150,31 @@ class AdvancedArabicPlayerDetail(Screen):
     <screen name="AdvancedArabicPlayerDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
 
-        <widget name="poster_box" position="45,30" size="420,600" backgroundColor="#1C2333" zPosition="2" />
+        <!-- [detail-tmdb] poster_box, info_box and plot_box merged into one
+             TMDb-style backdrop panel: a single shared background behind
+             the poster, title/meta block and plot, instead of three
+             separate boxes with gaps between them. No user-score widget
+             (TMDb's circular 84% dial) is ported; posterRating below is
+             the plugin's own gold-star rating badge, kept as-is. -->
+        <!-- [FIX] #161B22 (the old info_box shade) is only ~9-10 points
+             per channel away from bg's #0D1117; it rendered correctly but
+             was confirmed too low-contrast to read as a panel on a real TV.
+             #1C2333 (the old poster_box/plot_box shade) has roughly double
+             that delta and was already proven visible on this exact
+             screen before. -->
+        <widget name="backdrop" position="45,30" size="1830,600" backgroundColor="#1C2333" zPosition="2" />
+        <!-- [detail-tmdb] real TMDb DOM has a blurred/darkened copy of the
+             poster as the header's actual background (its ".blurred" div),
+             with the sharp poster layered on top as a card. Same here:
+             backdropImage sits above the flat-color backdrop (fallback
+             while it decodes, or if PIL is unavailable) and below the
+             sharp poster/title/plot text. -->
+        <widget name="backdropImage" position="45,30" size="1830,600" zPosition="3" alphatest="blend" />
+
         <widget name="poster" position="68,52" size="375,555" zPosition="4" alphatest="blend" />
         <widget name="posterYear" position="76,56" size="96,36" font="Regular;26" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
         <widget name="posterRating" position="325,58" size="104,36" font="Regular;26" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
 
-        <widget name="info_box" position="495,30" size="1380,405" backgroundColor="#161B22" zPosition="2" />
         <widget name="badge" position="525,52" size="800,33" font="Regular;26" foregroundColor="#E040FB" transparent="1" zPosition="4" />
         <widget name="title" position="525,93" size="1320,90" font="Regular;42" foregroundColor="#00E5FF" transparent="1" zPosition="4" />
         <widget name="meta" position="525,189" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
@@ -97,7 +182,6 @@ class AdvancedArabicPlayerDetail(Screen):
         <widget name="source" position="525,300" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
         <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
 
-        <widget name="plot_box" position="495,450" size="1380,180" backgroundColor="#1C2333" zPosition="2" />
         <widget name="plot_title" position="525,465" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
         <widget name="plot" position="525,504" size="1320,150" font="Regular;27" foregroundColor="#F0F6FC" transparent="1" halign="block" valign="top" zPosition="4" />
 
@@ -117,7 +201,11 @@ class AdvancedArabicPlayerDetail(Screen):
         <widget name="key_red"    position="45,1042"  size="330,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="4" />
         <widget name="key_yellow" position="385,1042" size="330,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
         <widget name="key_blue"   position="725,1042" size="330,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
-        <widget name="status"     position="1065,1042" size="795,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="4" />
+        <!-- [detail-trailer] green key added for "play trailer"; status's
+             own width/x shrunk to make room without moving the other
+             three key labels. -->
+        <widget name="key_green"  position="1065,1042" size="330,36" font="Regular;24" foregroundColor="#4CAF50" transparent="1" zPosition="4" />
+        <widget name="status"     position="1405,1042" size="470,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="4" />
     </screen>
     """
 
@@ -128,13 +216,13 @@ class AdvancedArabicPlayerDetail(Screen):
     # (name, ((widget_key, design_x, design_y), ...), off_x, off_y, delay, duration)
     _REVEAL_GROUPS = (
         ("poster", (
-            ("poster_box", 45, 30),
+            ("backdrop", 45, 30),
+            ("backdropImage", 45, 30),
             ("poster", 68, 52),
             ("posterYear", 76, 56),
             ("posterRating", 325, 58),
         ), -320, 0, 0, 8),
         ("info", (
-            ("info_box", 495, 30),
             ("badge", 525, 52),
             ("title", 525, 93),
             ("meta", 525, 189),
@@ -148,7 +236,6 @@ class AdvancedArabicPlayerDetail(Screen):
             ("menu", 60, 708),
         ), 0, 320, 3, 8),
         ("plot", (
-            ("plot_box", 495, 450),
             ("plot_title", 525, 465),
             ("plot", 525, 504),
         ), 220, 0, 4, 8),
@@ -234,9 +321,8 @@ class AdvancedArabicPlayerDetail(Screen):
         self._progress_active = False
 
         self["bg"]     = Label("")
-        self["poster_box"] = Label("")
-        self["info_box"] = Label("")
-        self["plot_box"] = Label("")
+        self["backdrop"] = Label("")
+        self["backdropImage"] = Pixmap()
         self["menu_box"] = Label("")
         self["poster"] = Pixmap()
         self["posterYear"] = Label("")
@@ -258,6 +344,7 @@ class AdvancedArabicPlayerDetail(Screen):
         self["key_red"] = Label("المفضلة")
         self["key_yellow"] = Label("تحديث TMDb")
         self["key_blue"] = Label("تحميل")
+        self["key_green"] = Label("")
         self["status"] = Label("جاري تحميل التفاصيل...")
 
         self._downloads = []
@@ -276,12 +363,20 @@ class AdvancedArabicPlayerDetail(Screen):
         self.picLoad = ePicLoad()
         self.picLoad.PictureData.get().append(self._paintPoster)
 
+        # [detail-tmdb] second, independent native-decode pipeline for the
+        # blurred backdrop image -- kept fully separate from self.picLoad
+        # (the sharp poster) so the two decodes never race or overwrite
+        # each other's PictureData callback.
+        self.backdropPicLoad = ePicLoad()
+        self.backdropPicLoad.PictureData.get().append(self._paintBackdrop)
+
         self["actions"] = ActionMap(["OkCancelActions", "ColorActions", "DirectionActions"], {
             "ok":     self._onOk,
             "cancel": self._onCancel,
             "red":    self._toggleFavorite,
             "yellow": self._refreshTMDb,
             "blue":   self._openDownloads,
+            "green":  self._playTrailer,
             "up":     self._navMenuUp,
             "down":   self._navMenuDown,
             "left":   lambda: self["menu"].pageUp(),
@@ -685,6 +780,9 @@ class AdvancedArabicPlayerDetail(Screen):
         try:
             self.picLoad.PictureData.get().remove(self._paintPoster)
         except Exception: pass
+        try:
+            self.backdropPicLoad.PictureData.get().remove(self._paintBackdrop)
+        except Exception: pass
         for p in self._tmp_posters:
             try:
                 if os.path.exists(p): os.remove(p)
@@ -701,6 +799,8 @@ class AdvancedArabicPlayerDetail(Screen):
                 pass
         try: self.picLoad.PictureData.get().remove(self._paintPoster)
         except Exception: pass
+        try: self.backdropPicLoad.PictureData.get().remove(self._paintBackdrop)
+        except Exception: pass
 
     def _paintPoster(self, picData=None):
         ptr = self.picLoad.getData()
@@ -710,6 +810,234 @@ class AdvancedArabicPlayerDetail(Screen):
             self._poster_loaded = True
         else:
             my_log("_paintPoster (detail): native decode returned empty picture data")
+
+    def _paintBackdrop(self, picData=None):
+        ptr = self.backdropPicLoad.getData()
+        if ptr:
+            self["backdropImage"].instance.setPixmap(ptr)
+            self["backdropImage"].show()
+        else:
+            my_log("_paintBackdrop (detail): native decode returned empty picture data")
+
+    def _generateBackdrop(self, src_path, is_tmp=False, is_landscape=False):
+        """
+        [detail-tmdb] Builds the darkened backdrop image for the panel,
+        matching real TMDb's header treatment (a backdrop image filling
+        the header behind the sharp poster card, dimmed so the title/plot
+        text stays readable). Runs on the same background thread as its
+        caller (never the UI thread), writes a small derived cache file
+        next to the source file, and hands only the native decode/paint
+        step to the main thread via callInMainThread, matching the
+        existing self.picLoad pattern above.
+
+        Uses the same try/except PIL-optional convention as
+        plugin_imagecache.resizeCover/plugin_util -- if PIL isn't
+        installed, this silently does nothing and the flat-color
+        "backdrop" widget (zPosition 2, already sitting underneath as the
+        fallback) stays visible on its own.
+
+        is_landscape distinguishes the two possible sources, which need
+        different treatment:
+          - True:  src_path is TMDb's own backdrop_path image (served
+            ~1280 wide, already roughly the panel's own 1830x600 aspect).
+            Confirmed directly against a real TMDb page (the user's own
+            screenshot) that TMDb shows this sharp, just darkened under a
+            gradient -- no blur -- because a same-aspect cover-crop is a
+            normal, unremarkable crop, not a zoom. Handled the same way
+            here: cover-crop + darken only.
+          - False: no TMDb backdrop was available, so src_path is the
+            already-downloaded poster instead -- a tall portrait image
+            (e.g. 375x555). Cover-cropping a portrait image into a wide
+            landscape box has to zoom in hard to cover the width, which
+            is exactly what was confirmed to read as an ugly "stretched/
+            extended" zoom on a real device photo rather than a soft
+            ambient blur. The downscale/blur/upscale trick below (shrink
+            the already-cropped frame way down, blur there, then scale
+            back up) erases that recognizable warped content into smooth
+            color instead, and is also far cheaper on embedded hardware
+            than a large-radius blur on the full 1830x600 frame.
+
+        is_tmp mirrors the source's own caching: when src_path is a
+        permanent file under the shared poster cache dir, the derived
+        backdrop file is kept there too so it is reused on the next open
+        instead of being regenerated every time; when src_path is itself
+        a one-off temp file (no cache dir available), the derived file is
+        tracked in self._tmp_posters for cleanup alongside it.
+        """
+        try:
+            from PIL import Image, ImageFilter, ImageEnhance
+        except ImportError:
+            return
+        try:
+            if not src_path or not os.path.exists(src_path):
+                return
+            try:
+                w = self["backdropImage"].instance.size().width()
+                h = self["backdropImage"].instance.size().height()
+            except Exception:
+                w, h = 1830, 600
+
+            img = Image.open(src_path).convert("RGB")
+
+            if is_landscape:
+                # [FIX] confirmed against the user's own reference crop of
+                # this exact backdrop image: TMDb's photo is a roughly
+                # 16:9 frame, but this panel is an unusually wide ~3:1 box
+                # (1830x600). Cover-cropping (the old ImageOps.fit above)
+                # scales the image up until it fully covers that 3:1 box,
+                # which blows the 16:9 photo up far past its own frame and
+                # crops hard on every side -- that's what was zooming into
+                # a tight, cut-off close-up instead of showing her full
+                # figure. Switched to a contain-fit instead: the WHOLE
+                # photo is scaled down to fit inside the box with nothing
+                # cropped off, anchored to the panel's RIGHT edge (vertically
+                # centered) so it reads the same as the reference -- full
+                # figure, positioned right. The leftover space on the left,
+                # which is also where the title/meta/plot text sits, is
+                # filled with the panel's own flat background color
+                # instead of stretched or cropped image content.
+                img_w, img_h = img.size
+                base_scale = min(w / float(img_w), h / float(img_h))
+                # [FIX] pure contain-fit (boost=1.0) left a big flat gap
+                # between the poster and the photo. _BACKDROP_WIDTH_BOOST
+                # scales the photo up beyond the plain contain size so it
+                # reaches closer to the poster -- the overflow this creates
+                # (height almost always, since this box is much wider than
+                # the source) is cropped symmetrically top/bottom, and any
+                # width overflow is cropped off the LEFT (anchored right,
+                # keeping the subject, who sits on that side of frame).
+                # This is a mild, controlled version of the cover-crop that
+                # was rejected before: that one force-covered the full 3:1
+                # box (a ~1.43x jump) and cut hard into the figure; this
+                # nudges in by _BACKDROP_WIDTH_BOOST and no more.
+                scale = base_scale * _BACKDROP_WIDTH_BOOST
+                scaled_w = max(1, int(round(img_w * scale)))
+                scaled_h = max(1, int(round(img_h * scale)))
+                try:
+                    scaled = img.resize((scaled_w, scaled_h), Image.LANCZOS)
+                except Exception:
+                    scaled = img.resize((scaled_w, scaled_h))
+                try:
+                    # Light touch-up blur only -- just enough to soften
+                    # JPEG block noise, not to obscure the photo. Real
+                    # TMDb keeps its backdrop sharp, not foggy.
+                    scaled = scaled.filter(ImageFilter.GaussianBlur(radius=2))
+                except Exception:
+                    pass
+
+                crop_w = min(scaled_w, w)
+                crop_h = min(scaled_h, h)
+                crop_left = scaled_w - crop_w   # keep the rightmost slice (the subject)
+                crop_top = (scaled_h - crop_h) // 2
+                if crop_w < scaled_w or crop_h < scaled_h:
+                    scaled = scaled.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h))
+
+                fitted = Image.new("RGB", (w, h), (28, 35, 51))  # #1C2333, matches the flat "backdrop" fallback widget
+                paste_x = w - crop_w   # flush to the right edge
+                paste_y = (h - crop_h) // 2
+                fitted.paste(scaled, (paste_x, paste_y))
+
+                try:
+                    from PIL import ImageDraw
+                    gradient = Image.new("L", (w, h), 0)
+                    draw = ImageDraw.Draw(gradient)
+                    # Dark out exactly to where the photo actually starts
+                    # (paste_x -- the flat letterbox area to its left is
+                    # already that same color, so this just carries the
+                    # same solid dark seamlessly across the seam), fading
+                    # to fully clear over the next ~25% of the panel width
+                    # so the text keeps contrast a bit further into the
+                    # photo without washing out the whole thing.
+                    dark_to = paste_x
+                    fade_to = max(dark_to + 1, min(w - 1, dark_to + int(w * 0.25)))
+                    for x in range(w):
+                        if x <= dark_to:
+                            a = 215
+                        elif x >= fade_to:
+                            a = 0
+                        else:
+                            t = (x - dark_to) / float(fade_to - dark_to)
+                            a = int(215 * (1 - t))
+                        draw.line([(x, 0), (x, h)], fill=a)
+                    dark_layer = Image.new("RGB", (w, h), (28, 35, 51))
+                    fitted = Image.composite(dark_layer, fitted, gradient)
+                except Exception:
+                    pass
+            else:
+                try:
+                    from PIL import ImageOps
+                    fitted = ImageOps.fit(img, (w, h), Image.LANCZOS)
+                except Exception:
+                    fitted = img.resize((w, h), Image.LANCZOS)
+                try:
+                    sw, sh = max(1, w // 14), max(1, h // 14)
+                    tiny = fitted.resize((sw, sh), Image.BILINEAR)
+                    tiny = tiny.filter(ImageFilter.GaussianBlur(radius=4))
+                    fitted = tiny.resize((w, h), Image.BILINEAR)
+                except Exception:
+                    try:
+                        fitted = fitted.filter(ImageFilter.GaussianBlur(radius=18))
+                    except Exception:
+                        pass
+                try:
+                    fitted = ImageEnhance.Brightness(fitted).enhance(0.45)
+                except Exception:
+                    pass
+
+            out_path = "{}_bd.jpg".format(os.path.splitext(src_path)[0])
+            fitted.save(out_path, format="JPEG", quality=82)
+            if is_tmp and out_path not in self._tmp_posters:
+                self._tmp_posters.append(out_path)
+
+            callInMainThread(self.backdropPicLoad.setPara, (w, h, 1, 1, 0, 1, "#000000"))
+            callInMainThread(self.backdropPicLoad.startDecode, out_path)
+        except Exception as e:
+            my_log("_generateBackdrop error: {}".format(e))
+
+    def _downloadBackdrop(self, url, fallback_poster_url=None):
+        """
+        [detail-tmdb] Fetches the real TMDb backdrop image (data["fanart"],
+        TMDb's backdrop_path served at w1280 -- plugin_tmdb.py already
+        resolves this during the TMDb merge, it just wasn't used anywhere
+        in this screen before) and hands it to _generateBackdrop as the
+        sharp, same-aspect source. Mirrors _downloadPoster's own
+        fetch/cache structure exactly (_get_cached_poster/_poster_cache_
+        path/_fetch_poster_bytes are all URL-keyed and work for any image
+        URL, not just posters), just for a second, independent URL.
+
+        Falls back to the already-downloaded poster (blurred, see
+        _generateBackdrop's is_landscape=False branch) only when no TMDb
+        backdrop URL is available at all, so the panel still gets some
+        imagery instead of staying on the flat color.
+        """
+        try:
+            src_url = url or fallback_poster_url
+            if not src_url:
+                return
+            is_landscape = bool(url)
+            src_url = _normalize_poster_url(src_url)
+            cached = _get_cached_poster(src_url)
+            if cached:
+                my_log("_downloadBackdrop (detail): using cached file for {}".format(src_url))
+                self._generateBackdrop(cached, is_tmp=False, is_landscape=is_landscape)
+                return
+            cache_path = _poster_cache_path(src_url)
+            from urllib.parse import urlparse as _urlparse
+            _p = _urlparse(src_url)
+            referer = "{}://{}/".format(_p.scheme, _p.netloc)
+            my_log("_downloadBackdrop (detail): fetching {}".format(src_url))
+            data = _fetch_poster_bytes(src_url, referer, timeout=10)
+            if not data:
+                return
+            save_path = cache_path or "/tmp/ap_detail_bd_{}.jpg".format(int(time.time()))
+            with open(save_path, "wb") as f:
+                f.write(data)
+            is_tmp = not cache_path
+            if is_tmp:
+                self._tmp_posters.append(save_path)
+            self._generateBackdrop(save_path, is_tmp=is_tmp, is_landscape=is_landscape)
+        except Exception as e:
+            my_log("_downloadBackdrop error: {} (URL: {})".format(e, url))
 
     def _onLoaded(self, data):
         if getattr(self, "_closed", False): return
@@ -723,13 +1051,59 @@ class AdvancedArabicPlayerDetail(Screen):
         self._raw_title = re.sub(r"\s+", " ", current_title).strip()
         self["title"].setText(_wrap_ui_text(current_title, width=30, max_lines=2, fallback="بدون عنوان"))
 
-        meta = []
-        if data.get("year"):    meta.append(data["year"])
-        if data.get("rating"):  meta.append("{}/10".format(data["rating"]))
-        if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "عنصر"))
-        if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
-        if data.get("genres"):  meta.append(data["genres"])
-        self["meta"].setText(_wrap_ui_text("   ".join(meta), width=58, max_lines=2))
+        # [detail-tmdb-meta] real TMDb page shows one line right under the
+        # title: certification badge + release date + genres + runtime
+        # (e.g. "PG-13   07/31/2026 (US)   Science Fiction, Action, and
+        # Adventure   2h 25m"). plugin_tmdb.py now resolves all three new
+        # pieces (certification, full release_date, runtime) during the
+        # TMDb merge -- reusing that instead of the old year/rating/type/
+        # quality mix, which showed similar-but-different info (rating is
+        # already on the poster's own gold-star badge; type/quality are
+        # already in the badge line above the title). Falls back to the
+        # previous construction whenever TMDb has none of these for this
+        # title (TMDb disabled, lookup failed, or site-only metadata).
+        _rd = str(data.get("release_date") or "").strip()
+        _rd_fmt = ""
+        if _rd:
+            try:
+                _y, _m, _d = _rd.split("-")
+                _rd_fmt = "{}/{}/{} (US)".format(_m, _d, _y)
+            except Exception:
+                _rd_fmt = _rd
+        _rt_fmt = ""
+        try:
+            _rt_min = int(data.get("runtime") or 0)
+            if _rt_min > 0:
+                _h, _m2 = divmod(_rt_min, 60)
+                _rt_fmt = "{}h {}m".format(_h, _m2) if _h else "{}m".format(_m2)
+        except Exception:
+            pass
+        _cert = str(data.get("certification") or "").strip()
+
+        # [FIX] data.get("genres") alone is NOT a reliable TMDb-ran signal
+        # -- confirmed at least wecima.py's own scraper sets "genres"
+        # directly from the site, with no TMDb lookup involved at all. A
+        # condition keyed on genres alone would silently drop the
+        # year/rating/type/quality fallback below for every such title,
+        # even when none of the three actually-TMDb-only fields
+        # (certification/release_date/runtime) resolved. Gate on those
+        # three instead; genres only decides whether it's appended once
+        # the TMDb-style line is already going to be shown.
+        if _cert or _rd_fmt or _rt_fmt:
+            tmdb_meta = []
+            if _cert:               tmdb_meta.append(_cert)
+            if _rd_fmt:             tmdb_meta.append(_rd_fmt)
+            if data.get("genres"): tmdb_meta.append(data["genres"])
+            if _rt_fmt:             tmdb_meta.append(_rt_fmt)
+            self["meta"].setText(_wrap_ui_text("   ".join(tmdb_meta), width=58, max_lines=2))
+        else:
+            meta = []
+            if data.get("year"):    meta.append(data["year"])
+            if data.get("rating"):  meta.append("{}/10".format(data["rating"]))
+            if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "عنصر"))
+            if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
+            if data.get("genres"):  meta.append(data["genres"])
+            self["meta"].setText(_wrap_ui_text("   ".join(meta), width=58, max_lines=2))
         self["badge"].setText("{}  •  {}".format(_site_label(self._site), _TYPE_LABELS.get(data.get("type"), "عنصر")))
         facts = [
             "المفضلة: {}  |  النسخة: {}  |  الوصف: {}".format(
@@ -840,6 +1214,18 @@ class AdvancedArabicPlayerDetail(Screen):
         else:
             self["key_blue"].setText("")
 
+        # [detail-trailer] only shown once TMDb has actually matched this
+        # title (data["_tmdb"]["tmdb_id"]/["tmdb_kind"], set by
+        # _merge_tmdb_data) -- without a TMDb id there is no /videos
+        # endpoint to query, so the green key stays blank/inert rather
+        # than offering a trailer that can never resolve.
+        self._tmdb_id = (data.get("_tmdb") or {}).get("tmdb_id")
+        self._tmdb_kind = (data.get("_tmdb") or {}).get("tmdb_kind")
+        if self._tmdb_id:
+            self["key_green"].setText("تريلر")
+        else:
+            self["key_green"].setText("")
+
         try:
             _r = str(data.get("rating") or self._item.get("rating") or "").strip()
             if _r and float(_r) > 0:
@@ -865,6 +1251,16 @@ class AdvancedArabicPlayerDetail(Screen):
         if poster_url:
             threading.Thread(target=self._downloadPoster, args=(poster_url,), daemon=True).start()
             self._osd_poster = poster_url
+
+        # [detail-tmdb] real TMDb backdrop (data["fanart"], already resolved
+        # by plugin_tmdb.py's merge -- backdrop_path served at w1280 -- but
+        # unused anywhere in this screen until now). Falls back to the
+        # poster (blurred, since it's portrait) only when no TMDb backdrop
+        # URL came back at all.
+        backdrop_url = data.get("fanart") or ""
+        if backdrop_url or poster_url:
+            threading.Thread(target=self._downloadBackdrop, args=(backdrop_url, poster_url), daemon=True).start()
+
         if getattr(self, "_auto_server_idx", None) is not None and self._servers:
             _asi = self._auto_server_idx
             self._auto_server_idx = None
@@ -1475,6 +1871,157 @@ class AdvancedArabicPlayerDetail(Screen):
         except Exception as e:
             my_log("Error opening player: {}".format(e))
             self["status"].setText("خطأ في المشغل: {}".format(str(e)[:60]))
+
+    def _playTrailer(self):
+        """
+        [detail-trailer] Green-key handler. Confirmed directly on the
+        user's own device: python3-yt-dlp is already installed system-
+        wide (opkg, /usr/bin/yt-dlp, importable as `yt_dlp`) independent
+        of any other plugin, so this resolves trailers itself rather than
+        depending on a separate closed-source YouTube plugin's internals
+        (which ships its own bundled yt-dlp copy, but is a stripped ARM
+        binary with no inspectable Python API from outside it).
+        """
+        if getattr(self, "_closed", False):
+            return
+        if not getattr(self, "_tmdb_id", None):
+            self["status"].setText("لا يوجد تريلر متاح لهذا العنصر")
+            return
+        if getattr(self, "_trailer_busy", False):
+            return
+        self._trailer_busy = True
+        self["status"].setText("جاري تجهيز التريلر...")
+        self["status"].show()
+        self._startProgress()          # [detail-progress]
+        threading.Thread(target=self._bgResolveTrailer, daemon=True).start()
+
+    def _bgResolveTrailer(self):
+        try:
+            from plugin_tmdb import _tmdb_fetch_trailer_key
+            key = _tmdb_fetch_trailer_key(self._tmdb_kind, self._tmdb_id)
+            if getattr(self, "_closed", False):
+                return
+            if not key:
+                callInMainThread(self._onTrailerFailed, "لا يوجد تريلر على YouTube لهذا العنصر")
+                return
+
+            youtube_url = "https://www.youtube.com/watch?v={}".format(key)
+            try:
+                import yt_dlp
+            except ImportError:
+                callInMainThread(self._onTrailerFailed, "yt-dlp غير مثبت على الجهاز")
+                return
+
+            # [FIX] confirmed directly on a real device, across two
+            # different trailers: requiring a single progressive (audio+
+            # video together) format still fails with "Requested format
+            # is not available" -- not a one-off, but a title genuinely
+            # having NO muxed format at all, which is increasingly common
+            # as YouTube phases those out. A direct-URL hand-off to the
+            # player can never work for those, whatever format selector is
+            # used, since there is no single URL that carries both.
+            #
+            # ffmpeg is confirmed installed on this device (8.0, opkg),
+            # so instead of asking for a progressive format, this
+            # downloads bestvideo+bestaudio and lets yt-dlp mux them via
+            # ffmpeg into one local mp4, then plays that local file --
+            # which works whether or not a muxed format ever existed.
+            # Keyed by video id under _trailer_cache_dir() so a repeat
+            # view of the same trailer is instant, not a re-download.
+            trailer_dir = _trailer_cache_dir()
+            cache_key = "{}_v{}".format(key, _TRAILER_CACHE_VERSION)
+            local_path = os.path.join(trailer_dir, "{}.mp4".format(cache_key))
+
+            if not os.path.exists(local_path):
+                callInMainThread(self["status"].setText, "جاري تحميل التريلر...")
+                ydl_opts = {
+                    "quiet": True,
+                    "no_warnings": True,
+                    "noplaylist": True,
+                    # avc1(H.264)/mp4a(AAC) kept at every rung except the
+                    # final no-filter fallback -- see _TRAILER_CACHE_VERSION
+                    # comment above for why.
+                    "format": (
+                        "bestvideo[vcodec^=avc1][height<={h}][ext=mp4]+bestaudio[acodec^=mp4a][ext=m4a]"
+                        "/bestvideo[vcodec^=avc1][height<={h}]+bestaudio[acodec^=mp4a]"
+                        "/best[vcodec^=avc1][height<={h}][ext=mp4]"
+                        "/bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]"
+                        "/best[vcodec^=avc1]"
+                        "/best[height<={h}][ext=mp4]"
+                        "/best[height<={h}]"
+                        "/best"
+                    ).format(h=_TRAILER_MAX_HEIGHT),
+                    "merge_output_format": "mp4",
+                    "outtmpl": os.path.join(trailer_dir, "{}.%(ext)s".format(cache_key)),
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([youtube_url])
+                _evict_old_trailers(trailer_dir)
+
+            if getattr(self, "_closed", False):
+                return
+            if not os.path.exists(local_path):
+                # [FIX] genuinely nothing downloadable/mergeable at all
+                # (rare once ffmpeg handles the split-stream case, but
+                # still possible -- e.g. a region-restricted or removed
+                # video). Distinct message from the generic failure below
+                # so it's clear this isn't a transient error.
+                callInMainThread(self._onTrailerFailed, "تعذر تحميل التريلر لهذا العنصر")
+                return
+
+            trailer_title = "{} - Trailer".format(self._raw_title or self._item.get("title", ""))
+            callInMainThread(self._onTrailerResolved, local_path, trailer_title)
+        except Exception as e:
+            my_log("_bgResolveTrailer error: {}".format(e))
+            if not getattr(self, "_closed", False):
+                callInMainThread(self._onTrailerFailed, "خطأ أثناء تجهيز التريلر")
+        finally:
+            self._trailer_busy = False
+
+    def _onTrailerResolved(self, local_path, trailer_title):
+        self._stopProgress()           # [detail-progress]
+        if getattr(self, "_closed", False):
+            return
+        self["status"].setText("جاري فتح التريلر...")
+        try:
+            # [FIX] switched to the app's own AdvancedArabicPlayerSimplePlayer
+            # instead of either _play() or the stock Screens.InfoBar.MoviePlayer
+            # tried before. Two real-device-confirmed problems with the stock
+            # player are just how it's built, not something fixable from the
+            # outside: on EOF it defers to the box's global "After a Movie"
+            # setting (which opened the movie-list browser instead of closing,
+            # even after forcing that setting to "stop" for the duration --
+            # it didn't take effect on this device/image), and its exit key
+            # goes through the SAME near-end/leave-player logic regardless of
+            # what's playing. AdvancedArabicPlayerSimplePlayer's own __onEOF
+            # (used for every other stream in this app already) just calls
+            # __onExit() and closes -- no movielist, no global setting
+            # involved -- and __onCancelKey does the same unless playback is
+            # past ~90% elapsed, which a quick trailer exit never reaches.
+            # previous_service=None and item_url="" mean there's nothing to
+            # restore and nothing to save/resume on close, so closing this
+            # screen (by EOF or by exit) just reveals the detail screen
+            # underneath, same as any other screen on the stack.
+            candidates = [(4097, local_path, u"تريلر محلي", False)]
+            self.session.open(AdvancedArabicPlayerSimplePlayer, trailer_title, candidates,
+                               previous_service=None, resume_pos=0, item_url="",
+                               next_episode=None, on_next=None,
+                               poster_url=self._osd_poster, quality_variants=None,
+                               server_url="", is_preview=True)
+            try:
+                self["status"].setText("")
+                self["status"].hide()
+            except Exception:
+                pass
+        except Exception as e:
+            my_log("_onTrailerResolved: open player failed: {}".format(e))
+            self["status"].setText("خطأ في فتح التريلر: {}".format(str(e)[:60]))
+
+    def _onTrailerFailed(self, message):
+        self._stopProgress()           # [detail-progress]
+        if getattr(self, "_closed", False):
+            return
+        self["status"].setText(message)
 
     def _openDownloads(self):
         if self._active_download_task and self._active_download_task.status == "downloading":

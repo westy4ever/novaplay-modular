@@ -134,6 +134,36 @@ def _safe_rating(value):
     except (TypeError, ValueError):
         return ""
 
+def _tmdb_extract_certification(detail, media_kind):
+    """
+    [detail-tmdb-meta] Pulls the US certification (PG-13, R, TV-MA, ...)
+    out of the release_dates (movie) / content_ratings (tv) block that
+    _tmdb_search_metadata now appends to the en-US detail request. Both
+    are lists of per-country entries -- only the US one is used, same
+    country TMDb's own web page defaults to. Movies can list several
+    release_dates per country (theatrical, digital, physical, ...); the
+    first one with a non-empty certification string is used, matching
+    what TMDb's own site shows.
+    """
+    try:
+        if media_kind == "movie":
+            for entry in (detail.get("release_dates") or {}).get("results") or []:
+                if entry.get("iso_3166_1") != "US":
+                    continue
+                for rd in entry.get("release_dates") or []:
+                    cert = (rd.get("certification") or "").strip()
+                    if cert:
+                        return cert
+        else:
+            for entry in (detail.get("content_ratings") or {}).get("results") or []:
+                if entry.get("iso_3166_1") == "US":
+                    cert = (entry.get("rating") or "").strip()
+                    if cert:
+                        return cert
+    except Exception:
+        pass
+    return ""
+
 def _tmdb_request(path, params=None):
     api_key = (_get_config("tmdb_api_key", "") or "").strip()
     if not api_key:
@@ -269,7 +299,17 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
     # 1. Check local JSON cache first!
     cache_path = _get_cache_path(title, year, item_type)
     cached = _load_cached_meta(cache_path)
-    if cached is not None:
+    # [FIX] confirmed directly on a real device: this cache has no expiry
+    # (100 years), so a title looked up before runtime/release_date/
+    # certification existed in this module's result dict comes back from
+    # disk forever missing those three keys -- the new detail-screen meta
+    # line silently falls back to the old year/rating/type/quality
+    # construction for every already-cached title, which looks like the
+    # feature never shipped. Treating a cache entry missing any of those
+    # keys as a miss self-heals it: one re-fetch (now including the new
+    # fields) the next time that exact title/year/type is looked up, then
+    # the re-save below overwrites the stale file with the complete one.
+    if cached is not None and all(k in cached for k in ("runtime", "release_date", "certification")):
         return cached
 
     # 2. Fetch from TMDB API
@@ -367,6 +407,14 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
             title, year, item_type, len(variants)))
         return None
         
+    # [detail-tmdb-meta] certification (PG-13 etc.) isn't on the base
+    # detail response -- it needs release_dates (movie) / content_ratings
+    # (tv) appended. Certification data is per-country, not per-language,
+    # so it only needs to ride along on one of the two language requests;
+    # piggybacked on detail_en since that one is the more reliable
+    # fallback of the two (confirmed en-US detail requests succeed even
+    # for titles with no Arabic metadata at all).
+    _cert_append = "release_dates" if media_kind == "movie" else "content_ratings"
     detail_ar = _tmdb_request_language(
         "/{}/{}".format(media_kind, best.get("id")),
         language="ar",
@@ -376,7 +424,7 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
     detail_en = _tmdb_request_language(
         "/{}/{}".format(media_kind, best.get("id")),
         language="en-US",
-        params={"append_to_response": "credits"},
+        params={"append_to_response": "credits,{}".format(_cert_append)},
         accept_any=True,
     ) or {}
     detail = detail_ar or detail_en
@@ -403,7 +451,20 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
     )
     
     backdrop_path = detail.get("backdrop_path") or best.get("backdrop_path") or ""
-    
+
+    # [detail-tmdb-meta] runtime: movies carry a single "runtime" (minutes);
+    # TV only has "episode_run_time" (a list -- use its first value as the
+    # typical episode length, same number TMDb's own site shows on a show's
+    # page). release_dates/content_ratings were only appended to detail_en
+    # above, so certification must be read from detail_en specifically --
+    # "detail" itself may be detail_ar, which never has that block.
+    runtime = detail.get("runtime")
+    if not runtime:
+        _ert = detail.get("episode_run_time") or []
+        runtime = _ert[0] if _ert else ""
+    release_date_full = str(detail.get("release_date") or detail.get("first_air_date") or "")
+    certification = _tmdb_extract_certification(detail_en or detail, media_kind)
+
     result = {
         "title": localized_title,
         "plot": localized_plot,
@@ -412,6 +473,9 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         "rating": _safe_rating(detail.get("vote_average")) if detail.get("vote_average") else "",
         "year": str(detail.get("release_date") or detail.get("first_air_date") or "")[:4],
         "genres": genres,
+        "runtime": runtime,
+        "release_date": release_date_full,
+        "certification": certification,
         "tmdb_id": detail.get("id"),
         "tmdb_kind": media_kind,
     }
@@ -458,9 +522,61 @@ def _merge_tmdb_data(data):
         merged["year"] = tmdb["year"]
     if tmdb.get("genres"):
         merged["genres"] = tmdb["genres"]
+    # [detail-tmdb-meta] fill-only, same as rating/year above: a site's
+    # own scraped runtime (already in some extractors' "runtime" field)
+    # is kept over TMDb's; release_date/certification have no other
+    # source in this codebase, so TMDb is always authoritative for them.
+    if tmdb.get("runtime") and not merged.get("runtime"):
+        merged["runtime"] = tmdb["runtime"]
+    if tmdb.get("release_date") and not merged.get("release_date"):
+        merged["release_date"] = tmdb["release_date"]
+    if tmdb.get("certification") and not merged.get("certification"):
+        merged["certification"] = tmdb["certification"]
     if tmdb.get("plot") or tmdb.get("poster") or tmdb.get("rating") or tmdb.get("genres") or tmdb.get("year"):
         merged["_tmdb"] = tmdb
     return merged
+
+def _tmdb_fetch_trailer_key(media_kind, tmdb_id):
+    """
+    [detail-trailer] Looks up a title's YouTube trailer via TMDb's own
+    /videos endpoint (same API this module already calls everywhere
+    else) -- called lazily, only when the user actually presses the
+    trailer button, not during the regular TMDb merge: resolving the
+    video key here is cheap (one more TMDb request), but turning that key
+    into a playable URL (plugin_screen_detail.py's job, via yt-dlp) is
+    not, so there is no reason to pay that cost for every detail screen
+    opened versus only the ones where a trailer is actually requested.
+
+    Prefers an official YouTube trailer, then any YouTube trailer, then a
+    YouTube teaser -- TMDb's own site uses the same preference order.
+    Non-YouTube entries (Vimeo etc.) are skipped; this plugin only has a
+    YouTube resolver (yt-dlp) to play them with. Returns "" if nothing
+    usable is found.
+    """
+    if not tmdb_id or not media_kind:
+        return ""
+    data = _tmdb_request_language(
+        "/{}/{}/videos".format(media_kind, tmdb_id),
+        language="en-US",
+        accept_any=True,
+    ) or {}
+    vids = [v for v in (data.get("results") or [])
+            if (v.get("site") or "").lower() == "youtube" and v.get("key")]
+    if not vids:
+        return ""
+
+    def _rank(v):
+        vtype = (v.get("type") or "").lower()
+        if vtype == "trailer" and v.get("official"):
+            return 0
+        if vtype == "trailer":
+            return 1
+        if vtype == "teaser":
+            return 2
+        return 3
+
+    vids.sort(key=_rank)
+    return vids[0].get("key", "")
 
 def _tmdb_search_suggestions(query, limit=8):
     query = re.sub(r"\s+", " ", query or "").strip()

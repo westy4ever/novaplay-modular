@@ -405,7 +405,8 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
     _QUALITY_WIPE_FRAMES = 10
 
     def __init__(self, session, title, candidates, previous_service=None, resume_pos=0, item_url="",
-                 next_episode=None, on_next=None, poster_url="", quality_variants=None, server_url=""):
+                 next_episode=None, on_next=None, poster_url="", quality_variants=None, server_url="",
+                 is_preview=False):
         Screen.__init__(self, session)
         self["overlay_bg"]   = Label("")
         self["status"]       = Label("جاري التشغيل...")
@@ -490,6 +491,13 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         # came from -- credited/blamed once playback is actually confirmed
         # or exhausted, not merely extracted.
         self._server_url = server_url or ""
+        # [detail-trailer] a trailer has nothing to mark watched, save a
+        # position for, or queue a next episode after -- so the near-end
+        # exit prompt in __onCancelKey (meant for "you're about to finish
+        # a real episode, what do you want to do?") is just noise here.
+        # Opt-in only: default False keeps the prompt exactly as-is for
+        # every other caller/stream.
+        self._is_preview = bool(is_preview)
         try:
             self.candidates = self._reorderCandidatesByPref(self.candidates)
         except Exception:
@@ -1948,6 +1956,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if getattr(self, "_autonext_active", False):
             self._hideAutoNextCard()
             self.__onExit(clear_position=True)
+            return
+        if getattr(self, "_is_preview", False):
+            # [detail-trailer] skip the near-end mark/save/next prompt
+            # entirely for a trailer -- there's nothing to mark, save or
+            # queue, so exit should just exit.
+            self.__onExit()
             return
         # [player-ux] near-end exit prompt
         total = self._total_secs

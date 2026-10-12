@@ -25,6 +25,7 @@ import json
 import time
 import base64
 import random
+import html as html_module  # aliased: every resolver uses a local `html` variable for page text
 from urllib.parse import urlparse, urljoin, parse_qs
 
 import threading  # [PATCH H1] for the vidsrc-family recursion guard below
@@ -105,6 +106,34 @@ def resolve_streamtape(url):
     return None
 
 
+def _follow_landing_iframe(html, base_url):
+    """[PATCH WC] Several embed hosts (doodstream/dhcplay, mixdrop, luluvdo/
+    lulustream, byselapuix, and likely others) respond to a direct fetch of
+    their "/e/" embed URL with a "/d/" or "/f/" landing/share page instead
+    of the real player -- confirmed directly against real captured markup
+    for all four of these hosts. The real player is a plain, STATIC
+    <iframe src="..."> already present in that landing page's raw HTML (no
+    JS execution needed), just at a different path or even a completely
+    different domain than the original URL. Returns the resolved absolute
+    iframe URL, or None. Skips 1x1 tracking/ad iframes."""
+    if not html:
+        return None
+    try:
+        for m in re.finditer(r'<iframe\b[^>]*\bsrc=(["\'])([^"\']+)\1[^>]*>', html, re.I):
+            attrs = m.group(0)
+            src = m.group(2)
+            if not src or src.startswith("data:") or src.startswith("javascript:"):
+                continue
+            wm = re.search(r'\bwidth=["\']?(\d+)', attrs)
+            hm = re.search(r'\bheight=["\']?(\d+)', attrs)
+            if wm and hm and int(wm.group(1)) <= 2 and int(hm.group(1)) <= 2:
+                continue
+            return urljoin(base_url or "", src)
+    except Exception:
+        pass
+    return None
+
+
 def resolve_doodstream(url):
     """[PATCH 101] DoodStream family. The embed page may redirect to another domain (doodstream.com ->
     playmogo.com); pass_md5 must be called on the domain the page ACTUALLY loaded from, with that page as
@@ -114,6 +143,10 @@ def resolve_doodstream(url):
         "dood.watch", "dood.sh", "dood.la", "dood.li", "dood.cx",
         "dood.xyz", "dood.wf", "d0o0d.com", "dsvplay.com",
         "doods.pro", "ds2play.com", "dooood.com", "doodstream.com",
+        # [PATCH WC] confirmed via a real doodstream.com/e/ capture:
+        # playmogo.com is a live current mirror -- it just never got tried
+        # because this list never had it.
+        "playmogo.com",
     ]
     try:
         page_html, page_url = None, url
@@ -135,6 +168,17 @@ def resolve_doodstream(url):
                 if html and "pass_md5" in html:
                     page_html, page_url = html, (final or candidate)
                     break
+        if not page_html:
+            # [PATCH WC] confirmed directly against a real doodstream.com/e/
+            # capture: a direct fetch lands on the "/d/" share/landing page
+            # (no pass_md5 anywhere on it), not the real "/e/" player -- the
+            # real player is a plain, static <iframe src="..."> already in
+            # that landing page's own HTML. Follow it before giving up.
+            iframe_url = _follow_landing_iframe(html, final or url)
+            if iframe_url:
+                html2, final2 = fetch(iframe_url, referer=final or url)
+                if html2 and "pass_md5" in html2:
+                    page_html, page_url = html2, (final2 or iframe_url)
         if not page_html:
             return None
         for attempt in (1, 2):
@@ -259,25 +303,46 @@ def resolve_upstream(url):
     return None
 
 
-def resolve_mixdrop(url):
-    try:
-        html, _ = fetch(url, referer=url)
-        if not html:
-            return None
-        log("Mixdrop fetched {} bytes, MDCore present: {}".format(len(html), "MDCore" in html))
-        m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', html)
+def _mixdrop_wurl(html, referer_base):
+    if not html:
+        return None
+    m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', html)
+    if m:
+        link = m.group(1)
+        if link.startswith("//"):
+            link = "https:" + link
+        return link + "|Referer={}/".format(referer_base)
+    for txt in _unpack_all(html):
+        m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', txt)
         if m:
             link = m.group(1)
             if link.startswith("//"):
                 link = "https:" + link
-            return link + "|Referer=https://mixdrop.to/"
-        for txt in _unpack_all(html):
-            m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', txt)
-            if m:
-                link = m.group(1)
-                if link.startswith("//"):
-                    link = "https:" + link
-                return link + "|Referer=https://mixdrop.to/"
+            return link + "|Referer={}/".format(referer_base)
+    return None
+
+
+def resolve_mixdrop(url):
+    try:
+        html, final = fetch(url, referer=url)
+        if not html:
+            return None
+        log("Mixdrop fetched {} bytes, MDCore present: {}".format(len(html), "MDCore" in html))
+        result = _mixdrop_wurl(html, "https://mixdrop.to")
+        if result:
+            return result
+        # [PATCH WC] confirmed directly against a real mixdrop.ps/e/
+        # capture: a direct fetch lands on the "/f/" share page (no
+        # MDCore.wurl anywhere on it, not even packed), not the real "/e/"
+        # player -- the real player is a plain, static <iframe src="...">
+        # already in that landing page's own HTML (often a relative path
+        # on the SAME mirror domain the "/f/" page redirected to).
+        iframe_url = _follow_landing_iframe(html, final or url)
+        if iframe_url:
+            html2, final2 = fetch(iframe_url, referer=final or url)
+            result = _mixdrop_wurl(html2, "https://mixdrop.to")
+            if result:
+                return result
     except Exception:
         pass
     return None
@@ -696,30 +761,50 @@ def _find_js_redirect(html):
     return None
 
 
+def _hanerix_extract(html):
+    if not html:
+        return None
+    res = find_m3u8(html) or find_mp4(html)
+    if res:
+        return res
+    all_variants = []
+    best = None
+    for txt in _unpack_all(html):
+        m3u8s = find_m3u8_all(txt)
+        mp4s = find_mp4_all(txt)
+        found = m3u8s or mp4s
+        if found:
+            if best is None:
+                best = found[0]
+            for u in found:
+                if u not in all_variants:
+                    all_variants.append(u)
+    if best:
+        _quality_tls.variants = all_variants
+        return best
+    return _best_media_url(html)
+
+
 def resolve_hanerix_style(url):
     try:
-        html, _ = fetch(url, referer=url)
+        html, final = fetch(url, referer=url)
         if not html:
             return None
-        res = find_m3u8(html) or find_mp4(html)
-        if res:
-            return res
-        all_variants = []
-        best = None
-        for txt in _unpack_all(html):
-            m3u8s = find_m3u8_all(txt)
-            mp4s = find_mp4_all(txt)
-            found = m3u8s or mp4s
-            if found:
-                if best is None:
-                    best = found[0]
-                for u in found:
-                    if u not in all_variants:
-                        all_variants.append(u)
-        if best:
-            _quality_tls.variants = all_variants
-            return best
-        return _best_media_url(html)
+        result = _hanerix_extract(html)
+        if result:
+            return result
+        # [PATCH WC] confirmed directly against a real luluvdo.com/e/
+        # capture: a direct fetch lands on the "/d/" landing page (no
+        # stream URL anywhere on it), not the real "/e/" player -- the
+        # real player is a plain, static <iframe src="..."> already in
+        # that landing page's own HTML, often on a DIFFERENT mirror domain
+        # (e.g. luluvdo.com's landing page embeds luluvido.com).
+        iframe_url = _follow_landing_iframe(html, final or url)
+        if iframe_url:
+            html2, _ = fetch(iframe_url, referer=final or url)
+            result = _hanerix_extract(html2)
+            if result:
+                return result
     except Exception:
         pass
     return None
@@ -777,76 +862,71 @@ def resolve_vidaraa(url):
         return None
 
 def resolve_hgcloud(url):
+    """
+    [FIX] Previous version looked only for an intermediate "masukestin.com"
+    embed/redirect that was never actually confirmed against a real page --
+    it never appears on hgcloud.to's actual markup, so this always fell
+    through to nothing (confirmed directly: a real captured hgcloud.to/e/...
+    page returned "extract_stream FAILED" in production with this logic).
+
+    Confirmed directly against a real captured hgcloud.to/e/{code} page:
+    hgcloud.to serves a StreamHG-style player inline -- a P.A.C.K.E.R.-packed
+    <script> that, once unpacked, defines
+    var links={"hls4":"...","hls3":"...","hls2":"https://.../master.m3u8?t=...
+    &s=...&e=...&f=...&srv=..."} and calls jwplayer(...).setup({sources:
+    [{file: links.hls4||links.hls3||links.hls2}]}). The unpacked script even
+    sets its tracking cookie on domain=".audinifer.com" -- confirming
+    hgcloud.to is the same backend/whitelabel network already handled by
+    resolve_hanerix_style for audinifer.com/vibuxer.com/morencius.com, so the
+    same fetch -> try direct m3u8/mp4 -> unpack packer -> re-scan -> follow
+    landing-page iframe approach applies unchanged, and reliably picks the
+    always-absolute hls2 URL (the hls3 .txt variant is kept as a
+    de-prioritized fallback; the relative hls4 path is correctly skipped
+    since it has no scheme).
+    """
+    return resolve_hanerix_style(url)
+
+
+def resolve_71stream(url):
+    """
+    71stream.one embed pages (https://71stream.one/embed/{code}) are a
+    Laravel + Inertia.js app (confirmed directly: its own JS bundle is named
+    ApplicationLogo-*.js / AuthenticatedLayout-*.js / Dashboard-*.js, standard
+    Laravel Breeze/Jetstream component names). The real, signed R2
+    object-storage .mp4 URL is never sitting in plain quoted text or inside
+    any packed script -- it lives inside the root
+    <div id="app" data-page="{&quot;component&quot;:&quot;Video/Embed&quot;,
+    &quot;props&quot;:{...,&quot;url&quot;:&quot;https:\\/\\/...
+    r2.cloudflarestorage.com\\/...mp4?...&quot;,...}}"> attribute, as
+    Inertia's standard HTML-entity-encoded JSON page-props blob. That is
+    exactly why resolve_generic_embed's plain-text scan (find_mp4_all /
+    _best_media_url, which only match a literal quote character around a
+    URL, never "&quot;") always failed here even though the stream link is
+    sitting in the page the whole time -- confirmed directly against a real
+    captured embed page where the fetch succeeded (37922 bytes) but every
+    generic extraction path still came back empty.
+    """
     try:
-        html, final_url = fetch(url, referer="https://hgcloud.to/")
+        html, _ = fetch(url, referer=url)
         if not html:
             return None
-        iframe_match = re.search(r'<iframe[^>]+src=["\']([^"\']+masukestin\.com[^"\']+)["\']', html, re.I)
-        if iframe_match:
-            embed_url = iframe_match.group(1)
-            log("hgcloud: Found masukestin embed: {}".format(embed_url))
-            result = resolve_host(embed_url)
-            if result:
-                return result
-        meta_refresh = re.search(r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+content=["\']\d+;\s*url=([^"\']+)["\']', html, re.I)
-        if meta_refresh:
-            redirect_url = meta_refresh.group(1)
-            if "masukestin" in redirect_url:
-                log("hgcloud: Redirecting to masukestin: {}".format(redirect_url))
-                result = resolve_host(redirect_url)
-                if result:
-                    return result
-        if "masukestin" in html:
-            masukestin_urls = re.findall(r'(https?://masukestin\.com/[^\s"\']+)', html)
-            for masukestin_url in masukestin_urls:
-                log("hgcloud: Found masukestin URL: {}".format(masukestin_url))
-                result = resolve_host(masukestin_url)
-                if result:
-                    return result
-        # real hgcloud.to traffic redirects to vibuxer.com using a
-        # "/dl?op=view&file_code=...&hash=..." path shape — dedicated scan
-        # so this doesn't silently fall through to the two fallback loops.
-        if "vibuxer.com" in html:
-            vibuxer_urls = re.findall(r'(https?://vibuxer\.com/[^\s"\']+)', html)
-            for vibuxer_url in vibuxer_urls:
-                vibuxer_url = vibuxer_url.replace("&amp;", "&")
-                log("hgcloud: Found vibuxer.com URL: {}".format(vibuxer_url))
-                result = resolve_host(vibuxer_url)
-                if result:
-                    return result
-        for embed_url in extract_iframes(html, final_url or url):
-            if not embed_url.startswith('http') or 'hgcloud.to' in embed_url or 'masukestin.com' in embed_url:
-                continue
-            log("hgcloud: Found non-masukestin embed iframe: {}".format(embed_url))
-            result = resolve_host(embed_url)
-            if result:
-                return result
-        for embed_url in re.findall(r'(https?://[a-z0-9.-]+\.[a-z]{2,}/(?:[ev]/[a-zA-Z0-9]+|dl\?op=view[^\s"\']+))', html, re.I):
-            embed_url = embed_url.replace("&amp;", "&")
-            if 'hgcloud.to' in embed_url or 'masukestin.com' in embed_url:
-                continue
-            log("hgcloud: Found non-masukestin embed URL in page script: {}".format(embed_url))
-            result = resolve_host(embed_url)
-            if result:
-                return result
-        js_redirect = _find_js_redirect(html)
-        if js_redirect and "hgcloud.to" not in js_redirect:
-            log("hgcloud: Following JS redirect: {}".format(js_redirect))
-            result = resolve_host(js_redirect)
-            if result:
-                return result
-            h2, final2 = fetch(js_redirect, referer=url)
-            if h2:
-                best = _best_media_url(h2)
-                if best:
-                    return best
-                for txt in _unpack_all(h2):
-                    best = _best_media_url(txt)
-                    if best:
-                        return best
+        m = re.search(r'data-page="({.*?})"', html, re.S)
+        if not m:
+            return None
+        raw = html_module.unescape(m.group(1)).replace("\\/", "/")
+        stream_url = None
+        try:
+            data = json.loads(raw)
+            props = data.get("props", {}) if isinstance(data, dict) else {}
+            stream_url = props.get("url")
+        except Exception:
+            um = re.search(r'"url"\s*:\s*"(https?://[^"]+)"', raw)
+            stream_url = um.group(1) if um else None
+        if stream_url and stream_url.startswith("http"):
+            return stream_url
         return None
     except Exception as e:
-        log("resolve_hgcloud error: {}".format(e))
+        log("resolve_71stream error: {}".format(e))
         return None
 
 
@@ -1459,7 +1539,7 @@ def resolve_abstream(url):
 
 def resolve_byselapuix(url):
     try:
-        html, _ = fetch(url, referer="https://byselapuix.com/")
+        html, final = fetch(url, referer="https://byselapuix.com/")
         if not html:
             return None
         best = _best_media_url(html)
@@ -1469,7 +1549,30 @@ def resolve_byselapuix(url):
             best = _best_media_url(txt)
             if best:
                 return best
-        return find_m3u8(html) or find_mp4(html)
+        result = find_m3u8(html) or find_mp4(html)
+        if result:
+            return result
+        # [PATCH WC] confirmed directly against a real byselapuix.com/e/
+        # capture: a direct fetch lands on the "/d/" landing page (no
+        # stream URL anywhere on it), not the real player -- the real
+        # player is a plain, static <iframe src="..."> already in that
+        # landing page's own HTML, on a completely different, unrelated
+        # mirror domain (confirmed: n1mwq.org).
+        iframe_url = _follow_landing_iframe(html, final or url)
+        if iframe_url:
+            html2, _ = fetch(iframe_url, referer=final or "https://byselapuix.com/")
+            if html2:
+                best = _best_media_url(html2)
+                if best:
+                    return best
+                for txt in _unpack_all(html2):
+                    best = _best_media_url(txt)
+                    if best:
+                        return best
+                result = find_m3u8(html2) or find_mp4(html2)
+                if result:
+                    return result
+        return None
     except Exception:
         return None
 
@@ -2512,6 +2615,7 @@ HOST_RESOLVERS = {
     "hgcloud":     resolve_hgcloud,
     "masukestin":  resolve_masukestin,
     "masukestin.com": resolve_masukestin,
+    "71stream.one": resolve_71stream,  # [FIX] confirmed against a real Fivetv embed capture
     "vidtube":     resolve_vidtube,
     "fastvip.space":       resolve_fastvip,
     "akhbarworld.online":  resolve_fastvip,
