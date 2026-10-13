@@ -25,10 +25,11 @@ class StreamList(GUIComponent):
     # "Seeders: N" when the server name's metadata starts with a digit,
     # which is a torrent-only convention. Every other site's server
     # list is really one line of text (name, maybe a size/source tag),
-    # so ROW_H_COMPACT packs a single ~30px text line into a 46px row:
-    # (46 - 30) / 2 = 8px padding above and below.
+    # so ROW_H_COMPACT packs a single ~30px text line into a 60px row:
+    # (60 - 30) / 2 = 15px padding above and below (was 46px/8px -- felt
+    # too tight row-to-row).
     ROW_H_NORMAL = 95
-    ROW_H_COMPACT = 46
+    ROW_H_COMPACT = 60
     ROW_H = ROW_H_NORMAL   # class-level default; __init__ sets the real instance value
 
     def __init__(self):
@@ -101,7 +102,7 @@ class StreamList(GUIComponent):
                 # ever one line of real content to show here.
                 q_clean = re.sub(r'[\[\]]', '', (quality or "")).strip()
                 right = " | ".join([x for x in (size, seeders_source) if x])
-                pad = (self.ROW_H_COMPACT - 30) // 2   # = 8
+                pad = (self.ROW_H_COMPACT - 30) // 2   # = 15
                 res.append([
                     item,
                     MultiContentEntryText(pos=(10, pad), size=(150, 30), font=0, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER, text=q_clean, color="#F0F6FC"),
