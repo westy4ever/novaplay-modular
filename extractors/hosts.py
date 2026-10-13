@@ -2897,40 +2897,30 @@ def resolve_vidsrc_family(url, referer=None):
         in_progress.discard(host)  # [PATCH H1]
 
 
-def resolve_megamax(url, referer=None):
-    """[PATCH MM1] megamax.me's own file-download aggregator, seen at
-    q7v3k8m2p1.top, reached from arabseed.wine's single "MegaMax"
-    watch-page server. Confirmed directly from a real network
-    capture, 2026-10-13:
+def megamax_list_mirrors(url, referer=None):
+    """[PATCH MM2] List EVERY mirror megamax.me's (q7v3k8m2p1.top)
+    file-download aggregator exposes, across ALL qualities -- not just
+    the first one that happens to resolve. Extracted out of the
+    original resolve_megamax() (see that function's docstring, kept
+    below, for the full reverse-engineered protocol writeup) so the
+    scraping logic can be shared between:
+      - resolve_megamax(): auto-pick wrapper (unchanged external
+        contract -- returns the first mirror that resolve_host() can
+        actually resolve).
+      - arabseed.py's get_page(): wants the FULL list, so the UI can
+        show every voe/byse/mixdrop/uqload/etc. choice across every
+        quality, not just one auto-picked link.
 
-      - GET /iframe/<hash> (the watch-page embed) and GET /download/<hash>
-        share the exact same <hash> -- same file, two page types on the
-        same Vue/Inertia.js app.
-      - /download/<hash>'s initial HTML embeds a JSON blob
-        (<script data-page="app">) with an Inertia "version" string and
-        an "attachments" list (each: hashId/label/resolution/size) --
-        one per quality -- but NOT the mirror links themselves.
-      - Clicking a quality's "download" button fires a POST to that
-        SAME /download/<hash> URL (Laravel/Inertia "partial reload"
-        convention): JSON body {"attach": <attachmentHashId>}, with
-        X-Inertia / X-Inertia-Partial-Data=download /
-        X-Inertia-Partial-Component=files/mirror/download /
-        X-Inertia-Version headers, plus an X-XSRF-TOKEN header that is
-        just the XSRF-TOKEN cookie value URL-decoded (standard Laravel
-        double-submit CSRF -- no secret to derive, the opener's shared
-        cookiejar already holds the cookie from the GET above). The
-        response is JSON with props.download.data.mirrors:
-        [{driver, link}, ...] -- the real voe/byse/mixdrop/uqload/etc.
-        embed links the site's own UI shows.
+    Returns a list of dicts, ordered highest-resolution-attachment
+    first then in the mirrors[] order the site itself returns per
+    attachment:
+        {"quality": <att label, e.g. "720p">, "driver": <str>,
+         "url": <normalized https:// link, NOT yet resolved>}
 
-    Every "driver" name seen in the real capture (send, streamruby,
-    Vikingfile, uqload, streamhg, mixdrop, doodstream, byse, earnvids,
-    voe) already matches an existing HOST_RESOLVERS entry by domain
-    substring, so this just fetches the mirror list (highest-resolution
-    attachment first) and hands each link to resolve_host() in order,
-    returning the first one that resolves -- no new per-host resolver
-    logic needed. rapidgator/nitroflare are premium cyberlockers with
-    no video-embed resolver and are skipped.
+    Returns [] (not None) on any failure, so callers can safely
+    iterate without a None-check. rapidgator/nitroflare are premium
+    cyberlockers with no video-embed resolver and are skipped, same
+    as before.
     """
     try:
         if "/iframe/" in url:
@@ -2938,26 +2928,26 @@ def resolve_megamax(url, referer=None):
         elif "/download/" in url:
             download_url = url
         else:
-            return None
+            return []
 
         html, final = fetch(download_url, referer=referer or download_url)
         if not html:
-            return None
+            return []
 
         page_m = re.search(
             r'<script[^>]+data-page=["\']app["\'][^>]*>(.*?)</script>',
             html, re.S)
         if not page_m:
-            return None
+            return []
         try:
             page_data = json.loads(page_m.group(1))
         except Exception:
-            return None
+            return []
 
         version = page_data.get("version")
         attachments = (page_data.get("props") or {}).get("attachments") or []
         if not version or not attachments:
-            return None
+            return []
 
         def _res_width(att):
             try:
@@ -2973,11 +2963,13 @@ def resolve_megamax(url, referer=None):
             xsrf = unquote(cookie_m.group(1))
 
         _skip_drivers = ("rapidgator", "nitroflare")
+        out = []
 
         for att in attachments:
             hash_id = att.get("hashId")
             if not hash_id:
                 continue
+            quality_label = att.get("label") or ""
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "text/html, application/xhtml+xml",
@@ -3010,10 +3002,64 @@ def resolve_megamax(url, referer=None):
                     link = "https:" + link
                 if not link.startswith("http"):
                     continue
-                result = resolve_host(link, referer=base)
-                if result:
-                    log("resolve_megamax: resolved via driver={} att={}".format(driver, hash_id))
-                    return result
+                out.append({
+                    "quality": quality_label,
+                    "driver": mirror.get("driver") or driver,
+                    "url": link,
+                    "referer": base,
+                })
+        return out
+    except Exception as e:
+        log("megamax_list_mirrors error: {}".format(e))
+        return []
+
+
+def resolve_megamax(url, referer=None):
+    """[PATCH MM1] megamax.me's own file-download aggregator, seen at
+    q7v3k8m2p1.top, reached from arabseed.wine's single "MegaMax"
+    watch-page server. Confirmed directly from a real network
+    capture, 2026-10-13:
+
+      - GET /iframe/<hash> (the watch-page embed) and GET /download/<hash>
+        share the exact same <hash> -- same file, two page types on the
+        same Vue/Inertia.js app.
+      - /download/<hash>'s initial HTML embeds a JSON blob
+        (<script data-page="app">) with an Inertia "version" string and
+        an "attachments" list (each: hashId/label/resolution/size) --
+        one per quality -- but NOT the mirror links themselves.
+      - Clicking a quality's "download" button fires a POST to that
+        SAME /download/<hash> URL (Laravel/Inertia "partial reload"
+        convention): JSON body {"attach": <attachmentHashId>}, with
+        X-Inertia / X-Inertia-Partial-Data=download /
+        X-Inertia-Partial-Component=files/mirror/download /
+        X-Inertia-Version headers, plus an X-XSRF-TOKEN header that is
+        just the XSRF-TOKEN cookie value URL-decoded (standard Laravel
+        double-submit CSRF -- no secret to derive, the opener's shared
+        cookiejar already holds the cookie from the GET above). The
+        response is JSON with props.download.data.mirrors:
+        [{driver, link}, ...] -- the real voe/byse/mixdrop/uqload/etc.
+        embed links the site's own UI shows.
+
+    Every "driver" name seen in the real capture (send, streamruby,
+    Vikingfile, uqload, streamhg, mixdrop, doodstream, byse, earnvids,
+    voe) already matches an existing HOST_RESOLVERS entry by domain
+    substring.
+
+    [PATCH MM2] Scraping logic moved to megamax_list_mirrors() above
+    (shared with arabseed.py's full-choice UI listing); this function
+    is now a thin auto-pick wrapper over it, kept for backward
+    compatibility with its existing HOST_RESOLVERS registration and
+    external contract: iterate the mirrors (already highest-resolution
+    attachment first) and hand each link to resolve_host() in order,
+    returning the first one that actually resolves.
+    """
+    try:
+        mirrors = megamax_list_mirrors(url, referer=referer)
+        for mirror in mirrors:
+            result = resolve_host(mirror["url"], referer=mirror.get("referer") or referer)
+            if result:
+                log("resolve_megamax: resolved via driver={}".format(mirror.get("driver")))
+                return result
         return None
     except Exception as e:
         log("resolve_megamax error: {}".format(e))

@@ -14,6 +14,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from .base import BaseExtractor, fetch, log, urljoin, clear_cookies
+from .hosts import megamax_list_mirrors
 
 if sys.version_info[0] == 3:
     from urllib.parse import quote_plus
@@ -829,6 +830,38 @@ class ArabseedExtractor(BaseExtractor):
                 "url": server["url"],
                 "type": server["type"],
             })
+
+        # [PATCH AS10] Expose the FULL voe/byse/mixdrop/uqload/etc.
+        # mirror choice for a MegaMax entry instead of silently
+        # auto-picking one. MegaMax's single watch-page server is
+        # really q7v3k8m2p1.top's own file-download aggregator (see
+        # hosts.py's megamax_list_mirrors(), reverse-engineered
+        # directly from a real network capture 2026-10-13) -- expand
+        # it in place into one named, individually-selectable entry
+        # per real mirror link across every quality, so the UI lets
+        # the user choose exactly like the site's own download page
+        # does, rather than resolve_megamax() silently picking the
+        # first one that happens to resolve.
+        if result["servers"]:
+            expanded_servers = []
+            for server in result["servers"]:
+                server_url = server.get("url", "")
+                if "q7v3k8m2p1.top" in server_url:
+                    mirrors = megamax_list_mirrors(server_url, referer=watch_final or watch_url)
+                    if mirrors:
+                        for mirror in mirrors:
+                            quality = mirror.get("quality") or ""
+                            driver = mirror.get("driver") or ""
+                            label = ("[{}] {} ({})".format(quality, driver, server["name"])
+                                     if quality else "{} ({})".format(driver, server["name"]))
+                            expanded_servers.append({
+                                "name": label,
+                                "url": mirror["url"],
+                                "type": "embed",
+                            })
+                        continue  # drop the original single MegaMax entry
+                expanded_servers.append(server)
+            result["servers"] = expanded_servers
 
         # Older variants still expose the AJAX endpoint; try it only
         # if the static list came back empty.
