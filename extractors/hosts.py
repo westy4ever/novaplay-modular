@@ -2681,6 +2681,20 @@ HOST_RESOLVERS = {
     "abstream.to":     resolve_abstream,
     "byselapuix":      resolve_byselapuix,
     "byselapuix.com":  resolve_byselapuix,
+    # [PATCH AS5] byseraguci.com confirmed, 2026-10-13, via a real
+    # captured network log + matching HTML snapshot (arabseed.wine
+    # "Bys" server): identical landing-page behavior to byselapuix.com
+    # -- same exact JS/CSS asset bundle hashes (index-DocunfmE.js,
+    # en-C5WysiHD.js, pow-DEJGtdh2.js, videoPagesBundle-*, etc.), same
+    # /api/videos/<id>/settings + /details calls, and the real player
+    # is the same plain static <iframe src="https://n1mwq.org/..."> --
+    # same unrelated mirror domain byselapuix already follows. Other
+    # "byse*" vanity domains are NOT assumed to match this (bysekoze
+    # uses the StreamWish backend instead, and bysezejataos.com is a
+    # confirmed-dead host in arabseed.py's BLOCKED_HOSTS) -- only this
+    # specific domain is mapped here, on direct evidence.
+    "byseraguci":      resolve_byselapuix,
+    "byseraguci.com":  resolve_byselapuix,
     "dhcplay":         resolve_dhcplay,
     "dhcplay.com":     resolve_dhcplay,
     "mycima.cv":       resolve_azrak_mycima,   # [PATCH 121]
