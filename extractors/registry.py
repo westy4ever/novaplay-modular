@@ -174,23 +174,21 @@ _SEARCH_SITE_ORDER = (
 )
 
 # Home-grid tile order — deliberately separate from _SEARCH_SITE_ORDER
-# (see module docstring). The cima-family sites (mywecima, mycima,
-# cimawebas, cwb) are pinned together so they appear as a sibling cluster
-# on the grid rather than being appended to the tail.
+# (see module docstring).
 #
-# "egydead_coupons", "egydead_ca", "arabseed_liv", "akwams" and
-# "wecima_sarl" are NOT listed here (only in _SEARCH_SITE_ORDER): each is
-# a _SITE_FAMILIES member of its representative ("egydead" / "arabseed" /
-# "akwam" / "wecima"), so it rides on that representative's single grid
-# tile (see get_home_sites()/get_family_members() below) rather than
-# getting a tile of its own. "Search all" still fans out to every
-# member normally.
+# "egydead_coupons", "egydead_ca", "arabseed_liv", "akwams",
+# "wecima_sarl", "faselhdx", "shahid4u", "mycima", "cimawebas" and "cwb"
+# are NOT listed here (only in _SEARCH_SITE_ORDER): each is a
+# _SITE_FAMILIES member of its representative ("egydead" / "arabseed" /
+# "akwam" / "wecima" / "fasel" / "shaheed" / "mywecima"), so it rides on
+# that representative's single grid tile (see get_home_sites()/
+# get_family_members() below) rather than getting a tile of its own.
+# "Search all" still fans out to every member normally.
 _HOME_SITE_ORDER = (
     "egydead", "egybest", "akwam",
     "arabseed",
-    "wecima", "shaheed", "shahid4u", "topcinema",
-    "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
-    "cimawebas", "cwb",
+    "wecima", "shaheed", "topcinema",
+    "fasel", "arablionz", "mywecima",
     "alooytv", "aflaam", "onlyflix", "fivetv",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
@@ -211,6 +209,9 @@ _SITE_FAMILIES = {
     "arabseed": ["arabseed", "arabseed_liv"],
     "akwam": ["akwam", "akwams"],
     "wecima": ["wecima", "wecima_sarl"],
+    "fasel": ["fasel", "faselhdx"],                     # FaselHD (RIP) / FaselHD (HDX)
+    "shaheed": ["shaheed", "shahid4u"],                  # both titled "Shaheed4u"
+    "mywecima": ["mywecima", "mycima", "cimawebas", "cwb"],  # the "cima" cluster
 }
 
 # Reverse lookup: member key -> representative key, built once below.
