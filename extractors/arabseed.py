@@ -468,6 +468,43 @@ class ArabseedExtractor(BaseExtractor):
             seen.add(url)
             servers.append({"name": name, "url": url, "type": "embed"})
 
+        # [PATCH AS6] Newer arabseed.wine watch-page layout, confirmed
+        # live 2026-10-13 against a real TV-episode watch page: server
+        # buttons carry data-player-url="" (filled in by JS only after a
+        # click) instead of a static data-link, so the loop above finds
+        # nothing. The one exception is whichever server is already
+        # ``active`` on page load -- its real URL isn't in the <li> at
+        # all, but in a sibling <div class="player__iframe"><iframe
+        # src="...">. Only that one server is recoverable this way (the
+        # rest need the get__watch__server AJAX call that
+        # _collect_ajax_servers already tries separately), so this adds
+        # just that single confirmed-active entry rather than guessing
+        # at the others.
+        if not servers:
+            scope2 = watch_html
+            list_m = re.search(
+                r'<div[^>]+class=["\'][^"\']*servers__list[^"\']*["\'][^>]*>(.*?)</ul>',
+                watch_html, re.S | re.I
+            )
+            if list_m:
+                scope2 = list_m.group(1)
+            li_m = re.search(r'<li\b([^>]*)>(.*?)</li>', scope2, re.S | re.I)
+            if li_m and "data-player-url" in li_m.group(1) and "active" in li_m.group(1):
+                iframe_m = re.search(
+                    r'<div[^>]+class=["\'][^"\']*player__iframe[^"\']*["\'][^>]*>\s*'
+                    r'<iframe[^>]+src=["\']([^"\']+)["\']',
+                    watch_html, re.S | re.I
+                )
+                if iframe_m:
+                    url = self._full_url(iframe_m.group(1))
+                    if (url.startswith("http") and url not in seen
+                            and not any(h in url for h in BLOCKED_HOSTS)):
+                        name_m = re.search(r'<span[^>]*>([^<]+)</span>', li_m.group(2), re.I)
+                        name = (html_lib.unescape(name_m.group(1).strip())
+                                if name_m else "Server")
+                        seen.add(url)
+                        servers.append({"name": name, "url": url, "type": "embed"})
+
         if servers:
             log("ArabSeed: watch page server list -> {} servers".format(len(servers)))
         return servers
