@@ -14,7 +14,7 @@ FIX: Improved server extraction with data-href attributes.
 """
 
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote_plus
 from .base import (BaseExtractor, fetch, log, extract_stream as base_extract_stream,
                    extract_stream_all as _resolve_all)
 
@@ -261,9 +261,9 @@ class ArablionzExtractor(BaseExtractor):
     def search(self, query, page=1):
         """Search functionality for arablionz.live."""
         base = self._get_base()
-        search_url = urljoin(base, "?s=" + query.replace(" ", "+"))
+        search_url = urljoin(base, "?s=" + quote_plus(query))
         if page > 1:
-            search_url = urljoin(base, "?s={}&paged={}".format(query.replace(" ", "+"), page))
+            search_url = urljoin(base, "?s={}&paged={}".format(quote_plus(query), page))
         
         html, _ = fetch(search_url, referer=base)
         if not html:

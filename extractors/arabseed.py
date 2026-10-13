@@ -9,10 +9,16 @@ import html as html_lib
 import json
 import random
 import re
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from .base import BaseExtractor, fetch, log, urljoin, clear_cookies
+
+if sys.version_info[0] == 3:
+    from urllib.parse import quote_plus
+else:
+    from urllib import quote_plus
 
 QUALITY_ORDER = {"1080": 0, "720": 1, "480": 2}
 BLOCKED_HOSTS = ("vidara.to", "bysezejataos.com")
@@ -703,9 +709,9 @@ class ArabseedExtractor(BaseExtractor):
         return items
 
     def search(self, query, page=1):
-        search_url = urljoin(self._get_base(), "?s=" + query.replace(" ", "+"))
+        search_url = urljoin(self._get_base(), "?s=" + quote_plus(query))
         if page > 1:
-            search_url = urljoin(self._get_base(), "page/{}/?s={}".format(page, query.replace(" ", "+")))
+            search_url = urljoin(self._get_base(), "page/{}/?s={}".format(page, quote_plus(query)))
         log("ArabSeed: search url={}".format(search_url))
         html, _ = fetch(search_url, referer=self._get_base())
         if not html:
