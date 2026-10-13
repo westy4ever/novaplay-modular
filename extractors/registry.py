@@ -178,16 +178,17 @@ _SEARCH_SITE_ORDER = (
 # cimawebas, cwb) are pinned together so they appear as a sibling cluster
 # on the grid rather than being appended to the tail.
 #
-# "egydead_coupons", "egydead_ca" and "arabseed_liv" are NOT listed here
-# (only in _SEARCH_SITE_ORDER): each is a _SITE_FAMILIES member of its
-# representative ("egydead" / "arabseed"), so it rides on that
-# representative's single grid tile (see get_home_sites()/
-# get_family_members() below) rather than getting a tile of its own.
-# "Search all" still fans out to every member normally.
+# "egydead_coupons", "egydead_ca", "arabseed_liv", "akwams" and
+# "wecima_sarl" are NOT listed here (only in _SEARCH_SITE_ORDER): each is
+# a _SITE_FAMILIES member of its representative ("egydead" / "arabseed" /
+# "akwam" / "wecima"), so it rides on that representative's single grid
+# tile (see get_home_sites()/get_family_members() below) rather than
+# getting a tile of its own. "Search all" still fans out to every
+# member normally.
 _HOME_SITE_ORDER = (
-    "egydead", "egybest", "akwam", "akwams",
+    "egydead", "egybest", "akwam",
     "arabseed",
-    "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
+    "wecima", "shaheed", "shahid4u", "topcinema",
     "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
     "alooytv", "aflaam", "onlyflix", "fivetv",
@@ -208,6 +209,8 @@ _HOME_SITE_ORDER = (
 _SITE_FAMILIES = {
     "egydead": ["egydead", "egydead_coupons", "egydead_ca"],
     "arabseed": ["arabseed", "arabseed_liv"],
+    "akwam": ["akwam", "akwams"],
+    "wecima": ["wecima", "wecima_sarl"],
 }
 
 # Reverse lookup: member key -> representative key, built once below.
