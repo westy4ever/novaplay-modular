@@ -17,19 +17,46 @@ from plugin_gridlist import _has_arabic
 class StreamList(GUIComponent):
     GUI_WIDGET = eListbox
 
-    # Row height used by every setList / getRowY call. Kept as a class
-    # constant so the detail screen's accent bar can compute row positions
-    # without a magic number.
-    ROW_H = 95
+    # [row-compact] Row height used by every setList / getRowY call.
+    # ROW_H_NORMAL (95px) is the original two-line layout (quality +
+    # source tag stacked, size + seeders stacked) -- needed only by
+    # sites that report a REAL torrent seeder count (torrentio, yts):
+    # AdvancedArabicPlayerDetail._format_server_item only ever fills in
+    # "Seeders: N" when the server name's metadata starts with a digit,
+    # which is a torrent-only convention. Every other site's server
+    # list is really one line of text (name, maybe a size/source tag),
+    # so ROW_H_COMPACT packs a single ~30px text line into a 46px row:
+    # (46 - 30) / 2 = 8px padding above and below.
+    ROW_H_NORMAL = 95
+    ROW_H_COMPACT = 46
+    ROW_H = ROW_H_NORMAL   # class-level default; __init__ sets the real instance value
 
     def __init__(self):
         GUIComponent.__init__(self)
+        self.compact = False
+        self.ROW_H = self.ROW_H_NORMAL
         self.l = eListboxPythonMultiContent()
         self.l.setFont(0, gFont("Regular", 26))
         self.l.setFont(1, gFont("Regular", 22))
         self.l.setFont(2, gFont("Regular", 20))
         self.l.setItemHeight(self.ROW_H)   # [PATCH 19] content is 75px tall; 95 = tight + 20px air
         self.onSelectionChanged = []
+
+    def setCompact(self, compact):
+        """Switch between the normal two-line row (torrent sites, which
+        show a real seeder count) and the compact single-line row
+        (every other site). Call this BEFORE setList() so the new rows
+        are built at the right height from the start; it's a no-op if
+        the mode isn't actually changing."""
+        compact = bool(compact)
+        if compact == self.compact:
+            return
+        self.compact = compact
+        self.ROW_H = self.ROW_H_COMPACT if compact else self.ROW_H_NORMAL
+        self.l.setItemHeight(self.ROW_H)
+        if self.instance:
+            try: self.instance.setItemHeight(self.ROW_H)
+            except Exception: pass
 
     def selectionChanged(self):
         for cb in self.onSelectionChanged:
@@ -67,6 +94,23 @@ class StreamList(GUIComponent):
             filename = item[1]
             size = item[2] if len(item) > 2 else ""
             seeders_source = item[3] if len(item) > 3 else ""
+            if self.compact:
+                # [row-compact] one text line per column, vertically
+                # centered in the shorter row -- no resolution/source-tag
+                # split and no size/seeders stack, since there's only
+                # ever one line of real content to show here.
+                q_clean = re.sub(r'[\[\]]', '', (quality or "")).strip()
+                right = " | ".join([x for x in (size, seeders_source) if x])
+                pad = (self.ROW_H_COMPACT - 30) // 2   # = 8
+                res.append([
+                    item,
+                    MultiContentEntryText(pos=(10, pad), size=(150, 30), font=0, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER, text=q_clean, color="#F0F6FC"),
+                    MultiContentEntryText(pos=(170, pad), size=(1130, 30), font=1,
+                                          flags=(RT_HALIGN_RIGHT if _has_arabic(filename) else RT_HALIGN_LEFT)|RT_VALIGN_CENTER,
+                                          text=filename, color="#F0F6FC"),
+                    MultiContentEntryText(pos=(1560, pad), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=right, color="#F0F6FC"),
+                ])
+                continue
             # [PATCH 19] row layout: tight columns, metadata beside the
             # content instead of hugging the screen edge.
             # quality 10-140 | filename 150-1320 | size/seeders 1330-1560

@@ -145,6 +145,13 @@ def _quality_pref_key(title):
     return ("qpref_" + t) if t else ""
 
 
+# [row-compact] Site keys (extractors/registry.py) whose server rows carry
+# a real torrent seeder count and so need StreamList's taller, two-line
+# row. Every other site gets the shorter single-line row -- see
+# AdvancedArabicPlayerDetail._applyMenuRowHeight().
+_TORRENT_SEEDER_SITES = ("torrentio", "yts")
+
+
 class AdvancedArabicPlayerDetail(Screen):
     skin = """
     <screen name="AdvancedArabicPlayerDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
@@ -465,8 +472,20 @@ class AdvancedArabicPlayerDetail(Screen):
             except Exception: pass
 
     # ── [detail-stagger] progressive menu population ──────────────────
+    def _applyMenuRowHeight(self):
+        """[row-compact] Only torrentio/yts ever put a real seeder count
+        in a server row (see StreamList's ROW_H_COMPACT comment) -- every
+        other site's rows are one line of text, so they get the shorter
+        row. Called once per menu (re)population; StreamList.setCompact()
+        is a no-op if the mode isn't actually changing."""
+        try:
+            self["menu"].setCompact(self._site not in _TORRENT_SEEDER_SITES)
+        except Exception:
+            pass
+
     def _setMenu(self, items):
         """Central setList — updates the accent bar's item count."""
+        self._applyMenuRowHeight()
         try:
             self._menu_item_count = len(items)
             self["menu"].setList(items)
@@ -479,6 +498,7 @@ class AdvancedArabicPlayerDetail(Screen):
         """Reveal menu rows a few at a time so a slow response feels live.
         Lists longer than 16 items advance in groups of 3 to cap the
         animation at ~400 ms regardless of size."""
+        self._applyMenuRowHeight()
         items = list(items)
         self._stagger_items = items
         n = len(items)
