@@ -174,18 +174,18 @@ _SEARCH_SITE_ORDER = (
 )
 
 # Home-grid tile order — deliberately separate from _SEARCH_SITE_ORDER
-# (see module docstring). The three cima-family sites (mywecima, mycima,
+# (see module docstring). The cima-family sites (mywecima, mycima,
 # cimawebas, cwb) are pinned together so they appear as a sibling cluster
-# on the grid rather than being appended to the tail. The three
-# egydead-family sites (egydead, egydead_coupons, egydead_ca) are pinned
-# together at the top for the same reason.
+# on the grid rather than being appended to the tail.
 #
-# "arabseed_liv" is NOT listed here (only in _SEARCH_SITE_ORDER): it is a
-# _SITE_FAMILIES member of "arabseed", so it rides on arabseed's single
-# grid tile (see get_home_sites()/get_family_members() below) rather than
-# getting a tile of its own. "Search all" still fans out to it normally.
+# "egydead_coupons", "egydead_ca" and "arabseed_liv" are NOT listed here
+# (only in _SEARCH_SITE_ORDER): each is a _SITE_FAMILIES member of its
+# representative ("egydead" / "arabseed"), so it rides on that
+# representative's single grid tile (see get_home_sites()/
+# get_family_members() below) rather than getting a tile of its own.
+# "Search all" still fans out to every member normally.
 _HOME_SITE_ORDER = (
-    "egydead", "egydead_coupons", "egydead_ca", "egybest", "akwam", "akwams",
+    "egydead", "egybest", "akwam", "akwams",
     "arabseed",
     "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
     "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
@@ -206,6 +206,7 @@ _HOME_SITE_ORDER = (
 # the home-screen picker both read this dict, so no other code changes
 # are needed for it to show up correctly.
 _SITE_FAMILIES = {
+    "egydead": ["egydead", "egydead_coupons", "egydead_ca"],
     "arabseed": ["arabseed", "arabseed_liv"],
 }
 
