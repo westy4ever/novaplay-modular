@@ -38,13 +38,15 @@ from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
 from .referers import get_referer
 from .htmlmedia import _quality_probe_text  # [PATCH 94]
 
-# ─── Optional AES-256-GCM backend (n1mwq.org playback decrypt) ─────────────
-# [PATCH N1] Neither of these is guaranteed to exist on the real OpenATV/
-# Enigma2 target -- confirmed only that "cryptography" is importable in
-# THIS sandbox (pycryptodome/Crypto is not, here). Same optional-dependency
-# shape as curl_cffi above: try the richer backend first, fall back, and if
-# neither is present resolve_n1mwq() fails loudly via log() rather than
-# silently returning None with no explanation.
+# ─── AES-256-GCM backend (n1mwq.org playback decrypt) ──────────────────────
+# [PATCH N1/N2] Confirmed directly on the user's real OpenATV/Enigma2 box:
+# `pip install cryptography` fails there -- its cffi dependency needs a C
+# compiler ("arm-oe-linux-gnueabi-gcc") that doesn't exist on the device,
+# so pycryptodome (also a compiled extension) would fail the same way.
+# Three tiers, richest/fastest first, with a pure-Python implementation
+# (_pure_aes_gcm.py -- no compiled extension, no dependency at all) as the
+# guaranteed-to-work last resort. resolve_n1mwq() fails loudly via log()
+# only if literally none of the three import, which shouldn't happen.
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _CRYPTOGRAPHY_AESGCM
     _AESGCM_BACKEND = "cryptography"
@@ -55,9 +57,15 @@ except Exception:
         _AESGCM_BACKEND = "pycryptodome"
     except Exception:
         _PYCRYPTODOME_AES = None
-        _AESGCM_BACKEND = None
-        print("No AES-GCM backend (cryptography/pycryptodome) available -- "
-              "n1mwq.org playback decrypt will be unavailable")
+        try:
+            from . import _pure_aes_gcm as _PURE_AES_GCM
+            _AESGCM_BACKEND = "pure-python"
+        except Exception:
+            _PURE_AES_GCM = None
+            _AESGCM_BACKEND = None
+            print("No AES-GCM backend available at all (cryptography / "
+                  "pycryptodome / pure-python) -- n1mwq.org playback "
+                  "decrypt will be unavailable")
 
 
 # ─── Video Host Resolvers ─────────────────────────────────────────────────────
@@ -1741,9 +1749,14 @@ def _n1mwq_aes_gcm_decrypt(key, iv, ciphertext_and_tag):
         ct, tag = ciphertext_and_tag[:-16], ciphertext_and_tag[-16:]
         cipher = _PYCRYPTODOME_AES.new(key, _PYCRYPTODOME_AES.MODE_GCM, nonce=iv)
         return cipher.decrypt_and_verify(ct, tag)
+    if _AESGCM_BACKEND == "pure-python":
+        # [PATCH N2] confirmed necessary: neither of the above can be
+        # pip-installed on the real target device (no C compiler), so
+        # this dependency-free fallback is what actually runs there.
+        return _PURE_AES_GCM.aes256_gcm_decrypt(key, iv, ciphertext_and_tag)
     raise RuntimeError(
-        "no AES-GCM backend available (install 'cryptography' or "
-        "'pycryptodome' to use n1mwq.org streams)")
+        "no AES-GCM backend available at all -- this should be "
+        "unreachable (pure-python fallback ships with the plugin)")
 
 
 def _n1mwq_decrypt_playback(playback):
