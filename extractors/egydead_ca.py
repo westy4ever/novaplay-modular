@@ -39,10 +39,12 @@ at all -- confirmed directly, live: extract_stream() on a real
 "https://egybestvid.com/embed-<id>.html" URL returned the real, playable
 s1.egybestvid.com HLS stream on its own.
 
-NOT confirmed, no real evidence captured: a search endpoint. No search
-request appeared anywhere in the real, captured network log this was
-built from. search() below returns an empty list rather than guessing at
-an unconfirmed URL shape.
+Search  /api/v1/search/<query>?loader=searchPage   -- confirmed live,
+            2026-10-13, via a real captured browser session (autocomplete
+            fires per keystroke on /api/v1/search/<partial>?loader=
+            searchAutocomplete, then the full search on Enter hits this
+            same path with loader=searchPage). Returns {"results": [...]}
+            with items in the same shape as a channel-listing item.
 """
 
 import re
@@ -264,11 +266,26 @@ class EgydeadCaExtractor(BaseExtractor):
 
     # ── Public: search ────────────────────────────────────────────────
     def search(self, query, page=1):
-        # [NOT CONFIRMED] no search request was ever captured in the real
-        # network log this extractor was built from -- returning empty
-        # rather than guessing at an unconfirmed endpoint shape.
-        log("Egydead: search not implemented -- no real endpoint confirmed")
-        return []
+        # Confirmed live, 2026-10-13, from a real captured browser session
+        # (autocomplete request immediately followed by the full search
+        # request): GET /api/v1/search/<query>?loader=searchPage returns
+        # {"results": [...]} with each item in the exact same shape as a
+        # channel-listing item (id, name, type, is_series, release_date,
+        # poster, backdrop, rating, description, ...) -- just without a
+        # primary_video field, which _card_from_title_item() already
+        # handles by falling back to the titles/<id> page for those.
+        if not query:
+            return []
+        data = self._fetch_json(
+            "api/v1/search/{}".format(quote(query, safe="")),
+            loader="searchPage")
+        if not data:
+            log("Egydead: search failed for {}".format(query))
+            return []
+        raw_items = data.get("results") or []
+        items = [self._card_from_title_item(it) for it in raw_items]
+        log("Egydead: {} search result(s) for {}".format(len(items), query))
+        return items
 
     # ── Public: detail / watch page ──────────────────────────────────────
     def get_page(self, url, m_type=None):
