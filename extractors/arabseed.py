@@ -668,7 +668,26 @@ class ArabseedExtractor(BaseExtractor):
         # Ensure URL uses the active domain
         url = self._full_url(url)
         log("ArabSeed: get_category_items url={} page={}".format(url, page))
-        html, _ = fetch(url, referer=self._get_base())
+        # [PATCH AS8] Pagination fix, confirmed 2026-10-13 against a real
+        # device log: fetching .../page/2/ (and deeper) with referer=base
+        # (the site root) gets served the SAME anti-bot decoy/shell page
+        # the plugin used to get for a flat-out wrong category URL (one
+        # bogus "عرب سيد" item, ~55KB) -- even though the URL itself is
+        # correct (it's the exact href the real page/1 HTML contains).
+        # The page/1 fetch for the very same category, using that same
+        # referer=base, gets the real ~328KB listing every time. A real
+        # browser clicking "next page" sends Referer = the page it just
+        # came from (page N-1's own URL), not the site root, so deep
+        # pages likely need that exact chain to pass whatever anti-bot
+        # check is gating them. Reconstruct that referer here: for a
+        # .../page/N/ URL, referer = the same URL with the /page/N/
+        # suffix stripped (i.e. page 1's URL); for a plain/page-1 URL,
+        # keep the previous referer=base behavior unchanged.
+        page_referer = self._get_base()
+        page_strip_match = re.match(r'^(.*?)/page/\d+/?$', url.rstrip('/') + '/')
+        if page_strip_match:
+            page_referer = page_strip_match.group(1).rstrip('/') + '/'
+        html, _ = fetch(url, referer=page_referer)
         if not html:
             log("ArabSeed: Failed to fetch: {}".format(url))
             return []
