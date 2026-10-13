@@ -278,6 +278,21 @@ class AdvancedArabicPlayerHome(Screen):
         self._listSlidePhase  = 0
         self._listSlideFrame  = 0
         self._listSlideDoneCb = None
+        # [family-back] _onBack()'s "return to family picker" callback
+        # fires from INSIDE _listSlideTick()'s own slide-out completion
+        # branch. Calling _showSiteFamilyPicker() (which starts a NEW
+        # slide-IN via _slideListIn()) synchronously from there is
+        # re-entrant: _listSlideTick's still-running slide-out frame
+        # unconditionally resets _listSlidePhase=0 and stops
+        # _listSlideTimer right after the callback returns, clobbering
+        # the slide-in state the callback just started (list stays
+        # stuck off-screen; stale catAccent position stays visible).
+        # Deferring the picker rebuild by one event-loop tick (a
+        # dedicated one-shot timer, started AFTER the slide-out tick's
+        # own tail code has already run) avoids that entirely.
+        self._pendingPickerTimer = eTimer()
+        self._pendingPickerTimer.callback.append(self._firePendingPicker)
+        self._pendingPickerArgs = None
         self._catShakeTimer   = eTimer()
         self._catShakeTimer.callback.append(self._catShakeTick)
         self._catShakeFrames  = 0
@@ -2601,6 +2616,25 @@ class AdvancedArabicPlayerHome(Screen):
             self["key_blue"].setText("")
             self._updateGridFooter()
 
+    def _firePendingPicker(self):
+        """One-shot timer callback: rebuild the family picker a tick
+        after a slide-out animation finished (see _pendingPickerTimer
+        in __init__). By now _listSlideTick's own slide-out completion
+        code has already reset _listSlidePhase/_listSlideTimer, so the
+        new slide-in this triggers (via _showSiteFamilyPicker ->
+        _setList -> _slideListIn) runs cleanly instead of being
+        clobbered."""
+        try:
+            self._pendingPickerTimer.stop()
+        except Exception:
+            pass
+        args = self._pendingPickerArgs
+        self._pendingPickerArgs = None
+        if not args:
+            return
+        rep_key, focus_site = args
+        self._showSiteFamilyPicker(rep_key, get_family_members(rep_key), focus_site=focus_site)
+
     def _showSiteFamilyPicker(self, rep_key, members, focus_site=None):
         """Grid tile for a grouped site family ("rep_key") was pressed --
         show a small picker (the same plain list used for categories) so
@@ -2897,9 +2931,17 @@ class AdvancedArabicPlayerHome(Screen):
             # branch below).
             _origin = getattr(self, "_site_pick_origin", None)
             if self._source == "categories" and _origin:
-                def _back_to_picker(_rep=_origin):
+                def _back_to_picker(_rep=_origin, _focus=self._site):
                     self._listVisible = False
-                    self._showSiteFamilyPicker(_rep, get_family_members(_rep), focus_site=self._site)
+                    # [family-back] deferred one tick -- see the
+                    # _pendingPickerTimer comment in __init__ for why
+                    # this can't call _showSiteFamilyPicker() directly
+                    # from inside a slide-out completion callback.
+                    self._pendingPickerArgs = (_rep, _focus)
+                    try:
+                        self._pendingPickerTimer.start(10, True)
+                    except Exception:
+                        self._showSiteFamilyPicker(_rep, get_family_members(_rep), focus_site=_focus)
                 if (self._display_mode == "list"
                         and getattr(self, "_listVisible", False)):
                     self._slideListOut(_back_to_picker)
@@ -2944,6 +2986,8 @@ class AdvancedArabicPlayerHome(Screen):
         try: self._navHintTimer.stop()                       # [zone-slide-2]
         except: pass
         try: self._listSlideTimer.stop()                     # [catlist-effects]
+        except: pass
+        try: self._pendingPickerTimer.stop()                  # [family-back]
         except: pass
         try: self._catShakeTimer.stop()                      # [catlist-effects]
         except: pass
