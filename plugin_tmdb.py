@@ -164,6 +164,53 @@ def _tmdb_extract_certification(detail, media_kind):
         pass
     return ""
 
+
+def _tmdb_extract_release_country(detail, media_kind, preferred=("EG", "US")):
+    """
+    [detail-tmdb-meta] Movies' own "release_date" field (used for the
+    date shown under the title) is just TMDb's first/primary release
+    date -- not tied to any specific country, and the hardcoded "(US)"
+    label this plugin used to print next to it was simply wrong: it
+    never checked which country that date actually belonged to.
+
+    TMDb's own web page shows a per-country release date -- confirmed
+    directly (user's own screenshot): a title page showed
+    "10/08/2026 (EG)", not a US date. Reuses the same per-country
+    release_dates block _tmdb_extract_certification() already reads,
+    preferring EG (this plugin's own audience) then US (TMDb's site
+    default), and returns the FIRST theatrical/digital/physical entry
+    with a non-empty release_date for whichever of those actually has
+    one -- so the date and the country label always agree.
+
+    TV has no equivalent per-country release-date block in this API
+    (content_ratings only carries certifications, not dates), so this
+    only applies to movies; callers fall back to the dateless
+    first_air_date/release_date field for TV.
+
+    Returns (date_str "YYYY-MM-DD", country_code) or ("", "") if none
+    of the preferred countries has a usable date.
+    """
+    if media_kind != "movie":
+        return "", ""
+    try:
+        by_country = {}
+        for entry in (detail.get("release_dates") or {}).get("results") or []:
+            cc = entry.get("iso_3166_1") or ""
+            if not cc:
+                continue
+            for rd in entry.get("release_dates") or []:
+                date_str = (rd.get("release_date") or "")[:10]
+                if date_str:
+                    by_country[cc] = date_str
+                    break
+        for cc in preferred:
+            if by_country.get(cc):
+                return by_country[cc], cc
+    except Exception:
+        pass
+    return "", ""
+
+
 def _tmdb_request(path, params=None):
     api_key = (_get_config("tmdb_api_key", "") or "").strip()
     if not api_key:
@@ -464,6 +511,12 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         runtime = _ert[0] if _ert else ""
     release_date_full = str(detail.get("release_date") or detail.get("first_air_date") or "")
     certification = _tmdb_extract_certification(detail_en or detail, media_kind)
+    # [detail-tmdb-meta] prefer an actual per-country release date (EG,
+    # then US) over the dateless generic field above, so the "(XX)" label
+    # shown under the title always matches the date it's printed next to.
+    _country_date, release_country = _tmdb_extract_release_country(detail_en or detail, media_kind)
+    if _country_date:
+        release_date_full = _country_date
 
     result = {
         "title": localized_title,
@@ -475,6 +528,7 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         "genres": genres,
         "runtime": runtime,
         "release_date": release_date_full,
+        "release_country": release_country,
         "certification": certification,
         "tmdb_id": detail.get("id"),
         "tmdb_kind": media_kind,
@@ -530,6 +584,8 @@ def _merge_tmdb_data(data):
         merged["runtime"] = tmdb["runtime"]
     if tmdb.get("release_date") and not merged.get("release_date"):
         merged["release_date"] = tmdb["release_date"]
+    if tmdb.get("release_country") and not merged.get("release_country"):
+        merged["release_country"] = tmdb["release_country"]
     if tmdb.get("certification") and not merged.get("certification"):
         merged["certification"] = tmdb["certification"]
     if tmdb.get("plot") or tmdb.get("poster") or tmdb.get("rating") or tmdb.get("genres") or tmdb.get("year"):

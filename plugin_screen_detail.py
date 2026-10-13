@@ -1067,7 +1067,15 @@ class AdvancedArabicPlayerDetail(Screen):
         if _rd:
             try:
                 _y, _m, _d = _rd.split("-")
-                _rd_fmt = "{}/{}/{} (US)".format(_m, _d, _y)
+                # [FIX detail-tmdb-meta] this used to hardcode "(US)" on
+                # every date regardless of which country it actually came
+                # from -- plugin_tmdb.py now resolves the real country
+                # (EG preferred, then US) alongside the date itself, so
+                # show that, and only that: never relabel a date with a
+                # country we didn't actually confirm it for.
+                _rc = str(data.get("release_country") or "").strip()
+                _rd_fmt = "{}/{}/{} ({})".format(_m, _d, _y, _rc) if _rc \
+                    else "{}/{}/{}".format(_m, _d, _y)
             except Exception:
                 _rd_fmt = _rd
         _rt_fmt = ""
