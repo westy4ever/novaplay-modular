@@ -66,7 +66,7 @@ from Components.Pixmap import Pixmap
 from enigma import eTimer, ePoint, eSize
 
 from plugin_common import my_log, PLUGIN_PATH, _PLUGIN_VERSION
-from extractors import get_extractor, get_home_sites, get_search_site_order
+from extractors import get_extractor, get_home_sites, get_search_site_order, get_family_members
 from extractors.base import get_curl_failed_needs_proxy
 
 import plugin_imagecache
@@ -2225,8 +2225,12 @@ class AdvancedArabicPlayerHome(Screen):
                     return
                 _key = ans[1] if isinstance(ans, tuple) else None
                 if _key == "open":
-                    self._site = _sk
-                    self._showSiteCategories()
+                    _members = get_family_members(_sk)
+                    if len(_members) > 1:
+                        self._showSiteFamilyPicker(_sk, _members)
+                    else:
+                        self._site = _sk
+                        self._showSiteCategories()
                 elif _key == "ping":
                     self._quickPingSite(_sk, _lbl)
                 elif _key == "proxy":
@@ -2311,8 +2315,13 @@ class AdvancedArabicPlayerHome(Screen):
                 return
             a = item.get("_action", "")
             if a.startswith("site_"):
-                self._site = a.replace("site_", "")
-                self._showSiteCategories()
+                site_key = a.replace("site_", "")
+                members = get_family_members(site_key)
+                if len(members) > 1:
+                    self._showSiteFamilyPicker(site_key, members)
+                else:
+                    self._site = site_key
+                    self._showSiteCategories()
             return
         if self._display_mode == "list":
             item = self["text_list"].getCurrent()
@@ -2324,6 +2333,9 @@ class AdvancedArabicPlayerHome(Screen):
                 self._list_return_index = None
             if item.get("_action") == "search_site":
                 self._onSearch(item.get("_site", self._site))
+            elif item.get("_action") == "site_pick":
+                self._site = item.get("_site")
+                self._showSiteCategories()
             elif item.get("type") == "category":
                 self._loadCategory(item["url"], item["title"], is_new=True)
             return
@@ -2531,6 +2543,27 @@ class AdvancedArabicPlayerHome(Screen):
             self["key_yellow"].setText("بحث")
             self["key_blue"].setText("")
             self._updateGridFooter()
+
+    def _showSiteFamilyPicker(self, rep_key, members):
+        """Grid tile for a grouped site family ("rep_key") was pressed --
+        show a small picker (the same plain list used for categories) so
+        the user can choose which family member to actually enter.
+        Reuses _setList()'s existing list-mode path; items carry
+        _action="site_pick" so _onOk()'s list-mode branch routes straight
+        into _showSiteCategories() for the chosen site."""
+        items = []
+        for key in members:
+            items.append({
+                "title": _site_label(key),
+                "plot": _site_tagline(key),
+                "type": "tool",
+                "_action": "site_pick",
+                "_site": key,
+            })
+        self._source = "site_pick"
+        self._setList(items)
+        self["title_text"].setText("اختر الموقع")
+        self._setStatus("اختر أحد المواقع")
 
     def _showSiteCategories(self):
         cached = self._cats_cache.get(self._site)

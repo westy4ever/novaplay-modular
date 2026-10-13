@@ -179,15 +179,42 @@ _SEARCH_SITE_ORDER = (
 # on the grid rather than being appended to the tail. The three
 # egydead-family sites (egydead, egydead_coupons, egydead_ca) are pinned
 # together at the top for the same reason.
+#
+# "arabseed_liv" is NOT listed here (only in _SEARCH_SITE_ORDER): it is a
+# _SITE_FAMILIES member of "arabseed", so it rides on arabseed's single
+# grid tile (see get_home_sites()/get_family_members() below) rather than
+# getting a tile of its own. "Search all" still fans out to it normally.
 _HOME_SITE_ORDER = (
     "egydead", "egydead_coupons", "egydead_ca", "egybest", "akwam", "akwams",
-    "arabseed", "arabseed_liv",
+    "arabseed",
     "wecima", "wecima_sarl", "shaheed", "shahid4u", "topcinema",
     "fasel", "faselhdx", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
     "alooytv", "aflaam", "onlyflix", "fivetv",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
+
+# Home-grid "site families": groups of registry keys that share one grid
+# tile. The FIRST key in each list is the representative -- the one whose
+# tile actually shows on the home grid (via get_home_sites()). Pressing
+# that tile opens a small picker (styled like the category list) listing
+# every member so the user can choose which one to actually enter.
+#
+# To add a new same-family site in future: register it in _SITE_REGISTRY
+# and _SEARCH_SITE_ORDER as usual, then just append its key to the right
+# list here (or add a new list for a new family) -- get_home_sites() and
+# the home-screen picker both read this dict, so no other code changes
+# are needed for it to show up correctly.
+_SITE_FAMILIES = {
+    "arabseed": ["arabseed", "arabseed_liv"],
+}
+
+# Reverse lookup: member key -> representative key, built once below.
+_FAMILY_OF = {}
+for _rep, _members in _SITE_FAMILIES.items():
+    for _m in _members:
+        _FAMILY_OF[_m] = _rep
+del _rep, _members, _m
 
 # ─── Extractor singletons ────────────────────────────────────────────────────
 # Created lazily under a lock, keyed by CLASS so the egydead fallback
@@ -239,16 +266,36 @@ def get_search_site_order():
     return _SEARCH_SITE_ORDER
 
 
+def get_family_members(site_key):
+    """Return the ordered list of registry keys grouped with site_key on
+    the home grid (its own key alone, if it isn't part of any family)."""
+    rep = _FAMILY_OF.get(site_key, site_key)
+    return list(_SITE_FAMILIES.get(rep, [site_key]))
+
+
+def is_family_representative(site_key):
+    """True if site_key is the one whose tile shows on the home grid
+    (either it isn't grouped at all, or it's the first/representative
+    member of its family)."""
+    return _FAMILY_OF.get(site_key, site_key) == site_key
+
+
 def get_home_sites():
     """Ordered (key, title, tagline) for the home grid — the single
     source of truth plugin.py builds its tiles from. The tagline is the
     entry's "short" value when present, else its full "tagline".
     Registered sites missing from _HOME_SITE_ORDER are appended at the
     end (in a stable, defined order: registry insertion order), so a
-    newly added extractor shows up even if you forget to order it."""
+    newly added extractor shows up even if you forget to order it.
+
+    A site that is a non-representative member of a _SITE_FAMILIES group
+    (e.g. "arabseed_liv") never gets its own tile here -- it rides on its
+    representative's tile and is reached through get_family_members()."""
     ordered_keys = set(_HOME_SITE_ORDER)
     out = []
     for key in _HOME_SITE_ORDER:
+        if not is_family_representative(key):
+            continue
         entry = _SITE_REGISTRY.get(key)
         if entry:
             out.append((key, entry["title"], entry.get("short") or entry["tagline"]))
@@ -256,6 +303,6 @@ def get_home_sites():
     # defined order — the old code's membership scan made tail order
     # implicit and the `key in tuple` check O(n²)).
     for key, entry in _SITE_REGISTRY.items():
-        if key not in ordered_keys:
+        if key not in ordered_keys and is_family_representative(key):
             out.append((key, entry["title"], entry.get("short") or entry["tagline"]))
     return out

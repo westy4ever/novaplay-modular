@@ -19,7 +19,7 @@ __all__ entries.
 """
 
 from .base import BaseExtractor, fetch, log, set_browser_proxy, get_proxy_used, get_curl_failed_needs_proxy
-from .registry import get_extractor, get_site_names, get_site_metadata, get_search_site_order, get_home_sites
+from .registry import get_extractor, get_site_names, get_site_metadata, get_search_site_order, get_home_sites, get_family_members, is_family_representative
 
 # Explicitly import extractors to make them available directly under the package
 from .yts import YTSExtractor
@@ -40,6 +40,8 @@ __all__ = [
     'get_site_metadata',
     'get_search_site_order',
     'get_home_sites',
+    'get_family_members',
+    'is_family_representative',
     'YTSExtractor',
     'TorrentioExtractor',
     'VidsrcExtractor',
