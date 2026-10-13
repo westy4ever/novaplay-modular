@@ -366,6 +366,66 @@ def _unhide_site(site_key):
         return True
 
 
+# [UX-rename] Per-site custom display name, user-editable via long-press
+# ("Rename") on a home-grid tile or a family sub-menu row. Persisted under
+# config key "site_custom_names" (site_key -> name). An empty/missing
+# entry means "use the registry's default title" -- _site_label() in
+# plugin_util.py checks this first and falls back to the registry title.
+
+def _get_site_custom_name(site_key):
+    if not site_key:
+        return ""
+    names = _load_state().get("site_custom_names") or {}
+    return str(names.get(site_key) or "").strip()
+
+
+def _set_site_custom_name(site_key, name):
+    """Save a custom display name for site_key. An empty/whitespace-only
+    name clears the override (reverts to the registry default)."""
+    if not site_key:
+        return False
+    name = str(name or "").strip()
+    with _STATE_LOCK:
+        state = _load_state()
+        names = state.setdefault("site_custom_names", {})
+        if name:
+            names[site_key] = name
+        else:
+            names.pop(site_key, None)
+        _save_state(state)
+        return True
+
+
+# [UX-reorder] Per-family row order for the home-grid sub-menu picker,
+# user-editable via long-press ("Move up" / "Move down") on a row.
+# Persisted under config key "family_order" (representative_key ->
+# ordered list of member keys). A family with no saved order uses the
+# registry's own _SITE_FAMILIES order.
+
+def _get_family_order(rep_key):
+    """Return the saved custom order for rep_key's family, or None if no
+    custom order has been saved (caller should fall back to the
+    registry default order)."""
+    if not rep_key:
+        return None
+    orders = _load_state().get("family_order") or {}
+    order = orders.get(rep_key)
+    if isinstance(order, list) and order:
+        return list(order)
+    return None
+
+
+def _set_family_order(rep_key, ordered_members):
+    if not rep_key or not ordered_members:
+        return False
+    with _STATE_LOCK:
+        state = _load_state()
+        orders = state.setdefault("family_order", {})
+        orders[rep_key] = list(ordered_members)
+        _save_state(state)
+        return True
+
+
 def _save_search_query(query):
     q = re.sub(r"\s+", " ", (query or "")).strip()
     if len(q) < 2:

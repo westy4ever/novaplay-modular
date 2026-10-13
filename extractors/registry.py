@@ -269,9 +269,31 @@ def get_search_site_order():
 
 def get_family_members(site_key):
     """Return the ordered list of registry keys grouped with site_key on
-    the home grid (its own key alone, if it isn't part of any family)."""
+    the home grid (its own key alone, if it isn't part of any family).
+
+    If the user has long-press-reordered this family's sub-menu rows
+    (plugin_state._set_family_order), that saved order is returned
+    instead of the hardcoded _SITE_FAMILIES order -- any member missing
+    from the saved order (e.g. one added after the reorder) is appended
+    at the end in the default order, so nothing silently disappears
+    from the picker. The representative (which key gets the home-grid
+    tile) is unaffected by this -- it's always the family's first
+    _SITE_FAMILIES entry, regardless of row order."""
     rep = _FAMILY_OF.get(site_key, site_key)
-    return list(_SITE_FAMILIES.get(rep, [site_key]))
+    default_order = list(_SITE_FAMILIES.get(rep, [site_key]))
+    try:
+        from plugin_state import _get_family_order
+        custom = _get_family_order(rep)
+    except Exception:
+        custom = None
+    if custom:
+        valid = set(default_order)
+        ordered = [k for k in custom if k in valid]
+        for k in default_order:
+            if k not in ordered:
+                ordered.append(k)
+        return ordered
+    return default_order
 
 
 def is_family_representative(site_key):
@@ -291,7 +313,20 @@ def get_home_sites():
 
     A site that is a non-representative member of a _SITE_FAMILIES group
     (e.g. "arabseed_liv") never gets its own tile here -- it rides on its
-    representative's tile and is reached through get_family_members()."""
+    representative's tile and is reached through get_family_members().
+
+    A tile's title is the user's long-press "Rename" override
+    (plugin_state._get_site_custom_name) when one is saved, else the
+    registry's default title."""
+    try:
+        from plugin_state import _get_site_custom_name
+    except Exception:
+        def _get_site_custom_name(_k):
+            return ""
+
+    def _title_for(key, entry):
+        return _get_site_custom_name(key) or entry["title"]
+
     ordered_keys = set(_HOME_SITE_ORDER)
     out = []
     for key in _HOME_SITE_ORDER:
@@ -299,11 +334,11 @@ def get_home_sites():
             continue
         entry = _SITE_REGISTRY.get(key)
         if entry:
-            out.append((key, entry["title"], entry.get("short") or entry["tagline"]))
+            out.append((key, _title_for(key, entry), entry.get("short") or entry["tagline"]))
     # Append-tail for unlisted sites: registry insertion order (a stable,
     # defined order — the old code's membership scan made tail order
     # implicit and the `key in tuple` check O(n²)).
     for key, entry in _SITE_REGISTRY.items():
         if key not in ordered_keys and is_family_representative(key):
-            out.append((key, entry["title"], entry.get("short") or entry["tagline"]))
+            out.append((key, _title_for(key, entry), entry.get("short") or entry["tagline"]))
     return out

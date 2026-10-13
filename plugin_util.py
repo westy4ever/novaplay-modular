@@ -41,6 +41,16 @@ _POSTER_CACHE_DIR = "/tmp/ap_cache"
 # ─── Site label helpers ──────────────────────────────────────────────────────
 
 def _site_label(site):
+    # [UX-rename] a long-press "Rename" on a home-grid tile or family
+    # sub-menu row overrides the registry's default title everywhere
+    # this label is shown.
+    try:
+        from plugin_state import _get_site_custom_name
+        custom = _get_site_custom_name(site)
+        if custom:
+            return custom
+    except Exception:
+        pass
     meta = get_site_metadata(site)
     return meta.get("title", str(site or "").capitalize())
 

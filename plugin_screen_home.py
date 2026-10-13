@@ -60,6 +60,7 @@ import time
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
 from Screens.ChoiceBox import ChoiceBox                     # [UX-5]
+from Screens.VirtualKeyBoard import VirtualKeyBoard          # [UX-rename]
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
@@ -77,7 +78,9 @@ from plugin_state import (_get_config, _set_config,
     _is_favorite, _get_saved_position,
     _continue_items, _library_search_suggestions,
     _history_items, _clear_continue_item,
-    _hide_site, _is_site_hidden)
+    _hide_site, _is_site_hidden,
+    _set_site_custom_name,                                    # [UX-rename]
+    _set_family_order)                                        # [UX-reorder]
 
 from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     build_pixmap_widgets_xml, build_poster_pixmap_widgets_xml,
@@ -233,6 +236,8 @@ class AdvancedArabicPlayerHome(Screen):
         self._cont_backdrop_token = 0
         self._cats_cache = {}
         self._list_return_index = None
+        self._picker_rep = None                              # [UX-reorder]
+        self._picker_members = []                             # [UX-reorder]
         self.index = 0
 
         # [UX batch] state
@@ -2215,6 +2220,7 @@ class AdvancedArabicPlayerHome(Screen):
 
             _opts = [
                 ("فتح الموقع",        "open"),
+                ("إعادة تسمية",       "rename"),
                 ("اختبار الاتصال",    "ping"),
                 ("تفعيل البروكسي",    "proxy"),
                 ("مسح من الشبكة",    "hide"),
@@ -2231,6 +2237,8 @@ class AdvancedArabicPlayerHome(Screen):
                     else:
                         self._site = _sk
                         self._showSiteCategories()
+                elif _key == "rename":
+                    self._renameSite(_sk, _lbl, on_done=self._showHome)
                 elif _key == "ping":
                     self._quickPingSite(_sk, _lbl)
                 elif _key == "proxy":
@@ -2245,6 +2253,47 @@ class AdvancedArabicPlayerHome(Screen):
                     except Exception:
                         pass
                     self._showHome()
+
+            self.session.openWithCallback(
+                _choice, ChoiceBox,
+                title=u"{} — ماذا تريد؟".format(label),
+                list=_opts)
+            return
+
+        if self._display_mode == "list":
+            item = self["text_list"].getCurrent()
+            if not item or item.get("_action") != "site_pick":
+                return
+            site_key = item.get("_site")
+            if not site_key:
+                return
+            label = item.get("title", site_key)
+            rep_key, members = self._picker_rep, self._picker_members
+            idx = members.index(site_key) if site_key in members else -1
+
+            _opts = [("إعادة تسمية", "rename")]
+            if idx > 0:
+                _opts.append(("نقل للأعلى", "up"))
+            if 0 <= idx < len(members) - 1:
+                _opts.append(("نقل للأسفل", "down"))
+
+            def _choice(ans, _sk=site_key, _lbl=label, _rep=rep_key, _idx=idx):
+                if ans is None:
+                    return
+                _key = ans[1] if isinstance(ans, tuple) else None
+                if _key == "rename":
+                    self._renameSite(_sk, _lbl,
+                        on_done=lambda: self._showSiteFamilyPicker(_rep, get_family_members(_rep)))
+                elif _key in ("up", "down") and _idx >= 0:
+                    new_order = list(members)
+                    swap_with = _idx - 1 if _key == "up" else _idx + 1
+                    if 0 <= swap_with < len(new_order):
+                        new_order[_idx], new_order[swap_with] = new_order[swap_with], new_order[_idx]
+                        try:
+                            _set_family_order(_rep, new_order)
+                        except Exception:
+                            pass
+                        self._showSiteFamilyPicker(_rep, get_family_members(_rep), focus_site=_sk)
 
             self.session.openWithCallback(
                 _choice, ChoiceBox,
@@ -2544,13 +2593,21 @@ class AdvancedArabicPlayerHome(Screen):
             self["key_blue"].setText("")
             self._updateGridFooter()
 
-    def _showSiteFamilyPicker(self, rep_key, members):
+    def _showSiteFamilyPicker(self, rep_key, members, focus_site=None):
         """Grid tile for a grouped site family ("rep_key") was pressed --
         show a small picker (the same plain list used for categories) so
         the user can choose which family member to actually enter.
         Reuses _setList()'s existing list-mode path; items carry
         _action="site_pick" so _onOk()'s list-mode branch routes straight
-        into _showSiteCategories() for the chosen site."""
+        into _showSiteCategories() for the chosen site.
+
+        _picker_rep/_picker_members are stashed so _onMenu()'s list-mode
+        branch (Rename / Move up / Move down) knows which family and
+        full member order it's working with. focus_site re-selects a
+        row after a reorder, so the row the user just moved stays
+        highlighted instead of the selection jumping back to the top."""
+        self._picker_rep = rep_key
+        self._picker_members = list(members)
         items = []
         for key in members:
             items.append({
@@ -2564,6 +2621,40 @@ class AdvancedArabicPlayerHome(Screen):
         self._setList(items)
         self["title_text"].setText("اختر الموقع")
         self._setStatus("اختر أحد المواقع")
+        if focus_site and focus_site in members:
+            try:
+                idx = members.index(focus_site)
+                tl = self["text_list"]
+                tl.currentPage = idx // tl.itemsPerPage
+                tl.currentRow = (idx % tl.itemsPerPage) // tl.cols
+                tl.currentCol = (idx % tl.itemsPerPage) % tl.cols
+                tl._updateIndex()
+                tl._redraw()
+                tl.instance.moveSelectionTo(tl.currentRow)
+                self._updateGridFooter()
+            except Exception:
+                pass
+
+    def _renameSite(self, site_key, current_label, on_done=None):
+        """Long-press "Rename" on a home-grid tile or a family sub-menu
+        row -- types a new display name on the VirtualKeyBoard and
+        saves it as that site's override (plugin_state), persisting
+        across restarts and applying everywhere _site_label()/
+        get_home_sites() show that site's name. An empty entry clears
+        the override back to the registry default."""
+        def _on_typed(new_name):
+            if new_name is None:
+                return
+            try:
+                _set_site_custom_name(site_key, new_name)
+            except Exception:
+                pass
+            if on_done:
+                on_done()
+        self.session.openWithCallback(
+            _on_typed, VirtualKeyBoard,
+            title=u"اسم العرض لـ {}".format(current_label),
+            text=current_label)
 
     def _showSiteCategories(self):
         cached = self._cats_cache.get(self._site)
