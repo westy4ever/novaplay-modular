@@ -2609,6 +2609,14 @@ HOST_RESOLVERS = {
     "miixdrop":    resolve_mixdrop,
     "miixdrop.top": resolve_mixdrop,
     "voe":         resolve_voe,
+    # [PATCH AS5] VOE rotates its embed domain constantly while keeping
+    # the exact same obfuscated-payload player template -- resolve_voe
+    # is already domain-agnostic (fixed referer, payload-pattern based),
+    # so a newly-seen vanity mirror just needs its own dispatch key
+    # rather than any new resolver logic. Confirmed as a VOE embed by the
+    # site's own "voe" server label on a real arabseed.wine watch page,
+    # 2026-10-13.
+    "megankiddifference.com": resolve_voe,
     "streamruby":  resolve_streamruby,
     "stmruby":     resolve_streamruby,   # [PATCH M1] confirmed via exact filecode match
     "stmruby.com": resolve_streamruby,
