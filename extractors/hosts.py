@@ -29,7 +29,7 @@ import html as html_module  # aliased: every resolver uses a local `html` variab
 from urllib.parse import urlparse, urljoin, parse_qs
 
 import threading  # [PATCH H1] for the vidsrc-family recursion guard below
-from .net import fetch, log, UA
+from .net import fetch, fetch_json, log, UA
 from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
                         _best_media_url, get_last_quality_variants,
                         get_synthesized_variants, _correct_stream_url,
@@ -37,6 +37,27 @@ from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
                         _quality_tls, _quality_lock, _label_quality_variant)
 from .referers import get_referer
 from .htmlmedia import _quality_probe_text  # [PATCH 94]
+
+# ─── Optional AES-256-GCM backend (n1mwq.org playback decrypt) ─────────────
+# [PATCH N1] Neither of these is guaranteed to exist on the real OpenATV/
+# Enigma2 target -- confirmed only that "cryptography" is importable in
+# THIS sandbox (pycryptodome/Crypto is not, here). Same optional-dependency
+# shape as curl_cffi above: try the richer backend first, fall back, and if
+# neither is present resolve_n1mwq() fails loudly via log() rather than
+# silently returning None with no explanation.
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _CRYPTOGRAPHY_AESGCM
+    _AESGCM_BACKEND = "cryptography"
+except Exception:
+    _CRYPTOGRAPHY_AESGCM = None
+    try:
+        from Crypto.Cipher import AES as _PYCRYPTODOME_AES
+        _AESGCM_BACKEND = "pycryptodome"
+    except Exception:
+        _PYCRYPTODOME_AES = None
+        _AESGCM_BACKEND = None
+        print("No AES-GCM backend (cryptography/pycryptodome) available -- "
+              "n1mwq.org playback decrypt will be unavailable")
 
 
 # ─── Video Host Resolvers ─────────────────────────────────────────────────────
@@ -1537,6 +1558,283 @@ def resolve_abstream(url):
         return None
 
 
+# ─── n1mwq.org backend (PoW captcha + AES-256-GCM encrypted playback) ──────
+#
+# [PATCH N1] n1mwq.org is the real player backend that byselapuix.com /
+# byseraguci.com landing pages iframe to (see resolve_byselapuix below).
+# Fully reverse-engineered, 2026-10-13, from the site's own JS bundles
+# (pow-DEJGtdh2.js, videoPagesBundle-Bgi0QmPo.js) and verified against two
+# real captured sessions end-to-end -- including a real AES-256-GCM
+# decrypt that produced a real, working master.m3u8 CDN URL. Flow:
+#
+#   1. GET  /api/videos/<id>/embed/settings       -> {captcha_required, ...}
+#   2. POST /api/videos/<id>/embed/captcha         -> {pow_nonce, pow_difficulty,
+#                                                       pow_token, expires_in}
+#      (only if captcha_required)
+#   3. solve the PoW (custom hash, NOT real SHA-256 -- see _n1mwq_pow_hash)
+#   4. POST /api/videos/<id>/embed/captcha/verify  -> {status, token}
+#   5. GET  /api/videos/<id>/embed/playback
+#      header X-Captcha-Token: <token from step 4> -> {playback: {...}}
+#   6. AES-256-GCM decrypt playback.payload (see _n1mwq_decrypt_playback)
+#      -> {"sources": [{url, height, bitrate_kbps, ...}, ...]}
+#
+# Deliberately NOT implemented: the separate /api/videos/access/challenge +
+# /access/attest device-attestation endpoint (ECDSA-signed canvas/audio/
+# WebGL/font fingerprint). Read directly from videoPagesBundle-Bgi0QmPo.js:
+# every call on this path -- si() (captcha start), oi() (captcha verify),
+# Et() (playback) -- treats its `fingerprint` argument as purely optional,
+# only adding it to the request body when truthy; a user with fingerprinting
+# blocked (or whose browser fails WebCrypto/canvas) still gets `expiresIn`
+# back from si() either way. There is no code path on this flow that calls
+# attest at all. Replicating attest faithfully would also require rendering
+# real canvas text, WebGL params and Web-Audio-synthesized samples --
+# nothing an Enigma2/Python box can produce -- so skipping it here is the
+# only implementable option, not a guess made to save effort. If the real
+# box later gets rejected specifically at /embed/captcha or .../verify (not
+# at PoW-solve timeout), that would be the first real evidence attest is
+# actually enforced server-side; nothing gathered so far shows that.
+
+_N1MWQ_ORIGIN = "https://n1mwq.org"
+
+
+def _n1mwq_rotl32(x, n):
+    x &= 0xFFFFFFFF
+    return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
+
+
+def _n1mwq_imul32(a, b):
+    return (a * b) & 0xFFFFFFFF
+
+
+def _n1mwq_mix_round(state):
+    """Port of the minified js `ye()` -- one ChaCha-style quarter round
+    over state[0..3]."""
+    state[0] = (state[0] + state[1]) & 0xFFFFFFFF
+    state[3] = _n1mwq_rotl32(state[3] ^ state[0], 16)
+    state[2] = (state[2] + state[3]) & 0xFFFFFFFF
+    state[1] = _n1mwq_rotl32(state[1] ^ state[2], 12)
+    state[0] = (state[0] + state[1]) & 0xFFFFFFFF
+    state[3] = _n1mwq_rotl32(state[3] ^ state[0], 8)
+    state[2] = (state[2] + state[3]) & 0xFFFFFFFF
+    state[1] = _n1mwq_rotl32(state[1] ^ state[2], 7)
+
+
+def _n1mwq_pow_hash(data_bytes):
+    """Port of the minified js `gr()` -- the site's custom PoW hash.
+    Seeded with SHA-256's IV words but mixed with ChaCha quarter-rounds,
+    NOT real SHA-256. Ported byte-for-byte from pow-DEJGtdh2.js and
+    self-verified against a real solved challenge (nonce
+    "kkJaZM4KOitHQp8OXdB3MVnC", difficulty 16 -> solution "4078").
+    Returns a list of 8 32-bit words."""
+    BLOCK = 512
+    MASK = BLOCK - 1
+    MIX_ROUNDS = 2
+    MUL1 = 2654435761
+    MUL2 = 2246822519
+
+    e = [1779033703, 3144134277, 1013904242, 2773480762]
+    for b in data_bytes:
+        e[0] = (e[0] + b) & 0xFFFFFFFF
+        e[0] = _n1mwq_rotl32(e[0], 7)
+        _n1mwq_mix_round(e)
+    for _ in range(8):
+        _n1mwq_mix_round(e)
+
+    r = [0] * BLOCK
+    for i in range(BLOCK):
+        _n1mwq_mix_round(e)
+        r[i] = (e[0] ^ e[2]) & 0xFFFFFFFF
+
+    for _ in range(MIX_ROUNDS):
+        for s in range(BLOCK):
+            a = r[s] & MASK
+            c = (r[s] + r[a]) & 0xFFFFFFFF
+            c = _n1mwq_rotl32(c, 13)
+            c = (c ^ _n1mwq_imul32(r[(s + 1) & MASK], MUL1)) & 0xFFFFFFFF
+            r[s] = c
+            e[0] = (e[0] ^ c) & 0xFFFFFFFF
+            _n1mwq_mix_round(e)
+
+    out = [0] * 8
+    chunk = BLOCK // 8
+    for i in range(8):
+        _n1mwq_mix_round(e)
+        s = e[0]
+        base = i * chunk
+        for c in range(chunk):
+            d = r[base + c]
+            s = (s + d) & 0xFFFFFFFF
+            s = _n1mwq_rotl32(s, 5)
+            s = (s ^ _n1mwq_imul32(d, MUL2)) & 0xFFFFFFFF
+        out[i] = (s ^ e[2]) & 0xFFFFFFFF
+    return out
+
+
+def _n1mwq_leading_zero_bits(words):
+    """Port of `wr()` -- counts leading zero bits across the word array
+    using the same Math.clz32 semantics as the page's own JS."""
+    total = 0
+    for w in words:
+        if w == 0:
+            total += 32
+            continue
+        return total + (32 - w.bit_length())
+    return total
+
+
+def _n1mwq_solve_pow(nonce, difficulty, timeout_ms=20000):
+    """Port of `Er()`/`no()` -- brute-forces an integer suffix appended to
+    "<nonce>:" until the custom hash's leading-zero-bit count meets
+    `difficulty`. Returns the solution as a string, or None on timeout."""
+    if not nonce:
+        return None
+    if not difficulty or difficulty <= 0:
+        return "0"
+    prefix = (nonce + ":").encode("ascii", errors="ignore")
+    start = time.time()
+    s = 0
+    while True:
+        for _ in range(2048):
+            data = prefix + str(s).encode("ascii")
+            if _n1mwq_leading_zero_bits(_n1mwq_pow_hash(data)) >= difficulty:
+                return str(s)
+            s += 1
+        if (time.time() - start) * 1000 > timeout_ms:
+            log("n1mwq: PoW not solved within {} ms (difficulty {})".format(
+                timeout_ms, difficulty))
+            return None
+
+
+def _n1mwq_b64url_decode(s):
+    """Base64url decode, as used throughout the page's own `Xt()`."""
+    if not s:
+        return b""
+    s = s + "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s.encode("ascii"))
+
+
+def _n1mwq_select_key_parts(key_parts, version):
+    """Port of `ws()`/`Ea()`/`Qa()`: the real AES key is just TWO of the
+    ~30 decoy `key_parts` entries, selected by 1-indexed positions
+    [version, 31-version] (version is itself a small int, "1".."20",
+    also present in the response). Falls back to concatenating every
+    part if the indices don't validate, matching the page's own
+    fallback exactly. Confirmed directly from videoPagesBundle-*.js and
+    against a real response (version="5" -> indices 5, 26)."""
+    n = len(key_parts)
+    try:
+        v = int(version)
+    except (TypeError, ValueError):
+        return key_parts
+    if not (1 <= v <= 20):
+        return key_parts
+    a, i = v, 31 - v
+    if a < 1 or i < 1 or a > n or i > n:
+        return key_parts
+    return [key_parts[a - 1], key_parts[i - 1]]
+
+
+def _n1mwq_aes_gcm_decrypt(key, iv, ciphertext_and_tag):
+    if _AESGCM_BACKEND == "cryptography":
+        return _CRYPTOGRAPHY_AESGCM(key).decrypt(iv, ciphertext_and_tag, None)
+    if _AESGCM_BACKEND == "pycryptodome":
+        ct, tag = ciphertext_and_tag[:-16], ciphertext_and_tag[-16:]
+        cipher = _PYCRYPTODOME_AES.new(key, _PYCRYPTODOME_AES.MODE_GCM, nonce=iv)
+        return cipher.decrypt_and_verify(ct, tag)
+    raise RuntimeError(
+        "no AES-GCM backend available (install 'cryptography' or "
+        "'pycryptodome' to use n1mwq.org streams)")
+
+
+def _n1mwq_decrypt_playback(playback):
+    """Port of `La()`/`En()`: AES-256-GCM-decrypt the playback blob into
+    the real {"sources": [...]} JSON. Confirmed working end-to-end against
+    a real response (key_parts[4]+key_parts[25] for version="5" -> a real,
+    playable master.m3u8 URL)."""
+    key_parts = playback.get("key_parts") or []
+    if not key_parts:
+        raise ValueError("playback response has no key_parts")
+    chosen = _n1mwq_select_key_parts(key_parts, playback.get("version"))
+    key = b"".join(_n1mwq_b64url_decode(p) for p in chosen if p)
+    iv = _n1mwq_b64url_decode(playback.get("iv", ""))
+    payload = _n1mwq_b64url_decode(playback.get("payload", ""))
+    plaintext = _n1mwq_aes_gcm_decrypt(key, iv, payload)
+    return json.loads(plaintext.decode("utf-8"))
+
+
+def _n1mwq_video_id(url):
+    # Confirmed path shape: https://n1mwq.org/<5-char share code>/<video id>
+    m = re.search(r'n1mwq\.org/[^/\s"\'<>]+/([A-Za-z0-9_-]+)', url)
+    if m:
+        return m.group(1)
+    m = re.search(r'n1mwq\.org/([A-Za-z0-9_-]+)/?(?:[?#].*)?$', url)
+    return m.group(1) if m else None
+
+
+def resolve_n1mwq(url, referer=None):
+    try:
+        video_id = _n1mwq_video_id(url)
+        if not video_id:
+            log("n1mwq: could not extract video id from {}".format(url))
+            return None
+        page_referer = referer or url
+        base = "{}/api/videos/{}/embed/".format(_N1MWQ_ORIGIN, video_id)
+
+        settings = fetch_json(base + "settings", referer=page_referer)
+        captcha_required = bool(settings and settings.get("captcha_required"))
+
+        captcha_token = None
+        if captcha_required:
+            start = fetch_json(
+                base + "captcha", referer=page_referer,
+                post_data="{}",
+                extra_headers={"Content-Type": "application/json"})
+            if not start or not start.get("pow_token"):
+                log("n1mwq: no captcha challenge in response for {}".format(video_id))
+                return None
+            nonce = start.get("pow_nonce")
+            difficulty = start.get("pow_difficulty") or 0
+            pow_token = start.get("pow_token")
+            expires_in = start.get("expires_in") or 20
+            timeout_ms = min(20000, max(4000, (expires_in - 3) * 1000))
+
+            solution = _n1mwq_solve_pow(nonce, difficulty, timeout_ms)
+            if solution is None:
+                return None
+
+            verify = fetch_json(
+                base + "captcha/verify", referer=page_referer,
+                post_data=json.dumps({"pow_token": pow_token, "solution": solution}),
+                extra_headers={"Content-Type": "application/json"})
+            if not verify or verify.get("status") != "ok" or not verify.get("token"):
+                log("n1mwq: captcha verify failed for {}: {}".format(video_id, verify))
+                return None
+            captcha_token = verify.get("token")
+
+        pb_headers = {"X-Captcha-Token": captcha_token} if captcha_token else None
+        playback_resp = fetch_json(base + "playback", referer=page_referer,
+                                    extra_headers=pb_headers)
+        playback = (playback_resp or {}).get("playback")
+        if not playback:
+            log("n1mwq: no playback payload for {}".format(video_id))
+            return None
+
+        try:
+            decrypted = _n1mwq_decrypt_playback(playback)
+        except Exception as e:
+            log("n1mwq: decrypt failed for {}: {}".format(video_id, e))
+            return None
+
+        sources = decrypted.get("sources") or []
+        if not sources:
+            return None
+        best = max(sources, key=lambda s: (s.get("height") or 0, s.get("bitrate_kbps") or 0))
+        return best.get("url")
+    except Exception as e:
+        log("n1mwq: resolver error for {}: {}".format(url, e))
+        return None
+
+
 def resolve_byselapuix(url):
     try:
         html, final = fetch(url, referer="https://byselapuix.com/")
@@ -1560,6 +1858,12 @@ def resolve_byselapuix(url):
         # mirror domain (confirmed: n1mwq.org).
         iframe_url = _follow_landing_iframe(html, final or url)
         if iframe_url:
+            # [PATCH N1] n1mwq.org never puts the stream in static HTML --
+            # it's a JS SPA that needs the full PoW-captcha/decrypt flow.
+            if "n1mwq.org" in urlparse(iframe_url).netloc.lower():
+                result = resolve_n1mwq(iframe_url, referer=final or url)
+                if result:
+                    return result
             html2, _ = fetch(iframe_url, referer=final or "https://byselapuix.com/")
             if html2:
                 best = _best_media_url(html2)
@@ -2695,6 +2999,11 @@ HOST_RESOLVERS = {
     # specific domain is mapped here, on direct evidence.
     "byseraguci":      resolve_byselapuix,
     "byseraguci.com":  resolve_byselapuix,
+    # [PATCH N1] n1mwq.org itself, for the case a server list or a future
+    # mirror hands us the n1mwq.org iframe URL directly rather than a
+    # byselapuix/byseraguci landing page that needs following first.
+    "n1mwq":           resolve_n1mwq,
+    "n1mwq.org":       resolve_n1mwq,
     "dhcplay":         resolve_dhcplay,
     "dhcplay.com":     resolve_dhcplay,
     "mycima.cv":       resolve_azrak_mycima,   # [PATCH 121]
