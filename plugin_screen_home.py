@@ -238,6 +238,7 @@ class AdvancedArabicPlayerHome(Screen):
         self._list_return_index = None
         self._picker_rep = None                              # [UX-reorder]
         self._picker_members = []                             # [UX-reorder]
+        self._site_pick_origin = None                         # [family-back]
         self.index = 0
 
         # [UX batch] state
@@ -880,6 +881,7 @@ class AdvancedArabicPlayerHome(Screen):
         self._display_mode = "home"
         self._page = 1
         self._nav_stack = []
+        self._site_pick_origin = None                        # [family-back]
         self["title_text"].setText("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
         self["status"].setText("")
 
@@ -2235,6 +2237,7 @@ class AdvancedArabicPlayerHome(Screen):
                     if len(_members) > 1:
                         self._showSiteFamilyPicker(_sk, _members)
                     else:
+                        self._site_pick_origin = None        # [family-back] direct, ungrouped site
                         self._site = _sk
                         self._showSiteCategories()
                 elif _key == "rename":
@@ -2369,6 +2372,7 @@ class AdvancedArabicPlayerHome(Screen):
                 if len(members) > 1:
                     self._showSiteFamilyPicker(site_key, members)
                 else:
+                    self._site_pick_origin = None            # [family-back] direct, ungrouped site
                     self._site = site_key
                     self._showSiteCategories()
             return
@@ -2383,6 +2387,10 @@ class AdvancedArabicPlayerHome(Screen):
             if item.get("_action") == "search_site":
                 self._onSearch(item.get("_site", self._site))
             elif item.get("_action") == "site_pick":
+                # [family-back] remember which family this member came
+                # from, so _onBack() returns to this picker instead of
+                # the home grid once the user leaves the category list.
+                self._site_pick_origin = self._picker_rep
                 self._site = item.get("_site")
                 self._showSiteCategories()
             elif item.get("type") == "category":
@@ -2880,6 +2888,24 @@ class AdvancedArabicPlayerHome(Screen):
             else:
                 self._showSiteCategories()
         elif self._source != "home":
+            # [family-back] leaving the TOP (categories) level of a site
+            # that was entered through a family sub-menu picker (e.g.
+            # Arabseed.living via the Arabseed tile) goes back to that
+            # picker, not straight to the home grid -- _site_pick_origin
+            # is the family's representative key, stashed when the user
+            # picked a member from the picker (see _onOk()'s "site_pick"
+            # branch below).
+            _origin = getattr(self, "_site_pick_origin", None)
+            if self._source == "categories" and _origin:
+                def _back_to_picker(_rep=_origin):
+                    self._listVisible = False
+                    self._showSiteFamilyPicker(_rep, get_family_members(_rep), focus_site=self._site)
+                if (self._display_mode == "list"
+                        and getattr(self, "_listVisible", False)):
+                    self._slideListOut(_back_to_picker)
+                else:
+                    _back_to_picker()
+                return
             # [catlist-effects] slide the list out first, then go home
             if (self._display_mode == "list"
                     and getattr(self, "_listVisible", False)):
