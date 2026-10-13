@@ -668,21 +668,11 @@ class ArabseedExtractor(BaseExtractor):
         # Ensure URL uses the active domain
         url = self._full_url(url)
         log("ArabSeed: get_category_items url={} page={}".format(url, page))
-        # [PATCH AS8] Pagination fix, confirmed 2026-10-13 against a real
-        # device log: fetching .../page/2/ (and deeper) with referer=base
-        # (the site root) gets served the SAME anti-bot decoy/shell page
-        # the plugin used to get for a flat-out wrong category URL (one
-        # bogus "عرب سيد" item, ~55KB) -- even though the URL itself is
-        # correct (it's the exact href the real page/1 HTML contains).
-        # The page/1 fetch for the very same category, using that same
-        # referer=base, gets the real ~328KB listing every time. A real
-        # browser clicking "next page" sends Referer = the page it just
-        # came from (page N-1's own URL), not the site root, so deep
-        # pages likely need that exact chain to pass whatever anti-bot
-        # check is gating them. Reconstruct that referer here: for a
-        # .../page/N/ URL, referer = the same URL with the /page/N/
-        # suffix stripped (i.e. page 1's URL); for a plain/page-1 URL,
-        # keep the previous referer=base behavior unchanged.
+        # [PATCH AS8] Referer chaining for deep pages (page N's referer is
+        # page N-1's own URL, matching real browser navigation) -- kept
+        # since it's harmless and more correct than referer=base for any
+        # site that actually serves deeper pages. Page-1 fetches are
+        # unaffected.
         page_referer = self._get_base()
         page_strip_match = re.match(r'^(.*?)/page/\d+/?$', url.rstrip('/') + '/')
         if page_strip_match:
@@ -693,6 +683,22 @@ class ArabseedExtractor(BaseExtractor):
             return []
         if "just a moment" in html.lower() and ("cf-chl" in html.lower() or "challenge" in html.lower()):
             log("ArabSeed: Cloudflare challenge detected")
+            return []
+        # [PATCH AS9] On arabseed.wine, confirmed 2026-10-13 directly in a
+        # real PC browser: EVERY /page/N/ URL for N>1 (tested page/2/ and
+        # the last-shown page/283/) returns the site's own
+        # "Page Not Found - عرب سيد" error page -- this is a real, true
+        # dead link on the site itself, not a referer/anti-bot/plugin
+        # issue (my earlier [PATCH AS8] theory was wrong; the referer fix
+        # above is harmless but doesn't and can't fix this, since there
+        # is genuinely no page 2 to fetch). Without this guard, Strategy 3's
+        # broad fallback below was scraping the error page's own branding
+        # text into a bogus single "item" named after the site itself
+        # ("عرب سيد"). Detect that title and bail out to an empty list
+        # instead, so pagination on this category correctly reports
+        # nothing further rather than a fake entry.
+        if "Page Not Found" in html and ("عرب سيد" in html or "ArabSeed" in html):
+            log("ArabSeed: page not found (dead pagination link) -- {}".format(url))
             return []
         items = self._extract_items_from_html(html)
         log("ArabSeed: Extracted {} items".format(len(items)))
