@@ -23,18 +23,16 @@ else:
 QUALITY_ORDER = {"1080": 0, "720": 1, "480": 2}
 BLOCKED_HOSTS = ("vidara.to", "bysezejataos.com")
 
-# [PATCH AS3] Real live domains first (fastest path, no redirect hop).
-# The legacy domains below 302 to one of these two, but we keep them as
-# fallbacks in case the live domains are temporarily unreachable.
+# [PATCH AS4] New main domain is arabseed.trade; .rent and .loan are now
+# just legacy redirectors into it (kept as fallbacks in case .trade is
+# temporarily unreachable). The old arabseed.wine mirror family (.wine,
+# .rocks, m.arsd.bid, .in) is a SEPARATE, independent catalog -- split out
+# into arabseed_original.py instead of living here.
 _KNOWN_DOMAINS = [
-    "https://arabseed.rent/",          # live (captured pages confirm this)
-    "https://www.arabseed.wine/",      # live (redirect target for .rocks / .bid / .in)
-    "https://arabseed.wine/",          # non-www alias
+    "https://arabseed.trade/",         # live -- new main domain
     # Legacy redirectors (kept as fallbacks):
-    "https://arabseed.loan/",          # → https://arabseed.rent/home/
-    "https://arabseed.rocks/",         # → https://www.arabseed.wine/home/
-    "https://m.arsd.bid/",             # → https://www.arabseed.wine/home/
-    "https://arabseed.in/",            # → https://www.arabseed.wine/home/
+    "https://arabseed.rent/",          # → https://arabseed.trade/
+    "https://arabseed.loan/",          # → https://arabseed.trade/
 ]
 
 # Class name fragments that identify movie/post blocks
@@ -97,11 +95,9 @@ class ArabseedExtractor(BaseExtractor):
                 final_host_match = re.search(r'https?://([^/]+)', final_url)
                 final_host = final_host_match.group(1) if final_host_match else ""
 
-                # Accept any arabseed/arsd host (the redirector chain
-                # lands on arabseed.rent or www.arabseed.wine)
-                if final_host and not any(
-                    marker in final_host for marker in ("arabseed", "arsd")
-                ):
+                # Accept any arabseed host (the redirector chain lands
+                # on arabseed.trade)
+                if final_host and "arabseed" not in final_host:
                     log("ArabSeed: Domain {} redirected to unknown host {}".format(
                         domain, final_host))
                     continue
@@ -137,9 +133,9 @@ class ArabseedExtractor(BaseExtractor):
         if path.startswith("http"):
             # If the URL points to a known Arabseed domain, rewrite it to
             # the currently active domain to avoid hitting a dead link /
-            # redirector again. [PATCH AS3] _KNOWN_DOMAINS now includes
-            # both live domains so links between arabseed.rent and
-            # arabseed.wine get normalised.
+            # redirector again. [PATCH AS4] _KNOWN_DOMAINS now includes
+            # arabseed.trade (main) plus the .rent/.loan legacy
+            # redirectors, so links between them get normalised.
             current_base = self._get_base()
             for d in self._known_domains:
                 if path.startswith(d) and d != current_base:
@@ -420,7 +416,7 @@ class ArabseedExtractor(BaseExtractor):
     def _extract_servers_from_watch_page(self, watch_html):
         """[PATCH AS4] Parse the watch page's static server list.
 
-        Real structure on arabseed.rent / arabseed.wine:
+        Real structure on arabseed.rent / arabseed.trade:
 
             <ul id="watch">
               <li data-link="https://govid.live/play/..." class="active">
@@ -608,7 +604,7 @@ class ArabseedExtractor(BaseExtractor):
         # [PATCH AS3] Corrected to the paths the current site actually
         # serves (verified against the captured nav menu). The old
         # ``category/films/``, ``category/tv/foreign-series/`` etc.
-        # paths 404 on arabseed.rent / arabseed.wine.
+        # paths 404 on arabseed.rent / arabseed.trade.
         base = self._get_base().rstrip("/")
         return [
             {"title": "🎬 كل الأفلام",       "url": base + "/افلام/",                          "type": "category", "_action": "category"},
