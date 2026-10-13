@@ -26,10 +26,10 @@ import time
 import base64
 import random
 import html as html_module  # aliased: every resolver uses a local `html` variable for page text
-from urllib.parse import urlparse, urljoin, parse_qs
+from urllib.parse import urlparse, urljoin, parse_qs, unquote
 
 import threading  # [PATCH H1] for the vidsrc-family recursion guard below
-from .net import fetch, fetch_json, log, UA
+from .net import fetch, fetch_json, log, UA, get_cookie_header_for_url
 from .htmlmedia import (find_m3u8, find_m3u8_all, find_mp4, find_mp4_all,
                         _best_media_url, get_last_quality_variants,
                         get_synthesized_variants, _correct_stream_url,
@@ -2897,6 +2897,129 @@ def resolve_vidsrc_family(url, referer=None):
         in_progress.discard(host)  # [PATCH H1]
 
 
+def resolve_megamax(url, referer=None):
+    """[PATCH MM1] megamax.me's own file-download aggregator, seen at
+    q7v3k8m2p1.top, reached from arabseed.wine's single "MegaMax"
+    watch-page server. Confirmed directly from a real network
+    capture, 2026-10-13:
+
+      - GET /iframe/<hash> (the watch-page embed) and GET /download/<hash>
+        share the exact same <hash> -- same file, two page types on the
+        same Vue/Inertia.js app.
+      - /download/<hash>'s initial HTML embeds a JSON blob
+        (<script data-page="app">) with an Inertia "version" string and
+        an "attachments" list (each: hashId/label/resolution/size) --
+        one per quality -- but NOT the mirror links themselves.
+      - Clicking a quality's "download" button fires a POST to that
+        SAME /download/<hash> URL (Laravel/Inertia "partial reload"
+        convention): JSON body {"attach": <attachmentHashId>}, with
+        X-Inertia / X-Inertia-Partial-Data=download /
+        X-Inertia-Partial-Component=files/mirror/download /
+        X-Inertia-Version headers, plus an X-XSRF-TOKEN header that is
+        just the XSRF-TOKEN cookie value URL-decoded (standard Laravel
+        double-submit CSRF -- no secret to derive, the opener's shared
+        cookiejar already holds the cookie from the GET above). The
+        response is JSON with props.download.data.mirrors:
+        [{driver, link}, ...] -- the real voe/byse/mixdrop/uqload/etc.
+        embed links the site's own UI shows.
+
+    Every "driver" name seen in the real capture (send, streamruby,
+    Vikingfile, uqload, streamhg, mixdrop, doodstream, byse, earnvids,
+    voe) already matches an existing HOST_RESOLVERS entry by domain
+    substring, so this just fetches the mirror list (highest-resolution
+    attachment first) and hands each link to resolve_host() in order,
+    returning the first one that resolves -- no new per-host resolver
+    logic needed. rapidgator/nitroflare are premium cyberlockers with
+    no video-embed resolver and are skipped.
+    """
+    try:
+        if "/iframe/" in url:
+            download_url = url.replace("/iframe/", "/download/", 1)
+        elif "/download/" in url:
+            download_url = url
+        else:
+            return None
+
+        html, final = fetch(download_url, referer=referer or download_url)
+        if not html:
+            return None
+
+        page_m = re.search(
+            r'<script[^>]+data-page=["\']app["\'][^>]*>(.*?)</script>',
+            html, re.S)
+        if not page_m:
+            return None
+        try:
+            page_data = json.loads(page_m.group(1))
+        except Exception:
+            return None
+
+        version = page_data.get("version")
+        attachments = (page_data.get("props") or {}).get("attachments") or []
+        if not version or not attachments:
+            return None
+
+        def _res_width(att):
+            try:
+                return int(str(att.get("resolution", "0x0")).split("x")[0])
+            except Exception:
+                return 0
+        attachments = sorted(attachments, key=_res_width, reverse=True)
+
+        base = final or download_url
+        xsrf = ""
+        cookie_m = re.search(r'XSRF-TOKEN=([^;]+)', get_cookie_header_for_url(base))
+        if cookie_m:
+            xsrf = unquote(cookie_m.group(1))
+
+        _skip_drivers = ("rapidgator", "nitroflare")
+
+        for att in attachments:
+            hash_id = att.get("hashId")
+            if not hash_id:
+                continue
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "text/html, application/xhtml+xml",
+                "X-Requested-With": "XMLHttpRequest",
+                "X-Inertia": "true",
+                "X-Inertia-Version": version,
+                "X-Inertia-Partial-Data": "download",
+                "X-Inertia-Partial-Component": "files/mirror/download",
+                "X-Inertia-Except-Once-Props": "file,attachments,ads",
+            }
+            if xsrf:
+                headers["X-XSRF-TOKEN"] = xsrf
+            resp, _ = fetch(download_url, referer=base,
+                             post_data=json.dumps({"attach": hash_id}),
+                             extra_headers=headers)
+            if not resp:
+                continue
+            try:
+                resp_data = json.loads(resp)
+            except Exception:
+                continue
+            mirrors = (((resp_data.get("props") or {}).get("download") or {})
+                       .get("data") or {}).get("mirrors") or []
+            for mirror in mirrors:
+                driver = (mirror.get("driver") or "").lower()
+                if driver in _skip_drivers:
+                    continue
+                link = mirror.get("link") or ""
+                if link.startswith("//"):
+                    link = "https:" + link
+                if not link.startswith("http"):
+                    continue
+                result = resolve_host(link, referer=base)
+                if result:
+                    log("resolve_megamax: resolved via driver={} att={}".format(driver, hash_id))
+                    return result
+        return None
+    except Exception as e:
+        log("resolve_megamax error: {}".format(e))
+        return None
+
+
 # ─── Host dispatcher ──────────────────────────────────────────────────────────
 
 HOST_RESOLVERS = {
@@ -3017,6 +3140,10 @@ HOST_RESOLVERS = {
     # byselapuix/byseraguci landing page that needs following first.
     "n1mwq":           resolve_n1mwq,
     "n1mwq.org":       resolve_n1mwq,
+    # [PATCH MM1] megamax.me's download-mirror aggregator, confirmed via
+    # a real network capture of arabseed.wine's single "MegaMax" server
+    # -- only this specific vanity domain is mapped, on direct evidence.
+    "q7v3k8m2p1.top":  resolve_megamax,
     "dhcplay":         resolve_dhcplay,
     "dhcplay.com":     resolve_dhcplay,
     "mycima.cv":       resolve_azrak_mycima,   # [PATCH 121]
