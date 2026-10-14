@@ -28,7 +28,10 @@ method here rather than forking the rest of the parent file.
 from .arabseed import ArabseedExtractor
 
 _KNOWN_DOMAINS = [
-    "https://arabseed.living/",
+    "https://arabseed.living/",        # live -- main domain
+    # Legacy redirector (kept as fallback): confirmed by the user,
+    # 2026-10-14, that arabseed.codes now redirects into arabseed.living.
+    "https://arabseed.codes/",         # → https://arabseed.living/
 ]
 
 
