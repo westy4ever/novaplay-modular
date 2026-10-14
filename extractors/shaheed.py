@@ -165,13 +165,17 @@ class ShaheedExtractor(BaseExtractor):
 
         [PATCH SH1] The old "securedServers" JS variable/embed-stream URL scheme is stale --
         confirmed against real captures the site now uses `let servers = [{...}];` instead,
-        with a real, ready-to-use "url" field per entry (a /media-issue/watch/<hash> URL) --
-        no construction needed. The page's own source comment claims this array carries "one
-        invisible decoy as the last item" not matched by any visible server button, as an
-        anti-scraper trap; checked against three separate real captures and found no such
-        mismatch (every array index had a matching visible button each time) -- but the cross-
-        reference against the visible data-index buttons is kept anyway as a defensive, no-cost
-        measure in case that ever becomes real, rather than trusting the array wholesale.
+        with a real, ready-to-use "url" field per entry -- no construction needed. [PATCH SH3]
+        that url is a relative /m/<hash> path, not the /media-issue/watch/<hash> shape this
+        comment originally claimed (corrected against a fresh capture, 2026-10-14); it's stored
+        as-is here and only resolved against the base in extract_stream(), which already joins
+        any leading-"/" url before fetching, so this was a stale comment, not a functional bug.
+        The page's own source comment claims this array carries "one invisible decoy as the
+        last item" not matched by any visible server button, as an anti-scraper trap; checked
+        against several real captures and found no such mismatch (every array index had a
+        matching visible button each time) -- but the cross-reference against the visible
+        data-index buttons is kept anyway as a defensive, no-cost measure in case that ever
+        becomes real, rather than trusting the array wholesale.
         """
         # [PATCH SH2] "doodstream" and "m1xdrop" (the site's own obfuscated spelling of
         # mixdrop) consistently show up as entries in the real `let servers = [...]` array
