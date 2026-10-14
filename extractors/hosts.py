@@ -2973,7 +2973,19 @@ def megamax_list_mirrors(url, referer=None):
         # no stream to find on those pages, same as rapidgator/nitroflare
         # just below. Skipping them here so the UI doesn't offer a
         # "server" that can never produce a playable stream.
-        _skip_drivers = ("rapidgator", "nitroflare", "vikingfile", "earnvids")
+        #
+        # [PATCH MM4] "send" (send.cm) is a DIFFERENT kind of failure --
+        # unlike the three above, it's not structurally download-only; it
+        # has a real resolve_send_cm() video resolver and would work fine
+        # given a working connection to it. It fails specifically because
+        # send.cm is behind Cloudflare and this plugin's proxy setting is
+        # disabled (confirmed directly in the real device log: "Cloudflare
+        # challenge detected ... but proxy is NOT configured"). User asked
+        # for it skipped here too since it never works without a proxy on
+        # their setup. Left as its own, separately-commented entry (rather
+        # than folded into the list above) in case a proxy gets configured
+        # later, at which point this one specifically is worth revisiting.
+        _skip_drivers = ("rapidgator", "nitroflare", "vikingfile", "earnvids", "send")
         out = []
 
         for att in attachments:
