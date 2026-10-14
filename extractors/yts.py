@@ -169,6 +169,108 @@ class YTSExtractor(BaseExtractor):
                 break
         return servers
 
+    # ═══ en.yts.lu's own torrent-search API (live-capture discovery) ═══
+    # [PATCH live-capture] the site itself calls an undocumented endpoint,
+    # ?api=torrents&mode=movie|tv&name=<title>&year=<year>&quality=all,
+    # that aggregates real trackers (Pirate Bay, 1337x, Nyaa.si, YTS
+    # itself) by TITLE+YEAR directly -- no IMDB round-trip needed -- and
+    # hands back ready-made magnets with real seeds/peers/bytes, not text
+    # scraped out of a title string. For TV it fetches once per show+year
+    # and the site filters client-side by season/episode via regex on the
+    # torrent title; _filter_tv_hits mirrors that same regex here so one
+    # fetch serves every episode of a season. Tried first in get_page();
+    # Torrentio (_torr_servers) is kept as a hash-deduped supplement.
+
+    @staticmethod
+    def _magnet_hash(magnet_url):
+        m = re.search(r'btih:([0-9a-fA-F]{32,40})', magnet_url or "")
+        return m.group(1).lower() if m else ""
+
+    @staticmethod
+    def _format_size(num_bytes):
+        try:
+            n = float(num_bytes)
+        except (TypeError, ValueError):
+            return ""
+        if n <= 0:
+            return ""
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024.0:
+                return "{:.0f} {}".format(n, unit) if unit == "B" else "{:.2f} {}".format(n, unit)
+            n /= 1024.0
+        return "{:.2f} PB".format(n)
+
+    @staticmethod
+    def _filter_tv_hits(hits, season, episode):
+        """Mirror the site's own client-side season/episode regex filter
+        (see the inline `filterTorrents()` JS captured off en.yts.lu)."""
+        try:
+            s_num = int(season) if season not in (None, "") else None
+        except (TypeError, ValueError):
+            s_num = None
+        try:
+            e_num = int(episode) if episode not in (None, "") else None
+        except (TypeError, ValueError):
+            e_num = None
+        if s_num is None and e_num is None:
+            return hits
+
+        s_re = None
+        if s_num is not None:
+            s_pad = "{:02d}".format(s_num) if s_num < 10 else str(s_num)
+            s_re = re.compile(r'(S{}|S{}[^0-9]|SEASON[.\s_-]*{})'.format(
+                re.escape(s_pad), re.escape(str(s_num)), re.escape(str(s_num))), re.I)
+        e_re = None
+        if e_num is not None:
+            e_pad = "{:02d}".format(e_num) if e_num < 10 else str(e_num)
+            e_re = re.compile(r'(E{}|E{}[^0-9])'.format(
+                re.escape(e_pad), re.escape(str(e_num))), re.I)
+        e_any_re = re.compile(r'E\d{1,2}', re.I)
+
+        out = []
+        for h in hits:
+            title = str(h.get("title") or "")
+            if s_re and not s_re.search(title):
+                continue
+            if e_re and not e_re.search(title) and e_any_re.search(title):
+                continue
+            out.append(h)
+        return out
+
+    def _native_yts_torrents(self, title, year, mode="movie", season=None, episode=None, max_n=60):
+        if not title:
+            return []
+        url = "{}/browse-movies?api=torrents&mode={}&name={}&year={}&quality=all".format(
+            self.main_url, mode, urllib.parse.quote(title), year or "")
+        try:
+            data = fetch_json(url, referer="{}/browse-movies".format(self.main_url)) or {}
+        except Exception:
+            return []
+        hits = data.get("hits") or []
+        if mode == "tv":
+            hits = self._filter_tv_hits(hits, season, episode)
+        servers, seen = [], set()
+        for h in hits:
+            magnet = str(h.get("magnetUrl") or "")
+            if not magnet.startswith("magnet:"):
+                continue
+            hh = self._magnet_hash(magnet)
+            if hh:
+                if hh in seen:
+                    continue
+                seen.add(hh)
+            name = str(h.get("title") or "Torrent")
+            servers.append({
+                "name": name,
+                "url": magnet,
+                "quality": self._extract_quality(name),
+                "seeders": str(h.get("seeds")) if h.get("seeds") is not None else "",
+                "size": self._format_size(h.get("bytes")),
+            })
+            if len(servers) >= max_n:
+                break
+        return servers
+
     # ═══ Categories (movies + TV — matches the site sidebar) ══════════
 
     def get_categories(self, mtype="movie"):
@@ -472,9 +574,23 @@ class YTSExtractor(BaseExtractor):
             tmdb_id = url.replace("yts_movie_", "")
             movie_data = self._tmdb_request("/movie/{}".format(tmdb_id))
 
-            # Magnet streams via Torrentio (same backend as the site)
+            # Magnet streams — en.yts.lu's own torrent-search API first
+            # (real seeds/peers/size, more trackers, no IMDB round-trip),
+            # then Torrentio as a hash-deduped supplement for anything
+            # it turns up that the native search missed.
+            _title = movie_data.get("title") or movie_data.get("name") or ""
+            _year = (movie_data.get("release_date") or "")[:4]
+            servers = self._native_yts_torrents(_title, _year, mode="movie")
             imdb = self._imdb_id(tmdb_id, "movie")
-            servers = self._torr_servers(imdb) if imdb else []
+            if imdb:
+                seen = set(self._magnet_hash(s["url"]) for s in servers)
+                for s in self._torr_servers(imdb):
+                    h = self._magnet_hash(s["url"])
+                    if h and h in seen:
+                        continue
+                    if h:
+                        seen.add(h)
+                    servers.append(s)
 
             # Embed fallbacks (work without TorrServer)
             servers += [
@@ -501,9 +617,24 @@ class YTSExtractor(BaseExtractor):
             season_num = parts[3]
             ep_num = parts[4]
 
-            # Magnet streams via Torrentio (same backend as the site)
+            # Magnet streams — native search first (one fetch covers the
+            # whole show+year, filtered to this season/episode the same
+            # way the site itself does), then Torrentio as a supplement.
+            show_data = self._tmdb_request("/tv/{}".format(tmdb_id))
+            _title = show_data.get("name") or show_data.get("original_name") or ""
+            _year = (show_data.get("first_air_date") or "")[:4]
+            servers = self._native_yts_torrents(
+                _title, _year, mode="tv", season=season_num, episode=ep_num)
             imdb = self._imdb_id(tmdb_id, "tv")
-            servers = self._torr_servers(imdb, int(season_num), int(ep_num)) if imdb else []
+            if imdb:
+                seen = set(self._magnet_hash(s["url"]) for s in servers)
+                for s in self._torr_servers(imdb, int(season_num), int(ep_num)):
+                    h = self._magnet_hash(s["url"])
+                    if h and h in seen:
+                        continue
+                    if h:
+                        seen.add(h)
+                    servers.append(s)
 
             # Embed fallbacks
             servers += [
