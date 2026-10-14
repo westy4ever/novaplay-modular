@@ -739,14 +739,35 @@ class AdvancedArabicPlayerDetail(Screen):
     def _bgLoad(self, site, item, m_type):
         url = item["url"]
         _done = [False]
+        # [PATCH WATCHDOG1] Confirmed directly on a real device log,
+        # 2026-10-14: a 30s watchdog here could fire a FALSE positive --
+        # the page's own TMDb metadata lookup was simply slow (a single
+        # TMDb call took 16+ seconds under load from the plugin's own
+        # background grid-fill lookups, see plugin_tmdb.py's PATCH
+        # TMDB-SLOW1 for the real fix to that), not actually stuck, and
+        # get_page() went on to finish successfully a few seconds later
+        # anyway. The old wording ("Timeout — please try again") read as
+        # a definite failure and invited the user to back out of a
+        # screen that was still loading; if they did, the poster/backdrop
+        # decode threads from the load that then finished anyway crashed
+        # with AttributeError trying to paint into the now-closed screen
+        # (self.picLoad / self.backdropPicLoad gone) -- harmless (caught
+        # and logged) but a real symptom of this false alarm.
+        #
+        # Raised the threshold (TMDb should rarely need it now that
+        # TMDB-SLOW1 caps concurrent in-flight TMDb requests) and
+        # softened the wording so it reads as "still working," not
+        # "failed" -- it no longer tells the user to retry, since
+        # retrying while the original load is still running is exactly
+        # what produced the race above.
         def _watchdog():
             if not _done[0] and not getattr(self, "_closed", False):
-                my_log("_bgLoad watchdog: timeout for {}".format(url[:60]))
+                my_log("_bgLoad watchdog: still loading after 45s for {}".format(url[:60]))
                 def _show_timeout_msg():
                     if not getattr(self, "_closed", False) and not _done[0]:
-                        self.session.open(MessageBox, "Timeout — please try again", MessageBox.TYPE_ERROR, timeout=5)
+                        self.session.open(MessageBox, "Still loading, please wait...", MessageBox.TYPE_INFO, timeout=5)
                 callInMainThread(_show_timeout_msg)
-        _wt = threading.Timer(30, _watchdog)
+        _wt = threading.Timer(45, _watchdog)
         _wt.daemon = True
         _wt.start()
         try:

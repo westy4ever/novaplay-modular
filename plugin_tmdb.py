@@ -125,6 +125,28 @@ def _tmdb_throttle():
         _tmdb_last_request_time[0] = time.monotonic()
 
 
+# [PATCH TMDB-SLOW1] _TMDB_MIN_REQUEST_INTERVAL only spaces out when each
+# request *fires*; it does nothing to limit how many fired requests are
+# simultaneously *in flight* waiting on a response. Confirmed directly
+# from a real device log, 2026-10-14: opening a movie's detail page right
+# after browsing its category grid made a single TMDb search take 16+
+# seconds for ONE HTTP round trip, well past plugin_screen_detail.py's
+# 30s "_bgLoad watchdog" -- because the grid page had just fired off a
+# background TMDb rating/poster lookup (fill_item_rating_async) for every
+# one of its ~40 items, each spaced only 0.15s apart at the *start* but
+# all left to run concurrently afterwards, so dozens of TMDb connections
+# were open to the same host at once by the time the detail page's own
+# lookup joined the pile. A bounded semaphore caps how many of those
+# requests (from ANY caller: grid fills, detail lookups, poster/trailer
+# language requests) are actually in flight at the same time, so a late
+# arrival like the detail page's own search gets a slot sooner instead of
+# queuing behind an unbounded pile -- without touching the existing
+# minimum-interval spacing above, which stays in place for its own
+# documented reason (avoiding the burst-triggered rate-limit failure a
+# prior incident already traced to firing too many requests at once).
+_tmdb_concurrency_sem = threading.Semaphore(3)
+
+
 def _tmdb_enabled():
     return bool((_get_config("tmdb_api_key", "") or "").strip())
 
@@ -224,7 +246,8 @@ def _tmdb_request(path, params=None):
         url = "{}{}?{}".format(_TMDB_API_BASE, path, urlencode(payload))
         try:
             _tmdb_throttle()
-            raw, _ = base_fetch(url, referer="https://www.themoviedb.org/", extra_headers={"Accept": "application/json"})
+            with _tmdb_concurrency_sem:
+                raw, _ = base_fetch(url, referer="https://www.themoviedb.org/", extra_headers={"Accept": "application/json"})
             if not raw:
                 _log("TMDb: empty HTTP body for {} [{}]".format(path, language))
                 continue
@@ -255,7 +278,16 @@ def _tmdb_request_language(path, language="ar", params=None, accept_any=False):
         payload.update(params)
     url = "{}{}?{}".format(_TMDB_API_BASE, path, urlencode(payload))
     try:
-        raw, _ = base_fetch(url, referer="https://www.themoviedb.org/", extra_headers={"Accept": "application/json"})
+        # [PATCH TMDB-SLOW1] This call used to skip _tmdb_throttle()
+        # entirely -- the only outbound-TMDb function in this module that
+        # did -- so poster/trailer language lookups could fire completely
+        # unthrottled alongside everything else, feeding the same burst
+        # load the throttle exists to prevent. Added here for the same
+        # reason it was already on _tmdb_request(), plus the shared
+        # concurrency cap.
+        _tmdb_throttle()
+        with _tmdb_concurrency_sem:
+            raw, _ = base_fetch(url, referer="https://www.themoviedb.org/", extra_headers={"Accept": "application/json"})
         if not raw:
             _log("TMDb: empty HTTP body for {} [{}]".format(path, language))
             return None
