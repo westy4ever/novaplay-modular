@@ -3241,6 +3241,26 @@ HOST_RESOLVERS = {
     "vinovo.to":        resolve_vinovo,
     "vidaraa.cc":       resolve_vidaraa,
     "vidaraa":          resolve_vidaraa,
+    # [PATCH VIDARA1] "vidara.to" (seen as a shahid4u.courses server, e.g.
+    # https://vidara.to/e/<code>) has no resolver entry at all -- it fell
+    # through to resolve_generic_embed, which found nothing (confirmed in
+    # a real device log: resolver lookup never even matched, straight to
+    # "Generic fallback for: vidara.to", then iframe-chain also failed).
+    # resolve_vidaraa() builds its /api/stream request from the PASSED-IN
+    # url's own netloc (not a hardcoded "vidaraa.cc"), so it is already
+    # domain-portable -- the only question is whether vidara.to speaks the
+    # same {filecode, device} POST -> {"streaming_url": ...} JSON API as
+    # vidaraa.cc. The near-identical naming ("vidara.to" vs "vidaraa.cc",
+    # both /e/<code> embed paths) strongly suggests the same underlying
+    # platform under a rotated domain, and this is a safe bet either way:
+    # if vidara.to's API differs, resolve_vidaraa() returns None exactly
+    # like no resolver matching at all, and resolve_host() still falls
+    # through to the same generic-embed + iframe-chain fallbacks that run
+    # today -- this entry can only add a chance of success, never remove
+    # one. Needs a real vidara.to embed-page capture to confirm outright;
+    # flagged for the user to verify next time it's hit.
+    "vidara.to":        resolve_vidaraa,
+    "vidara":           resolve_vidaraa,
 
     # ─── Modern CDN resolvers from LINKS.txt ──────────────────────────────
     "streamrk.site":        resolve_streamrk,
