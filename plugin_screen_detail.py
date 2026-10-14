@@ -182,11 +182,9 @@ class AdvancedArabicPlayerDetail(Screen):
         <widget name="posterYear" position="76,56" size="96,36" font="Regular;26" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
         <widget name="posterRating" position="325,58" size="104,36" font="Regular;26" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
 
-        <widget name="badge" position="525,52" size="800,33" font="Regular;26" foregroundColor="#E040FB" transparent="1" zPosition="4" />
         <widget name="title" position="525,93" size="1320,90" font="Regular;42" foregroundColor="#00E5FF" transparent="1" zPosition="4" />
         <widget name="meta" position="525,189" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="facts" position="525,255" size="1320,42" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="4" />
-        <widget name="source" position="525,300" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
+        <widget name="source" position="525,255" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
         <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
 
         <widget name="plot_title" position="525,465" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
@@ -230,11 +228,9 @@ class AdvancedArabicPlayerDetail(Screen):
             ("posterRating", 325, 58),
         ), -320, 0, 0, 8),
         ("info", (
-            ("badge", 525, 52),
             ("title", 525, 93),
             ("meta", 525, 189),
-            ("facts", 525, 255),
-            ("source", 525, 300),
+            ("source", 525, 255),
             ("proxy_warning", 1355, 52),
         ), 220, 0, 2, 8),
         ("menu", (
@@ -334,10 +330,8 @@ class AdvancedArabicPlayerDetail(Screen):
         self["poster"] = Pixmap()
         self["posterYear"] = Label("")
         self["posterRating"] = Label("")
-        self["badge"]  = Label("")
         self["title"]  = Label(item.get("title", ""))
         self["meta"]   = Label("")
-        self["facts"]  = Label("")
         self["source"] = Label("")
         self["proxy_warning"] = Label("")
         self["plot_title"] = Label("القصة")
@@ -1100,7 +1094,7 @@ class AdvancedArabicPlayerDetail(Screen):
         # TMDb merge -- reusing that instead of the old year/rating/type/
         # quality mix, which showed similar-but-different info (rating is
         # already on the poster's own gold-star badge; type/quality are
-        # already in the badge line above the title). Falls back to the
+        # already implied by the source line below). Falls back to the
         # previous construction whenever TMDb has none of these for this
         # title (TMDb disabled, lookup failed, or site-only metadata).
         _rd = str(data.get("release_date") or "").strip()
@@ -1153,15 +1147,6 @@ class AdvancedArabicPlayerDetail(Screen):
             if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
             if data.get("genres"):  meta.append(data["genres"])
             self["meta"].setText(_wrap_ui_text("   ".join(meta), width=58, max_lines=2))
-        self["badge"].setText("{}  •  {}".format(_site_label(self._site), _TYPE_LABELS.get(data.get("type"), "عنصر")))
-        facts = [
-            "المفضلة: {}  |  النسخة: {}  |  الوصف: {}".format(
-                "محفوظ" if _is_favorite(self._item.get("url")) else "غير محفوظ",
-                _PLUGIN_VERSION,
-                "موجود" if _pick_plot_text(data, self._item) != "القصة غير متوفرة حالياً لهذا العنصر." else "غير متوفر"
-            ),
-        ]
-        self["facts"].setText(_single_line_text("".join(facts), width=62))
         counts = []
         _nav_items = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
         has_episodes = bool(_nav_items)
