@@ -141,6 +141,19 @@ class ShaheedExtractor(BaseExtractor):
         if not url.startswith("http"):
             return urljoin(self._get_base(), url)
         return url
+
+    def _m_hash(self, url):
+        """[PATCH SH4] Both the watch page's `let servers = [...]` array and the
+        download page's <a class="btn-down"> buttons point at the same relative
+        /m/<hash> URL shape for a given server -- confirmed against real captures
+        of both pages for the same title (2026-10-14). Used to dedup when merging
+        download-page server links into the watch-page servers list, so the same
+        server isn't offered twice just because it showed up on both pages.
+        """
+        if not url:
+            return ""
+        m = re.search(r'/m/([^/?#]+)', url)
+        return m.group(1) if m else ""
     
     def _fetch_live(self, url, referer=None):
         ref = referer or self._get_base()
@@ -555,6 +568,7 @@ class ShaheedExtractor(BaseExtractor):
         elif "/download/" in url:
             download_html = html
 
+        downloads = []
         if download_html:
             downloads = self._extract_downloads_from_page(download_html)
             if downloads:
@@ -595,6 +609,48 @@ class ShaheedExtractor(BaseExtractor):
                         })
             else:
                 log("Shaheed: no episode list found on watch page")
+
+        # [PATCH SH4] "stream links in download add to watch in detail screen" --
+        # the detail screen's watch/play list only reads result["servers"]
+        # (plugin_screen_detail.py builds its playable-server list from that key
+        # alone; result["downloads"] only feeds the separate download-queue key).
+        # The download page often exposes MORE hosts than the watch page (and, per
+        # real captures, loads fine even when the watch page hits a Cloudflare
+        # wall) so its links are wasted sitting only in "downloads" -- merge them
+        # into "servers" too, deduped by the shared /m/<hash> id (falling back to
+        # an exact URL match when a link isn't /m/<hash>-shaped) so a host already
+        # offered from the watch page isn't listed twice.
+        if downloads:
+            existing_hashes = set()
+            existing_urls = set()
+            for s in result["servers"]:
+                s_url = s.get("url", "")
+                s_hash = self._m_hash(s_url)
+                if s_hash:
+                    existing_hashes.add(s_hash)
+                existing_urls.add(s_url)
+
+            merged = 0
+            for d in downloads:
+                d_url = d.get("url", "")
+                if not d_url:
+                    continue
+                d_hash = self._m_hash(d_url)
+                if d_hash:
+                    if d_hash in existing_hashes:
+                        continue
+                    existing_hashes.add(d_hash)
+                elif d_url in existing_urls:
+                    continue
+                existing_urls.add(d_url)
+                result["servers"].append({
+                    "name": d.get("name") or "Download Server",
+                    "url": d_url,
+                    "type": "embed",
+                })
+                merged += 1
+            if merged:
+                log("Shaheed: merged {} download-page server link(s) into watch servers list".format(merged))
 
         if result["items"]:
             result["type"] = "series"
