@@ -252,7 +252,55 @@ def resolve_vidbom(url):
 
 
 def resolve_uqload(url):
+    """
+    [PATCH UQLOAD1] A real device log showed this resolver always
+    returning nothing (embed page fetched fine, 2.7KB, but no stream
+    regex matched) -- confirmed via a real recorded browsing session's
+    network log that the real source URL is NOT in the embed page's
+    initial HTML at all. The page's own JS POSTs to /dl once it loads:
+
+        POST https://uqload.vc/dl
+        Content-Type: application/x-www-form-urlencoded
+        Referer: <the embed page URL>
+        Origin: https://<embed host>
+        body: auto=1&file_code=<code>&op=embed&referer=
+
+    and gets back a JSON body (served with a text/html content-type,
+    oddly, but JSON regardless) shaped like:
+        {"sources":[{"file":"https://strm15.uqload.vc/hls2/.../master.m3u8?t=...&s=...&e=14400&..."}], ...}
+
+    confirmed end-to-end against the real captured request/response
+    pair, including the real master.m3u8 URL playing back correctly.
+    Try this first; fall back to the old embed-page regex scan in case
+    some uqload mirror still inlines the source directly.
+    """
     try:
+        m = re.search(r'/e/([A-Za-z0-9_-]+)', url)
+        file_code = m.group(1) if m else ""
+        if file_code:
+            p = urlparse(url)
+            base = "{}://{}".format(p.scheme or "https", p.netloc or "uqload.vc")
+            headers = {
+                "Referer": url,
+                "Origin": base,
+            }
+            body, _ = fetch(
+                base + "/dl", referer=url, extra_headers=headers,
+                post_data="auto=1&file_code={}&op=embed&referer=".format(file_code)
+            )
+            if body:
+                try:
+                    data = json.loads(body)
+                    sources = data.get("sources") or []
+                    if sources and isinstance(sources, list):
+                        stream_url = sources[0].get("file") if isinstance(sources[0], dict) else None
+                        if stream_url:
+                            variants = [s.get("file") for s in sources if isinstance(s, dict) and s.get("file")]
+                            _quality_tls.variants = variants or [stream_url]
+                            return _correct_stream_url(stream_url)
+                except Exception as e:
+                    log("resolve_uqload: /dl JSON parse failed: {}".format(e))
+
         html, _ = fetch(url, referer=url)
         if not html:
             return None
