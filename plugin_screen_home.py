@@ -372,6 +372,7 @@ class AdvancedArabicPlayerHome(Screen):
         self["contSel"] = Label("")
         for i in range(CONT_SLOTS):
             self["contbadge%d" % i] = Label("")
+            self["conttype%d" % i] = Label("")
             self["contbartrack%d" % i] = Label("")
             self["contbar%d" % i] = Label("")
             self["cont%d" % i] = Pixmap()
@@ -1032,6 +1033,7 @@ class AdvancedArabicPlayerHome(Screen):
             self["cont%d" % i].hide()
             self["contbadge%d" % i].hide()
             try:
+                self["conttype%d" % i].hide()
                 self["contbartrack%d" % i].hide()
                 self["contbar%d" % i].hide()
             except Exception:
@@ -1932,6 +1934,7 @@ class AdvancedArabicPlayerHome(Screen):
         for i in range(CONT_SLOTS):
             widget = self["cont%d" % i]
             badge = self["contbadge%d" % i]
+            typetag = self["conttype%d" % i]
             track = self["contbartrack%d" % i]
             bar = self["contbar%d" % i]
             if i < len(self._cont_items):
@@ -1958,22 +1961,41 @@ class AdvancedArabicPlayerHome(Screen):
                     widget.hide()
 
                 pos = int(item.get("last_position_sec") or 0)
-                mm, ss = divmod(pos, 60)
-                hh, mm = divmod(mm, 60)
-                tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
-                badge.setText(tstr)
-                badge.show()
-
                 dur = int(item.get("total_duration")
                           or item.get("duration")
                           or item.get("total_seconds") or 0)
                 if dur > 0:
+                    # [UX] remaining time is more actionable than elapsed when
+                    # deciding whether to continue something -- a leading "-"
+                    # marks it as remaining, matching common player convention.
+                    remaining = max(0, dur - pos)
+                    mm, ss = divmod(remaining, 60)
+                    hh, mm = divmod(mm, 60)
+                    tstr = "-{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "-{}:{:02d}".format(mm, ss)
                     self._cont_pct[i] = min(99, max(1, int(pos * 100 / dur)))
                 else:
-                    self._cont_pct[i] = 35 if pos > 600 else (20 if pos > 30 else 0)
+                    # duration unknown -- fall back to elapsed (all we actually
+                    # know) and don't fabricate a completion percentage.
+                    mm, ss = divmod(pos, 60)
+                    hh, mm = divmod(mm, 60)
+                    tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
+                    self._cont_pct[i] = 0
+                badge.setText(tstr)
+                badge.show()
+
+                _type = item.get("type", "")
+                if _type == "episode":
+                    typetag.setText("حلقة")
+                    typetag.show()
+                elif _type in ("series", "show"):
+                    typetag.setText("مسلسل")
+                    typetag.show()
+                else:
+                    typetag.hide()
             else:
                 widget.hide()
                 badge.hide()
+                typetag.hide()
                 track.hide()
                 bar.hide()
                 self._cont_pct[i] = 0
@@ -2026,6 +2048,7 @@ class AdvancedArabicPlayerHome(Screen):
                 zy = CONT_Y - (zh - CONT_H) // 2 + y_off
                 self._moveResize("cont%d" % i, zx, zy, zw, zh)
                 self._moveResize("contbadge%d" % i, zx, zy + zh - sc(28), zw, sc(28))
+                self._moveResize("conttype%d" % i, zx + sc(8), zy + sc(8), zw - sc(16), sc(24))
                 _bx = zx + sc(6)
                 _by = zy + zh - 26 - _bar_h - sc(6)
                 _bw = zw - sc(12)
@@ -2037,15 +2060,20 @@ class AdvancedArabicPlayerHome(Screen):
                 self._moveResize("cont%d" % i, base_x, CONT_Y + y_off, CONT_W, CONT_H)
                 self._moveResize("contbadge%d" % i, base_x,
                                  CONT_Y + y_off + CONT_H - sc(28), CONT_W, sc(28))
+                self._moveResize("conttype%d" % i, base_x + sc(8), CONT_Y + y_off + sc(8),
+                                 CONT_W - sc(16), sc(24))
                 _bx = base_x + sc(6)
                 _by = CONT_Y + y_off + CONT_H - 26 - _bar_h - sc(6)
                 _bw = CONT_W - sc(12)
             pct = self._cont_pct.get(i, 0) if i < len(self._cont_items) else 0
             try:
-                if i < len(self._cont_items):
+                # [UX] a real, known percentage only -- an empty/guessed track
+                # for an unknown duration implied a measurement that wasn't
+                # real, so it's hidden rather than shown as a fake 0%/35%/20%.
+                if i < len(self._cont_items) and pct > 0:
                     self._moveResize("contbartrack%d" % i, _bx, _by, _bw, _bar_h)
                     self["contbartrack%d" % i].show()
-                    _fill = max(sc(4), (_bw * pct) // 100) if pct > 0 else 0
+                    _fill = max(sc(4), (_bw * pct) // 100)
                     if _fill > 0:
                         self._moveResize("contbar%d" % i, _bx, _by, _fill, _bar_h)
                         self["contbar%d" % i].show()
@@ -2540,6 +2568,7 @@ class AdvancedArabicPlayerHome(Screen):
                 self["cont%d" % i].hide()
                 self["contbadge%d" % i].hide()
                 try:
+                    self["conttype%d" % i].hide()
                     self["contbartrack%d" % i].hide()
                     self["contbar%d" % i].hide()
                 except Exception:
