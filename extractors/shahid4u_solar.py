@@ -195,13 +195,35 @@ class Shahid4uSolarExtractor(BaseExtractor):
                 return "", ""
         return h, final_url or url
     
+    # [PATCH TITLE1] This only ever stripped trailing site-branding
+    # ("- shahid4u") and was never called on the category-card title at
+    # all (get_category_items() used the raw <h2> text directly) -- so
+    # every title kept its leading Arabic boilerplate word ("فيلم",
+    # "مسلسل", ...). Since Arabic is RTL, a title that still starts with
+    # one of those words renders right-aligned in the Enigma2 UI, unlike
+    # arabseed.py/arabseed_original.py, whose _clean_title() strips this
+    # same set of boilerplate words so the remaining (usually Latin)
+    # title renders left-aligned like every other extractor's. Confirmed
+    # against the user's real example: "فيلم Don't Move 2026 مترجم اون
+    # لاين" -> "Don't Move 2026" once "فيلم"/"مترجم"/"اون لاين" are
+    # stripped, matching the behavior of the other sites the user
+    # compared it against.
     def _clean_title(self, title):
         if not title:
             return ""
         title = html_unescape(title)
+        # [PATCH TITLE2] Longer words must be replaced before the shorter
+        # words they contain -- "مترجم" is a prefix of "مترجمة" (and
+        # "مدبلج" of "مدبلجة"), so replacing the short form first eats
+        # part of the long form and leaves a stray "ة" behind. Confirmed
+        # against a real title ("...الحلقة 4 مترجمة") which produced a
+        # dangling "ة" before this fix.
+        for word in ("مشاهدة", "فيلم", "مسلسل", "تحميل", "اون لاين", "أون لاين",
+                     "مترجمة", "مترجم", "مدبلجة", "مدبلج", "بجودة", "عالية"):
+            title = title.replace(word, "")
         title = re.sub(r'\s*[-|]\s*شاهد\s*فور\s*يو.*$', '', title)
         title = re.sub(r'\s*[-|]\s*shahid4u.*$', '', title, flags=re.I)
-        return title.strip()
+        return re.sub(r'\s+', ' ', title).strip(" -|")
     
     def get_categories(self, mtype="movie"):
         base = self._get_base().rstrip("/")
@@ -303,7 +325,7 @@ class Shahid4uSolarExtractor(BaseExtractor):
                 title_match = re.search(r'title="([^"]+)"', attrs, re.I)
             if not title_match:
                 continue
-            title = html_unescape(title_match.group(1).strip())
+            title = self._clean_title(title_match.group(1).strip())
             if not title:
                 continue
 
@@ -354,7 +376,7 @@ class Shahid4uSolarExtractor(BaseExtractor):
                     title_m = re.search(r'<[^>]+class="[^"]*title[^"]*"[^>]*>([^<]+)</', card_content, re.I)
                 if not title_m:
                     title_m = re.search(r'>([^<]{3,})<', card_content)
-                title = html_unescape(title_m.group(1).strip()) if title_m else ""
+                title = self._clean_title(title_m.group(1).strip()) if title_m else ""
                 if not title:
                     continue
     
