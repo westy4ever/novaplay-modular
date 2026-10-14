@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Shahid4u Solar extractor - for shahid4u.cash (formerly shahid4u.solar)
+Shahid4u Solar extractor - for shahid4u.courses (formerly shahid4u.cash / shahid4u.solar)
 Supports: Movies, Series, TV Shows
 Inherits from BaseExtractor.
 """
@@ -39,11 +39,16 @@ _shahid4u_base_cache_lock = threading.Lock()
 class Shahid4uSolarExtractor(BaseExtractor):
     """Extractor for Shahid4u - shahid4u.cash / shahid4u.solar"""
     
+    # [PATCH DOM1] shahid4u.solar and shahid4u.cash both now redirect into
+    # shahid4u.courses -- confirmed by the user, 2026-10-14. Courses is the
+    # new primary/live domain; the other two are kept as legacy redirector
+    # fallbacks (same pattern used for arabseed_liv.py's arabseed.codes).
     DOMAINS = [
-        "https://shahid4u.cash/",
-        "https://shahid4u.solar/",
+        "https://shahid4u.courses/",       # live -- main domain
+        "https://shahid4u.cash/",          # → https://shahid4u.courses/
+        "https://shahid4u.solar/",         # → https://shahid4u.courses/
     ]
-    VALID_HOST_MARKERS = ("shahid4u.cash", "shahid4u.solar")
+    VALID_HOST_MARKERS = ("shahid4u.courses", "shahid4u.cash", "shahid4u.solar")
     BLOCKED_HOST_MARKERS = ("alliance4creativity.com",)
     
     def __init__(self):
