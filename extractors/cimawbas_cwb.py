@@ -1252,6 +1252,22 @@ class CimaWbasCwbExtractor(BaseExtractor):
         result["servers"] = servers
         result["downloads"] = self._extract_download_links(html)
 
+        # [PATCH CW-merge] detail screen's watch/play UI only reads
+        # result["servers"] -- merge the download block's file-host links in
+        # too (reusing _add_server's own dedup/filtering) so a host only
+        # found on the download block isn't stranded. Same gap/fix as
+        # Shaheed, 2026-10-14.
+        if result["downloads"]:
+            seen_urls = set(s.get("url", "") for s in result["servers"])
+            before = len(result["servers"])
+            for d in result["downloads"]:
+                label = d.get("quality") or d.get("resolution") or None
+                self._add_server(result["servers"], seen_urls, d.get("url", ""),
+                                 label=label)
+            merged = len(result["servers"]) - before
+            if merged:
+                log("CimaWbasCWB: merged {} download link(s) into servers".format(merged))
+
         # Episodes / seasons — series pages and watch pages with an ep list.
         if result["type"] == "series":
             episodes = []

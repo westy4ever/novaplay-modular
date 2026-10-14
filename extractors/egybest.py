@@ -1138,6 +1138,31 @@ class EgyBestExtractor(BaseExtractor):
         # ── Downloads ───────────────────────────────────────────────────
         result["downloads"] = self._parse_downloads(html)
 
+        # [PATCH CW-merge] detail screen's watch/play UI only reads
+        # result["servers"] -- the download block's file-host links
+        # (ser-link / resolution-table hrefs) are real external pages too,
+        # just scraped from a different block of the same page. Merge in
+        # any not already present, deduped by URL. Same gap/fix as
+        # Shaheed, 2026-10-14.
+        if result["downloads"]:
+            seen_urls = set(s.get("url", "") for s in result["servers"])
+            merged = 0
+            for d in result["downloads"]:
+                d_url = d.get("url", "")
+                if not d_url or d_url in seen_urls:
+                    continue
+                seen_urls.add(d_url)
+                label = d.get("quality") or d.get("resolution") or "تحميل"
+                result["servers"].append({
+                    "name": label,
+                    "url": d_url,
+                    "type": "embed",
+                    "quality": d.get("resolution", ""),
+                })
+                merged += 1
+            if merged:
+                log("EgyBest: merged {} download link(s) into servers".format(merged))
+
         # ── Episodes / seasons ──────────────────────────────────────────
         if result["type"] == "series":
             seasons = self._parse_season_list(html)

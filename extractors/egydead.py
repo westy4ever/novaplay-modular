@@ -1325,6 +1325,27 @@ class EgyDeadExtractor(BaseExtractor):
             # MegaMax-mirror reuse (PATCH 99) only when this page has no download list.
             real_downloads = self._parse_download_servers(html)
             result["downloads"] = real_downloads if real_downloads else self._pull_downloads(servers)
+            # [PATCH CW-merge] only when `real_downloads` is the genuine,
+            # separately-parsed download list (not the servers-mirror
+            # fallback, which by definition has nothing new) -- merge any
+            # download-only links into servers so the watch/play UI can
+            # offer them too. Same gap/fix as Shaheed, 2026-10-14.
+            if real_downloads:
+                seen_urls = set(s.get("url", "") for s in result["servers"])
+                merged = 0
+                for d in real_downloads:
+                    d_url = d.get("url", "")
+                    if not d_url or d_url in seen_urls:
+                        continue
+                    seen_urls.add(d_url)
+                    result["servers"].append({
+                        "name": d.get("quality") or d.get("resolution") or "Server",
+                        "url": d_url,
+                        "type": "embed",
+                    })
+                    merged += 1
+                if merged:
+                    log("EgyDead: merged {} download link(s) into servers".format(merged))
             log("EgyDead: episode {} → {} servers".format(title, len(servers)))
             return result
 
@@ -1409,6 +1430,27 @@ class EgyDeadExtractor(BaseExtractor):
         # MegaMax-mirror reuse (PATCH 99) only when this page has no download list.
         real_downloads = self._parse_download_servers(html)
         result["downloads"] = real_downloads if real_downloads else self._pull_downloads(servers)
+        # [PATCH CW-merge] only when `real_downloads` is the genuine,
+        # separately-parsed download list (not the servers-mirror fallback,
+        # which by definition has nothing new) -- merge any download-only
+        # links into servers so the watch/play UI can offer them too. Same
+        # gap/fix as Shaheed, 2026-10-14.
+        if real_downloads:
+            seen_urls = set(s.get("url", "") for s in result["servers"])
+            merged = 0
+            for d in real_downloads:
+                d_url = d.get("url", "")
+                if not d_url or d_url in seen_urls:
+                    continue
+                seen_urls.add(d_url)
+                result["servers"].append({
+                    "name": d.get("quality") or d.get("resolution") or "Server",
+                    "url": d_url,
+                    "type": "embed",
+                })
+                merged += 1
+            if merged:
+                log("EgyDead: merged {} download link(s) into servers".format(merged))
         log("EgyDead: movie {} → {} servers".format(title, len(servers)))
         return result
 

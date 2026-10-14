@@ -1470,6 +1470,27 @@ class CimaWebasExtractor(BaseExtractor):
                     result["downloads"] = self._extract_download_links(
                         dl_html)
 
+        # [PATCH CW-merge] The detail screen's watch/play UI only reads
+        # result["servers"] -- result["downloads"] only feeds the separate
+        # download-queue feature. The /download/ page's quality-grouped
+        # file-host links are often real, playable embeds that never showed
+        # up in the watch-page server scan (same gap confirmed on Shaheed,
+        # 2026-10-14). Merge them in here, reusing `_add_server`'s own
+        # dedup/filtering (same-site rejection, ad-host rejection, proxy
+        # unwrap) against a `seen` set seeded from the servers already found,
+        # so a host already offered isn't listed twice.
+        if result["downloads"]:
+            seen_urls = set(s.get("url", "") for s in result["servers"])
+            before = len(result["servers"])
+            for d in result["downloads"]:
+                label = d.get("quality") or d.get("resolution") or None
+                self._add_server(result["servers"], seen_urls, d.get("url", ""),
+                                 label=label)
+            merged = len(result["servers"]) - before
+            if merged:
+                log("CimaWebas: merged {} download-page link(s) into servers"
+                    .format(merged))
+
         # ── 6. Episodes (series only) ─────────────────────────────────────
         if result["type"] == "series" and landing_html:
             episodes = []
