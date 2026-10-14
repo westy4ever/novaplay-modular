@@ -183,8 +183,8 @@ class AdvancedArabicPlayerDetail(Screen):
         <widget name="posterRating" position="325,58" size="104,36" font="Regular;26" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
 
         <widget name="title" position="525,93" size="1320,90" font="Regular;42" foregroundColor="#00E5FF" transparent="1" zPosition="4" />
-        <widget name="meta" position="525,189" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="source" position="525,255" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
+        <widget name="meta" position="525,183" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
+        <widget name="source" position="525,243" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
         <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
 
         <widget name="plot_title" position="525,465" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
@@ -229,8 +229,8 @@ class AdvancedArabicPlayerDetail(Screen):
         ), -320, 0, 0, 8),
         ("info", (
             ("title", 525, 93),
-            ("meta", 525, 189),
-            ("source", 525, 255),
+            ("meta", 525, 183),
+            ("source", 525, 243),
             ("proxy_warning", 1355, 52),
         ), 220, 0, 2, 8),
         ("menu", (
@@ -594,6 +594,24 @@ class AdvancedArabicPlayerDetail(Screen):
         quality = (s.get("quality") or "HD").upper()
         lines = name.split('\n')
         release_name = lines[0].strip()
+
+        # [FIX] yts.py (both _torr_servers/Torrentio and the native
+        # en.yts.lu search) already computes real seeders/size and puts
+        # them on the server dict directly -- "seeders": "154", "size":
+        # "2.67 GB". The emoji-second-line parse below predates that and
+        # only applies to sites whose "name" embeds a 👤/💾-marked meta
+        # line with no separate dict fields; for a single-line name (every
+        # YTS entry) it always came up empty, silently dropping real data
+        # the dict already had. Dict fields win when present; the legacy
+        # parse is now only the fallback for sites that still need it.
+        dict_seeders = str(s.get("seeders") or "").strip()
+        dict_size = str(s.get("size") or "").strip()
+        if dict_seeders or dict_size:
+            seeders = "Seeders: " + dict_seeders if dict_seeders else ""
+            size = "Size: " + dict_size if dict_size else ""
+            seeders_source = " | ".join([x for x in [seeders] if x])
+            return (quality, release_name, size, seeders_source)
+
         meta_line = lines[1] if len(lines) > 1 else ""
         parts = re.split(r'[\U00010000-\U0010ffff]', meta_line)
         parts = [p.strip() for p in parts if p.strip()]
