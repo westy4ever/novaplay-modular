@@ -2683,6 +2683,9 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             ("Sleep timer — مؤقت النوم: %s" % self._sleepLabel(), "sleep"),
             ("%s Record stream — تسجيل البث" % ("● REC" if rec_on else "○"), "record"),
             ("Stop recording — إيقاف التسجيل", "stoprec"),
+            ("Chapters / jump points — فصول", "chapters"),
+            ("Self-test — فحص ذاتي", "selftest"),
+            ("Help / controls — المساعدة", "help"),
         ]
         self.session.openWithCallback(self._onPlayerMenuChoice, ChoiceBox, "Player Menu", items)
 
@@ -2696,6 +2699,12 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self.__audioSelect()
         elif action == "info":
             self.__streamInfo()
+        elif action == "chapters":
+            self._showChapters()
+        elif action == "selftest":
+            self._runSelfTest()
+        elif action == "help":
+            self._showHelp()
         elif action == "nxtep":
             self._next_prompt_enabled = not self._next_prompt_enabled
             _set_config("next_episode_prompt", "true" if self._next_prompt_enabled else "false")
@@ -2707,6 +2716,174 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
             self.__recordCurrentStream()
         elif action == "stoprec":
             self.__stopRecording()
+
+    # ── [player-ux] chapters / jump points ──────────────────────────────
+    # Streams here have no real chapter markers (remote URLs, not local
+    # files we could ffprobe), so this mirrors the WGFileManager player's
+    # fallback path directly: synthetic quarter-marks across the known
+    # duration, plus the saved resume point as an extra entry when one
+    # exists. Reuses __seek()'s existing OSD-flash + tracker bookkeeping
+    # by converting the chosen absolute target into a relative delta.
+    @staticmethod
+    def _fmtChapterTime(secs):
+        secs = max(0, int(secs))
+        h, rem = divmod(secs, 3600)
+        m, s = divmod(rem, 60)
+        return u"{:d}:{:02d}:{:02d}".format(h, m, s) if h else u"{:d}:{:02d}".format(m, s)
+
+    def _showChapters(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        total = self._total_secs
+        if not total or total <= 60:
+            self["status"].setText(u"مدة غير معروفة بعد — لا توجد نقاط قفز")
+            self.__showOSD(True)
+            return
+        marks = [
+            (u"Start — البداية", 0),
+            (u"25% — الربع الأول", total * 0.25),
+            (u"Halfway — المنتصف", total * 0.5),
+            (u"75% — الربع الثالث", total * 0.75),
+            (u"End — النهاية", max(0, total - 10)),
+        ]
+        items = [(u"{}   {}".format(name, self._fmtChapterTime(t)), int(t))
+                 for name, t in marks]
+        try:
+            saved = _get_saved_position(self._item_url) if self._item_url else 0
+        except Exception:
+            saved = 0
+        if saved and saved > 30:
+            items.append((u"↺ Resume point — نقطة الاستئناف   {}".format(
+                self._fmtChapterTime(saved)), int(saved)))
+        self.session.openWithCallback(self._onChapterChosen, ChoiceBox,
+                                      title=u"القفز إلى — Jump to", list=items)
+
+    def _onChapterChosen(self, choice):
+        if not choice:
+            return
+        target = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
+        try:
+            target = int(target)
+        except Exception:
+            return
+        try:
+            cur = int(self._paused_elapsed if self._paused else current_play_secs())
+        except Exception:
+            cur = 0
+        self.__seek(target - cur)
+
+    # ── [player-ux] on-device help / keymap reference ───────────────────
+    def _showHelp(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        lines = [
+            u"NovaPlay — مفاتيح التشغيل / Player Controls",
+            u"",
+            u"PLAYBACK",
+            u"OK            Play / Pause",
+            u"GREEN         Restart + resume from saved position",
+            u"STOP          Exit player (saves position, returns to TV)",
+            u"EXIT/CANCEL   Exit — near the end: Next / Mark / Save / Cancel",
+            u"",
+            u"SEEKING",
+            u"LEFT / RIGHT     Seek -/+ (hold to accelerate 10s→30s→60s)",
+            u"UP / DOWN        Seek -/+ 60s",
+            u"FF / REW         Seek +/- (same hold-accelerate step)",
+            u"0-9              Jump to 0%/10%/20%/…/90% of total duration",
+            u"",
+            u"TRACKS & SUBTITLES",
+            u"BLUE / SUBTITLE  Subtitle menu",
+            u"RED              Subtitle sync -100ms",
+            u"AUDIO            Audio track selection",
+            u"",
+            u"QUALITY & INFO",
+            u"YELLOW        Quality / server menu",
+            u"INFO          Stream info (resolution, candidate, proxy stats)",
+            u"",
+            u"MENU          Player menu — subtitle, audio, info, next-episode,",
+            u"              sleep timer, record, chapters, self-test, help",
+        ]
+        self.session.open(MessageBox, u"\n".join(lines), MessageBox.TYPE_INFO)
+
+    # ── [player-ux] non-destructive self-test ────────────────────────────
+    # Mostly read-only queries (service/seek reachability, track counts,
+    # subtitle state, proxy stats, OSD widget attachment). The only real
+    # actions are a pause/unpause round-trip and a tiny +5s/-5s seek
+    # round-trip, both of which restore the original state -- same
+    # convention as the WGFileManager player's self-test, scaled down
+    # since this is a live/remote stream rather than a local file.
+    def _selfTestAudioQuery(self):
+        svc = self.session.nav.getCurrentService()
+        if not svc:
+            return False
+        tracks = svc.audioTracks()
+        return bool(tracks and tracks.getNumberOfTracks() >= 1)
+
+    def _selfTestSubtitleQuery(self):
+        state = get_subtitle_state()
+        if self._item_url:
+            has_subtitle_for(self._item_url)
+        return isinstance(state, dict)
+
+    def _selfTestPauseRoundtrip(self):
+        was_paused = self._paused
+        self.__togglePause()
+        self.__togglePause()
+        return self._paused == was_paused
+
+    def _selfTestSeekRoundtrip(self):
+        if not self._total_secs or self._total_secs < 20:
+            return True
+        before = self._paused_elapsed if self._paused else current_play_secs()
+        self.__seek(5)
+        self.__seek(-5)
+        after = self._paused_elapsed if self._paused else current_play_secs()
+        return abs(after - before) <= 3
+
+    def _selfTestOSDRoundtrip(self):
+        was_visible = self._osd_visible
+        self.__showOSD(True)
+        shown = self._osd_visible
+        if not was_visible:
+            self.__hideOSD()
+        return shown is True
+
+    def _runSelfTest(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        results = []
+
+        def t(name, fn):
+            try:
+                r = fn()
+                results.append((name, "OK" if r is not False else "returned False"))
+            except Exception as e:
+                results.append((name, "FAIL: {}".format(e)))
+
+        t("service-reachable", lambda: self.session.nav.getCurrentService() is not None)
+        t("seek-object", lambda: bool(self.session.nav.getCurrentService() and
+                                       self.session.nav.getCurrentService().seek()))
+        t("duration-known", lambda: self._total_secs > 0)
+        t("audio-tracks-query", self._selfTestAudioQuery)
+        t("subtitle-state-query", self._selfTestSubtitleQuery)
+        t("proxy-stats", lambda: bool(novaplay_proxy.get_stats()))
+        t("osd-widgets-attached", lambda: all(
+            self[n].instance is not None for n in self._OSD_WIDGETS))
+        t("pause-roundtrip", self._selfTestPauseRoundtrip)
+        t("seek-roundtrip", self._selfTestSeekRoundtrip)
+        t("osd-show-hide", self._selfTestOSDRoundtrip)
+
+        ok = sum(1 for _, r in results if r == "OK")
+        for name, r in results:
+            my_log("[SelfTest] {:22s} {}".format(name, r))
+        self["status"].setText(u"Self-test: {}/{} OK".format(ok, len(results)))
+        self.__showOSD(True)
+        lines = [u"Self-test: {}/{} passed".format(ok, len(results)), u""]
+        for name, r in results:
+            mark = u"✓" if r == "OK" else u"✗"
+            lines.append(u"{} {}".format(mark, name) if r == "OK"
+                         else u"{} {} — {}".format(mark, name, r))
+        self.session.open(MessageBox, u"\n".join(lines), MessageBox.TYPE_INFO, timeout=15)
 
     def _aspectLabel(self):
         try:
