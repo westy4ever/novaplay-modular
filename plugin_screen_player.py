@@ -2777,31 +2777,32 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
             return
         lines = [
-            u"NovaPlay — مفاتيح التشغيل / Player Controls",
+            u"مفاتيح التشغيل — Player Controls",
             u"",
-            u"PLAYBACK",
-            u"OK            Play / Pause",
-            u"GREEN         Restart + resume from saved position",
-            u"STOP          Exit player (saves position, returns to TV)",
-            u"EXIT/CANCEL   Exit — near the end: Next / Mark / Save / Cancel",
+            u"التشغيل — Playback",
+            u"OK            تشغيل/إيقاف مؤقت — Play / Pause",
+            u"GREEN         إعادة التشغيل + استئناف — Restart + resume",
+            u"STOP          خروج مباشر للتلفاز — Exit straight to TV",
+            u"EXIT/CANCEL   خروج — قرب النهاية: التالي/علّم/احفظ/إلغاء",
             u"",
-            u"SEEKING",
-            u"LEFT / RIGHT     Seek -/+ (hold to accelerate 10s→30s→60s)",
-            u"UP / DOWN        Seek -/+ 60s",
-            u"FF / REW         Seek +/- (same hold-accelerate step)",
-            u"0-9              Jump to 0%/10%/20%/…/90% of total duration",
+            u"التقديم — Seeking",
+            u"LEFT / RIGHT     تقديم/تأخير (استمر للتسريع 10s→30s→60s)",
+            u"UP / DOWN        تقديم/تأخير 60 ثانية",
+            u"FF / REW         تقديم/تأخير (نفس تسريع الاستمرار)",
+            u"0-9              قفز إلى 0%/10%/20%/…/90% من المدة",
             u"",
-            u"TRACKS & SUBTITLES",
-            u"BLUE / SUBTITLE  Subtitle menu",
-            u"RED              Subtitle sync -100ms",
-            u"AUDIO            Audio track selection",
+            u"المسارات والترجمة — Tracks & Subtitles",
+            u"BLUE / SUBTITLE  قائمة الترجمة — Subtitle menu",
+            u"RED              تأخير الترجمة -100ms — Subtitle sync -100ms",
+            u"AUDIO            اختيار المسار الصوتي — Audio track selection",
             u"",
-            u"QUALITY & INFO",
-            u"YELLOW        Quality / server menu",
-            u"INFO          Stream info (resolution, candidate, proxy stats)",
+            u"الجودة والمعلومات — Quality & Info",
+            u"YELLOW        قائمة الجودة/السيرفر — Quality / server menu",
+            u"INFO          معلومات البث — Stream info",
             u"",
-            u"MENU          Player menu — subtitle, audio, info, next-episode,",
-            u"              sleep timer, record, chapters, self-test, help",
+            u"MENU          القائمة — الترجمة، الصوت، المعلومات، الحلقة",
+            u"              التالية، مؤقت النوم، التسجيل، الفصول،",
+            u"              الفحص الذاتي، المساعدة",
         ]
         self.session.open(MessageBox, u"\n".join(lines), MessageBox.TYPE_INFO)
 
@@ -2876,9 +2877,13 @@ class AdvancedArabicPlayerSimplePlayer(Screen):
         ok = sum(1 for _, r in results if r == "OK")
         for name, r in results:
             my_log("[SelfTest] {:22s} {}".format(name, r))
-        self["status"].setText(u"Self-test: {}/{} OK".format(ok, len(results)))
+        self["status"].setText(u"الفحص الذاتي: {}/{} — Self-test".format(ok, len(results)))
         self.__showOSD(True)
-        lines = [u"Self-test: {}/{} passed".format(ok, len(results)), u""]
+        # Bilingual header, same precedent as __streamInfo: an Arabic
+        # header over technical/diagnostic lines left in English, since
+        # the check names themselves (service-reachable, osd-widgets-
+        # attached, …) are debug labels, not end-user copy.
+        lines = [u"الفحص الذاتي — Self-test: {}/{} passed".format(ok, len(results)), u""]
         for name, r in results:
             mark = u"✓" if r == "OK" else u"✗"
             lines.append(u"{} {}".format(mark, name) if r == "OK"
