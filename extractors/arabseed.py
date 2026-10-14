@@ -831,38 +831,6 @@ class ArabseedExtractor(BaseExtractor):
                 "type": server["type"],
             })
 
-        # [PATCH AS10] Expose the FULL voe/byse/mixdrop/uqload/etc.
-        # mirror choice for a MegaMax entry instead of silently
-        # auto-picking one. MegaMax's single watch-page server is
-        # really q7v3k8m2p1.top's own file-download aggregator (see
-        # hosts.py's megamax_list_mirrors(), reverse-engineered
-        # directly from a real network capture 2026-10-13) -- expand
-        # it in place into one named, individually-selectable entry
-        # per real mirror link across every quality, so the UI lets
-        # the user choose exactly like the site's own download page
-        # does, rather than resolve_megamax() silently picking the
-        # first one that happens to resolve.
-        if result["servers"]:
-            expanded_servers = []
-            for server in result["servers"]:
-                server_url = server.get("url", "")
-                if "q7v3k8m2p1.top" in server_url:
-                    mirrors = megamax_list_mirrors(server_url, referer=watch_final or watch_url)
-                    if mirrors:
-                        for mirror in mirrors:
-                            quality = mirror.get("quality") or ""
-                            driver = mirror.get("driver") or ""
-                            label = ("[{}] {} ({})".format(quality, driver, server["name"])
-                                     if quality else "{} ({})".format(driver, server["name"]))
-                            expanded_servers.append({
-                                "name": label,
-                                "url": mirror["url"],
-                                "type": "embed",
-                            })
-                        continue  # drop the original single MegaMax entry
-                expanded_servers.append(server)
-            result["servers"] = expanded_servers
-
         # Older variants still expose the AJAX endpoint; try it only
         # if the static list came back empty.
         if not result["servers"]:
@@ -878,6 +846,57 @@ class ArabseedExtractor(BaseExtractor):
             result["servers"] = self._extract_servers_fallback(
                 watch_html, html, final_url or url
             )
+
+        # [PATCH AS10] Expose the FULL voe/byse/mixdrop/uqload/etc.
+        # mirror choice for a MegaMax entry instead of silently
+        # auto-picking one. MegaMax's single watch-page server is
+        # really q7v3k8m2p1.top's own file-download aggregator (see
+        # hosts.py's megamax_list_mirrors(), reverse-engineered
+        # directly from a real network capture 2026-10-13) -- expand
+        # it in place into one named, individually-selectable entry
+        # per real mirror link across every quality, so the UI lets
+        # the user choose exactly like the site's own download page
+        # does, rather than resolve_megamax() silently picking the
+        # first one that happens to resolve.
+        #
+        # [FIX] Moved here, AFTER all three server sources (static /
+        # AJAX / generic fallback) have had their turn, instead of
+        # sitting right after the static-list block only. Confirmed
+        # live on a real device, 2026-10-14: this site variant's
+        # watch page has NO static data-link list at all, so the
+        # static block above always returns [] here and the single
+        # MegaMax entry is only ever produced by the AJAX branch
+        # (_collect_ajax_servers, "AJAX returned 1 servers" in the
+        # log) -- which runs AFTER the old expansion check, so it was
+        # silently skipped and the UI kept showing one "MegaMax"
+        # entry. Scanning result["servers"] here, regardless of which
+        # branch populated it, catches the AJAX-sourced entry too.
+        if result["servers"]:
+            expanded_servers = []
+            for server in result["servers"]:
+                server_url = server.get("url", "")
+                if "q7v3k8m2p1.top" in server_url:
+                    mirrors = megamax_list_mirrors(server_url, referer=watch_final or watch_url)
+                    if mirrors:
+                        # [FIX] Use a fixed "MegaMax" tag rather than
+                        # re-wrapping server["name"] -- that name can
+                        # be whatever generic label the AJAX/fallback
+                        # branch happened to assign (e.g. "[1080p]
+                        # سيرفر عرب سيد"), which read as mangled
+                        # nested text once embedded in the new label.
+                        for mirror in mirrors:
+                            quality = mirror.get("quality") or ""
+                            driver = mirror.get("driver") or ""
+                            label = ("[{}] {} (MegaMax)".format(quality, driver)
+                                     if quality else "{} (MegaMax)".format(driver))
+                            expanded_servers.append({
+                                "name": label,
+                                "url": mirror["url"],
+                                "type": "embed",
+                            })
+                        continue  # drop the original single MegaMax entry
+                expanded_servers.append(server)
+            result["servers"] = expanded_servers
 
         if is_series:
             seen_eps = set()
