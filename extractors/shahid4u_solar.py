@@ -242,41 +242,73 @@ class Shahid4uSolarExtractor(BaseExtractor):
         items = []
         seen_urls = set()
     
-        # Pattern for the new shahid4u.cash theme
+        # Pattern for the new shahid4u.courses theme.
+        #
+        # [PATCH CAT1] The previous version tried to isolate each card's
+        # HTML by bounding a "Small--Box" <div> with a naive
+        # "(.*?)</div>\s*(?=<div|$)" pattern. Real markup nests an empty
+        # "<div class=\"card-overlay\" ...></div>" as the very first child,
+        # so that lazy match (and its "followed by another <div>" lookahead)
+        # stopped right there -- every card's captured HTML was truncated to
+        # ~300 bytes before the title, poster or episode number ever
+        # appeared, and the nested-div cutoff also meant the subsequent
+        # "class=...href=..." anchor search (which additionally assumed
+        # class before href, when real markup is href, title, class) never
+        # had a chance to find its closing </a>. Net effect: 0 items parsed
+        # from every category/listing page, confirmed against a real
+        # shahid4u.courses snapshot with 62 cards on the page.
+        #
+        # Fixed by matching the <a ...recent--block...>...</a> anchor
+        # directly across the whole page instead of pre-bounding a div:
+        # there are no nested <a> tags inside a card, so a lazy
+        # ".*?</a>" correctly spans the whole card content (title, poster,
+        # episode number) regardless of how many <div>s are nested inside,
+        # and attribute order inside the <a> tag no longer matters since
+        # href/title are pulled out of the matched attribute string instead
+        # of being assumed to appear in a fixed order.
         box_matches = re.finditer(
-            r'<div[^>]*class="[^"]*Small--Box[^"]*"[^>]*>(.*?)</div>\s*(?=<div|$)',
+            r'<a\s+([^>]*\brecent--block\b[^>]*)>(.*?)</a>',
             html, re.S | re.I
         )
         for box_match in box_matches:
-            box_html = box_match.group(1)
-            a_match = re.search(
-                r'<a[^>]*class="[^"]*recent--block[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-                box_html, re.S | re.I
-            )
-            if not a_match:
+            attrs, inner = box_match.group(1), box_match.group(2)
+            href_match = re.search(r'href="([^"]+)"', attrs, re.I)
+            if not href_match:
                 continue
-            link = self._normalize_url(a_match.group(1))
+            link = self._normalize_url(href_match.group(1))
             if not link or link in seen_urls:
                 continue
             seen_urls.add(link)
-            inner = a_match.group(2)
-    
+
+            # [PATCH CAT1] Real cards carry both a placeholder "src" (a
+            # generic cover image, shared across several items) and the
+            # real lazy-loaded poster in "data-src" when present -- and src
+            # comes first in the attribute order, so a single alternated
+            # regex stops at the placeholder before ever reaching data-src.
+            # Search for data-src explicitly first, falling back to src
+            # only for the cards that don't lazy-load at all (their src is
+            # already the real image).
             poster = ""
-            poster_match = re.search(r'<div[^>]*class="[^"]*Poster[^"]*"[^>]*>.*?<img[^>]+data-src="([^"]+)"', box_html, re.S | re.I)
-            if poster_match:
-                poster = self._normalize_url(poster_match.group(1))
-    
-            title_match = re.search(r'<inner--title>.*?<h2>(.*?)</h2>', box_html, re.S | re.I)
+            poster_block_match = re.search(r'<div[^>]*class="[^"]*Poster[^"]*"[^>]*>.*?<img[^>]+>', inner, re.S | re.I)
+            if poster_block_match:
+                img_tag = poster_block_match.group(0)
+                poster_src_match = re.search(r'data-src="([^"]+)"', img_tag, re.I)
+                if not poster_src_match:
+                    poster_src_match = re.search(r'\bsrc="([^"]+)"', img_tag, re.I)
+                if poster_src_match:
+                    poster = self._normalize_url(poster_src_match.group(1))
+
+            title_match = re.search(r'<inner--title>.*?<h2>(.*?)</h2>', inner, re.S | re.I)
             if not title_match:
-                title_match = re.search(r'<a[^>]*title="([^"]+)"', a_match.group(0), re.I)
+                title_match = re.search(r'title="([^"]+)"', attrs, re.I)
             if not title_match:
                 continue
             title = html_unescape(title_match.group(1).strip())
             if not title:
                 continue
-    
+
             episode_number = ""
-            ep_match = re.search(r'<div[^>]*class="[^"]*number[^"]*"[^>]*>.*?<span>الحلقة</span>\s*<em>(\d+)</em>', box_html, re.S | re.I)
+            ep_match = re.search(r'<div[^>]*class="[^"]*number[^"]*"[^>]*>.*?<span>الحلقة</span>\s*<em>(\d+)</em>', inner, re.S | re.I)
             if ep_match:
                 episode_number = ep_match.group(1)
                 item_type = "episode"
@@ -493,31 +525,59 @@ class Shahid4uSolarExtractor(BaseExtractor):
                 result["servers"] = servers
     
         # Extract episodes for series
+        #
+        # [PATCH EPS1] Neither of the two previous container patterns
+        # ("w-100 bg-main rounded my-4" / "...جميع الحلقات..." / "items", or
+        # id="eps") appear anywhere in real shahid4u.courses markup --
+        # confirmed against real series-page snapshots, both 0 matches.
+        # Real markup is:
+        #   <div class="EpisodesArea"><h3>...جميع الحلقات</h3>
+        #     <div class="EpisodesList">
+        #       <a href="...">
+        #         <span>الحلقة</span><em>4</em>
+        #       </a>
+        #       ...
+        # so episodes were never extracted at all -- a series page always
+        # came back with an empty item list. Matched directly against the
+        # distinctive <span>الحلقة</span><em>N</em> structure instead of
+        # trying to bound the EpisodesList container (same reasoning as
+        # [PATCH CAT1]: no nested <a> inside each episode link, so scanning
+        # the whole page for this anchor shape is simpler and robust to
+        # markup nesting changes elsewhere on the page).
+        #
+        # Note: on at least one real capture the EpisodesList container was
+        # completely absent from the fetched HTML (populated only via a
+        # later `Single/Episodes.php` AJAX call the page's own JS fires) --
+        # that state still correctly yields zero episodes here rather than
+        # a wrong/partial list; if that turns out to be the fetched state
+        # in practice (not just a snapshot timing artifact), an AJAX
+        # fallback mirroring arabseed's would be the next step, but that
+        # needs more evidence than currently available before building it.
+        # [PATCH EPS2] An individual episode's own page *also* carries this
+        # same <span>الحلقة</span><em>N</em> sidebar list (confirmed: the
+        # episode-4 snapshot includes its own entry plus episodes 3 and 1),
+        # so matching it unconditionally would wrongly turn a playable
+        # episode page into a season-overview "series" item list,
+        # discarding the servers we already found for it. The confirmed,
+        # real distinguishing marker is the URL path: a season/series
+        # overview page's canonical URL contains "/series/" (e.g.
+        # ".../series/مسلسل-line-of-fire-الموسم-الاول-مترجم/"), while an
+        # individual episode's canonical URL does not (e.g.
+        # ".../مسلسل-line-of-fire-الموسم-الاول-الحلقة-4-مترجمة/"). Only
+        # treat the page as a season overview -- and use this sidebar list
+        # as its episode listing -- when that marker is present.
         episodes = []
-        eps_container = re.search(
-            r'<div[^>]*class="[^"]*w-100 bg-main rounded my-4[^"]*"[^>]*>.*?جميع الحلقات.*?</div>.*?<div[^>]*class="[^"]*items[^"]*"[^>]*>(.*?)</div>',
-            html, re.S | re.I
-        )
-        if not eps_container:
-            eps_container = re.search(r'<div[^>]*id="eps"[^>]*>(.*?)</div>', html, re.S | re.I)
-    
-        if eps_container:
-            eps_html = eps_container.group(1)
-            for ep_match in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', eps_html, re.S | re.I):
+        is_series_overview = "/series/" in (final_url or url)
+        if is_series_overview:
+            for ep_match in re.finditer(
+                r'<a[^>]+href="([^"]+)"[^>]*>\s*<span>الحلقة</span>\s*<em>(\d+)</em>\s*</a>',
+                html, re.S | re.I
+            ):
                 ep_url = self._normalize_url(ep_match.group(1))
                 if not ep_url or ep_url == url or ep_url == final_url:
                     continue
-                ep_inner = ep_match.group(2)
-                ep_text = re.sub(r'<[^>]+>', '', ep_inner).strip()
-                ep_num_match = re.search(r'الحلقة\s*(\d+)', ep_text)
-                if ep_num_match:
-                    ep_title = "حلقة {}".format(ep_num_match.group(1))
-                else:
-                    num_match = re.search(r'\b(\d+)\b', ep_text)
-                    if num_match:
-                        ep_title = "حلقة {}".format(num_match.group(1))
-                    else:
-                        ep_title = ep_text or "حلقة"
+                ep_num = ep_match.group(2)
+                ep_title = "حلقة {}".format(ep_num)
                 if ep_url not in [e.get("url") for e in episodes]:
                     episodes.append({
                         "title": ep_title,
