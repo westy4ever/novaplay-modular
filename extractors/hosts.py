@@ -2377,6 +2377,96 @@ def resolve_vaplayer(url):
         return None
 
 
+# ─── MedMedia03 (OnlyFlix "Server 3") Resolver ──────────────────────────────
+# [NEW 2026-10-14] `balance.medmedia03.wiki/embed/movie/<tmdb_id>` (or an
+# analogous /embed/tv/<tmdb_id>/<season>/<episode> shape) is a VidSrc-clone
+# aggregator -- confirmed against a real capture of OnlyFlix's "Server 3"
+# tab for "The Uprising" (tmdb 977942). The iframe's own src redirects from
+# the load-balancer alias ("balance.medmedia03.wiki") to a numbered worker
+# subdomain (seen: "2.medmedia03.wiki") in the real capture -- fetch()'s own
+# redirect-following hands us the real subdomain via final_url, so there's
+# no guessing involved.
+#
+# Once on the real subdomain, the page's own JS queries
+# `<base>/embed-api/source/<provider>/movie/<id>` for each of several
+# backing providers and uses whichever one responds with a non-empty
+# "streams" array -- confirmed from a real capture's network log, which
+# shows 9 providers tried in this order (vidlove, vidrock, onetouchtv,
+# vidnest, streamflix, vidsrcpm, vaplayer, moviesapi, zxcstreams) with only
+# vaplayer and moviesapi returning real streams for this title (the rest
+# came back with an empty "streams" array and a diagnostic reason). Tried
+# in a working-likelihood order here rather than the page's own order.
+# Each hit's `streams[0]["url"]` is a path on medmedia03 itself (e.g.
+# "/embed-media/<ts>.<opaque>") that already proxies the real CDN
+# response -- playable directly once joined against the base, no further
+# unwrapping needed.
+_MEDMEDIA03_PROVIDERS = (
+    "vaplayer", "moviesapi", "vidsrcpm", "streamflix", "vidnest",
+    "onetouchtv", "vidrock", "vidlove", "zxcstreams",
+)
+
+
+def resolve_medmedia03(url):
+    """Resolver for balance.medmedia03.wiki / <n>.medmedia03.wiki embed pages."""
+    try:
+        log("resolve_medmedia03: Processing {}".format(url[:100]))
+
+        if '.m3u8' in url or '.mp4' in url:
+            return _correct_stream_url(url)
+
+        parsed = urlparse(url)
+        m = re.search(r'/embed/(movie|tv)/(\d+)(?:/(\d+)/(\d+))?', parsed.path)
+        if not m:
+            log("resolve_medmedia03: couldn't parse media id from {}".format(url))
+            return None
+        media_type, media_id, season, episode = m.groups()
+
+        html, final_url = fetch(url, referer="https://onlyflix.to/")
+        base_url = final_url or url
+        base_parsed = urlparse(base_url)
+        if "medmedia03.wiki" not in base_parsed.netloc:
+            # redirect target wasn't captured for some reason -- fall back
+            # to the original (load-balancer alias) host rather than fail.
+            base_parsed = parsed
+        base = "{}://{}".format(base_parsed.scheme or "https", base_parsed.netloc)
+
+        if season and episode:
+            suffix = "/tv/{}/{}/{}".format(media_id, season, episode)
+        else:
+            suffix = "/{}/{}".format(media_type, media_id)
+
+        for provider in _MEDMEDIA03_PROVIDERS:
+            api_url = base + "/embed-api/source/" + provider + suffix
+            body, _ = fetch(api_url, referer=base + "/")
+            if not body:
+                continue
+            try:
+                data = json.loads(body)
+            except Exception:
+                continue
+            streams = data.get("streams") or []
+            if not streams:
+                continue
+            # [PATCH] each stream entry carries its own "verified" flag (a
+            # real capture showed 1 verified + 2 unverified entries for the
+            # same provider, with two of the unverified ones failing
+            # upstream with HTTP 429) -- prefer a verified one over
+            # streams[0] when one exists, instead of trusting list order.
+            chosen = next((s for s in streams if s.get("verified")), streams[0])
+            stream_path = chosen.get("url")
+            if not stream_path:
+                continue
+            stream_url = urljoin(base + "/", stream_path)
+            log("resolve_medmedia03: provider '{}' -> {}".format(provider, stream_url[:100]))
+            return _correct_stream_url(stream_url)
+
+        log("resolve_medmedia03: no provider returned a usable stream")
+        return None
+    except Exception as e:
+        log("resolve_medmedia03 error: {}".format(e))
+        return None
+
+
 # ─── SuperFlix API Resolver ─────────────────────────────────────────────────
 
 def resolve_superflixapi(url):
@@ -3329,6 +3419,7 @@ HOST_RESOLVERS = {
     "shows.st":             resolve_shows_st,
     "vaplayer.ru":          resolve_vaplayer,
     "streamdata.vaplayer.ru": resolve_vaplayer,
+    "medmedia03.wiki":      resolve_medmedia03,
 
     # ─── SuperFlix and ZXC resolvers ───────────────────────────────────────
     "superflixapi.buzz": resolve_superflixapi,

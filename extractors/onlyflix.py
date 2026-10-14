@@ -128,6 +128,9 @@ class OnlyFlixExtractor(BaseExtractor):
         "audinifer", "hanerix", "vibuxer", "earnvids", "cloudwindow",
         "superflixapi", "zxcstream", "vidsrc", "vidcore",
         "vidfast", "cdnm.ink", "vidapi", "nontongo",
+        # [NEW 2026-10-14] "Server 3" on a real capture of "The Uprising" --
+        # balance.medmedia03.wiki/embed/movie/<id>, a VidSrc-clone aggregator.
+        "medmedia03",
     )
 
     # Confirmed server-list AJAX action (Network capture, 2026-09-24):
@@ -1238,6 +1241,7 @@ class OnlyFlixExtractor(BaseExtractor):
             # onlyflix server tabs (2026-09-24):
             ("vidfast", "VidFast"), ("cdnm.ink", "CDNM"),
             ("vidapi", "VidApi"), ("nontongo", "Nontongo"),
+            ("medmedia03", "MedMedia03"),  # [NEW 2026-10-14]
         )
         for frag, label in mapping:
             if frag in lowered:
