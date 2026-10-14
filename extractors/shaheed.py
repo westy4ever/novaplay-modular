@@ -173,6 +173,16 @@ class ShaheedExtractor(BaseExtractor):
         reference against the visible data-index buttons is kept anyway as a defensive, no-cost
         measure in case that ever becomes real, rather than trusting the array wholesale.
         """
+        # [PATCH SH2] "doodstream" and "m1xdrop" (the site's own obfuscated spelling of
+        # mixdrop) consistently show up as entries in the real `let servers = [...]` array
+        # (confirmed across multiple real watch-page captures, 2026-10-14). Both are known-
+        # unfixable dead ends here -- same as megamax's doodstream/mixdrop server choices
+        # elsewhere in this plugin -- so they're filtered out rather than offered as a
+        # server choice that never plays. Matched by substring so other obfuscated spellings
+        # of the same two host names (e.g. a differently-cased or hyphenated variant) are
+        # still caught.
+        _skip_server_names = ("doodstream", "mixdrop", "m1xdrop")
+
         servers = []
         match = re.search(r'let\s+servers\s*=\s*(\[.*?\]);', html, re.DOTALL | re.I)
         if match:
@@ -184,6 +194,9 @@ class ShaheedExtractor(BaseExtractor):
                         log("Shaheed: server array index {} has no matching visible button, skipping".format(idx))
                         continue
                     name = server.get("name") or "Server {}".format(idx + 1)
+                    if any(skip in name.lower() for skip in _skip_server_names):
+                        log("Shaheed: skipping known-unfixable server '{}'".format(name))
+                        continue
                     url = server.get("url")
                     if url:
                         servers.append({"name": name, "url": url, "type": "embed"})
