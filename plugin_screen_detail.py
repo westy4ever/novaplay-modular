@@ -187,8 +187,8 @@ class AdvancedArabicPlayerDetail(Screen):
         <widget name="source" position="525,243" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
         <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
 
-        <widget name="plot_title" position="525,465" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="plot" position="525,504" size="1320,150" font="Regular;27" foregroundColor="#F0F6FC" transparent="1" halign="block" valign="top" zPosition="4" />
+        <widget name="plot_title" position="525,355" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
+        <widget name="plot" position="525,394" size="1320,256" font="Regular;27" foregroundColor="#F0F6FC" transparent="1" halign="block" valign="top" zPosition="4" />
 
         <widget name="menu_box" position="45,652" size="1830,390" backgroundColor="#161B22" zPosition="2" />
         <widget name="section" position="75,663" size="1770,36" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="4" />
@@ -239,8 +239,8 @@ class AdvancedArabicPlayerDetail(Screen):
             ("menu", 60, 708),
         ), 0, 320, 3, 8),
         ("plot", (
-            ("plot_title", 525, 465),
-            ("plot", 525, 504),
+            ("plot_title", 525, 355),
+            ("plot", 525, 394),
         ), 220, 0, 4, 8),
     )
 
