@@ -2962,7 +2962,18 @@ def megamax_list_mirrors(url, referer=None):
         if cookie_m:
             xsrf = unquote(cookie_m.group(1))
 
-        _skip_drivers = ("rapidgator", "nitroflare")
+        # [PATCH MM3] vikingfile.com and vidhidevip.com (driver "earnvids")
+        # looked like they should resolve -- both already had a
+        # HOST_RESOLVERS entry and fetched real content fine in testing
+        # (646KB and 26KB real pages, no Cloudflare block) -- but every
+        # extraction path (specific resolver, generic fallback, iframe
+        # chain) came back empty every time. Confirmed directly by the
+        # user, 2026-10-14: on megamax's aggregator these two are
+        # download-link mirrors, not embeddable video players -- there is
+        # no stream to find on those pages, same as rapidgator/nitroflare
+        # just below. Skipping them here so the UI doesn't offer a
+        # "server" that can never produce a playable stream.
+        _skip_drivers = ("rapidgator", "nitroflare", "vikingfile", "earnvids")
         out = []
 
         for att in attachments:
