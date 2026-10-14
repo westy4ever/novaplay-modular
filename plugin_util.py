@@ -83,19 +83,27 @@ def _normalize_query(text):
 
 
 def _strip_arabic_from_english_title(title):
+    """Strip Arabic wrapper words -- site boilerplate meaning roughly
+    "Movie ... translated online" around an English name -- keeping just
+    the English title.
+
+    [FIX] This used to bail out and return the title UNTOUCHED whenever
+    Arabic characters made up >=30% of it -- meant to protect a genuinely
+    Arabic-native title from being destroyed, but a site's own wrapper
+    phrase alone (three Arabic words, a dozen-plus letters) is long
+    enough that any short English name (e.g. "Rolling Loud") pushes the
+    Arabic share past 30%, so the guard fired on exactly the case this
+    function exists to fix and the raw Arabic+English title got shown
+    as-is. Now it strips first and only falls back to the original when
+    nothing meaningful survives (a title with no real English name at
+    all), rather than refusing to even try based on a character count."""
     if not title:
-        return title
-    stripped = title.replace(" ", "")
-    if not stripped:
-        return title
-    ar_count = sum(1 for c in stripped if "\u0600" <= c <= "\u06ff")
-    if ar_count / len(stripped) >= 0.30:
         return title
     cleaned = re.sub(r"[\u0600-\u06ff]+", " ", title)
     cleaned = re.sub(r"[\s|\-–_]+$", "", cleaned)
     cleaned = re.sub(r"^[\s|\-–_]+", "", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" -|_")
-    return cleaned if cleaned.strip() else title
+    return cleaned if len(cleaned) >= 2 else title
 
 
 def _clean_title_for_tmdb(title):
