@@ -104,6 +104,23 @@ class SflixProExtractor(BaseExtractor):
     def _poster(self, path):
         return "https://image.tmdb.org/t/p/w342" + path if path else ""
 
+    @staticmethod
+    def _rating(r):
+        # [FIX] the site's own cards show TMDB's vote_average (e.g. "6.3");
+        # it's already in every TMDB response we fetch, so carry it on the
+        # item instead of making the home grid's fill_item_rating_async()
+        # fire a second TMDB lookup per poster just to recover it.
+        try:
+            v = float((r or {}).get("vote_average") or 0)
+        except (TypeError, ValueError):
+            return ""
+        return "{:.1f}".format(v) if v > 0 else ""
+
+    @staticmethod
+    def _genres(data):
+        return ", ".join(g.get("name", "") for g in ((data or {}).get("genres") or [])
+                         if isinstance(g, dict) and g.get("name"))
+
     # ─── Categories ───────────────────────────────────────────────────────
 
     def get_categories(self, mtype="movie"):
@@ -207,7 +224,8 @@ class SflixProExtractor(BaseExtractor):
                 "poster": self._poster(r.get("poster_path", "")),
                 "url": "sflix_{}_{}".format(item_type, r.get("id")),
                 "type": item_type,
-                "year": year
+                "year": year,
+                "rating": self._rating(r)
             })
 
         total_pages = data.get("total_pages", 1)
@@ -234,7 +252,8 @@ class SflixProExtractor(BaseExtractor):
                     "poster": self._poster(r.get("poster_path", "")),
                     "url": "sflix_{}_{}".format(item_type, r.get("id")),
                     "type": item_type,
-                    "year": year
+                    "year": year,
+                    "rating": self._rating(r)
                 })
         return items
 
@@ -281,7 +300,10 @@ class SflixProExtractor(BaseExtractor):
                 "poster": self._poster(data.get("poster_path", "")),
                 "servers": [],
                 "items": seasons,
-                "type": "series"
+                "type": "series",
+                "year": (data.get("first_air_date") or "")[:4],
+                "rating": self._rating(data),
+                "genres": self._genres(data)
             }
 
         elif url.startswith("sflix_season_"):
@@ -319,7 +341,9 @@ class SflixProExtractor(BaseExtractor):
                 "poster": self._poster(ep_data.get("still_path", "")),
                 "servers": servers,
                 "items": [],
-                "type": "episode"
+                "type": "episode",
+                "year": (ep_data.get("air_date") or "")[:4],
+                "rating": self._rating(ep_data)
             }
 
         elif url.startswith("sflix_movie_"):
@@ -332,7 +356,10 @@ class SflixProExtractor(BaseExtractor):
                 "poster": self._poster(movie_data.get("poster_path", "")),
                 "servers": servers,
                 "items": [],
-                "type": "movie"
+                "type": "movie",
+                "year": (movie_data.get("release_date") or "")[:4],
+                "rating": self._rating(movie_data),
+                "genres": self._genres(movie_data)
             }
 
         return None
