@@ -51,6 +51,21 @@ Site architecture, confirmed directly from the capture:
     fallback if vidnest.fun's own encryption scheme changes. A couple of
     the same public multi-embed providers vidsrc.py already relies on
     (tvembed.cc, VidSrc.win) round out the list as further fallbacks.
+  * [UPDATE 2] vidnest.fun actually proxies TWELVE backend providers this
+    same way, not just "catflix"/yflix -- a second, larger JS chunk the
+    user pulled (the movie-player component itself) contained the full
+    per-provider response-handling logic for all twelve, so
+    resolve_vidnest() in hosts.py now supports all of them via a
+    `?provider=<key>` query param appended to the vidnest.fun URL
+    (catflix is still the default with no param). Added here as extra
+    movie-only fallback servers -- movie-only because TV was only ever
+    evidenced (as an extrapolation, not a capture) for catflix; no TV
+    shape evidence exists for the other 11, so they're not offered for
+    TV. Unlike catflix, none of these 11 have been checked against a
+    real captured ciphertext (only the verified decrypt algorithm + the
+    verified response-handling JS) -- if one doesn't actually pan out on
+    a real device, it's a harmless extra entry in the server list, not a
+    regression of anything that worked before.
 """
 import re
 import urllib.parse
@@ -225,13 +240,28 @@ class CinebyExtractor(BaseExtractor):
                 {"name": "Server 4 (2Embed)", "url": "https://www.2embed.skin/embedtv/{}&s={}&e={}".format(tmdb_id, season, episode), "quality": "HD"},
                 {"name": "Server 5 (VidSrc.win)", "url": "https://vidsrc.win/watch/{}?s={}&e={}".format(tmdb_id, season, episode), "quality": "HD"},
             ]
-        return [
+        servers = [
             {"name": "Server 1 (Vidnest)", "url": "https://vidnest.fun/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 2 (MedMedia03)", "url": "https://balance.medmedia03.wiki/embed/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 3 (tvembed)", "url": "https://tvembed.cc/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 4 (2Embed)", "url": "https://www.2embed.skin/embed/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 5 (VidSrc.win)", "url": "https://vidsrc.win/watch/{}".format(tmdb_id), "quality": "HD"},
         ]
+        # Extra Vidnest-backed fallbacks (movie-only -- see module docstring
+        # "[UPDATE 2]"), one per remaining provider resolve_vidnest() now
+        # understands via ?provider=<key>. Not re-verified against a real
+        # device capture the way catflix (Server 1) was.
+        for i, (provider, label) in enumerate((
+            ("beta", "Beta"), ("gama", "Gama"), ("ophim", "Ophim"), ("lamda", "Lamda"),
+            ("prime", "Prime"), ("zeta", "Zeta"), ("sigma", "Sigma"), ("hexa", "Hexa"),
+            ("alfa", "Alfa"), ("delta", "Delta (Hindi)"), ("filxer", "Filxer"),
+        ), start=6):
+            servers.append({
+                "name": "Server {} (Vidnest-{})".format(i, label),
+                "url": "https://vidnest.fun/movie/{}?provider={}".format(tmdb_id, provider),
+                "quality": "HD",
+            })
+        return servers
 
     # ─── Detail pages ─────────────────────────────────────────────────────
 

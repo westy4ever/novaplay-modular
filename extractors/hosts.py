@@ -1923,17 +1923,140 @@ def resolve_n1mwq(url, referer=None):
 # response, byte for byte.
 #
 # vidnest proxies TWELVE providers this way (all through new.vidnest.fun,
-# all through the same decrypt function) -- "catflix" (-> /yflix/movie)
-# is the default server and the one actually used by Cineby, so that's
-# the only one implemented here; the others (filxer/rogflix, gama/vidzee,
-# lamda/ophim, beta/flixhq, alfa/onehd, prime/rpmvid, zeta/
-# nextgencloudfabric, ophim/klikxxi, sigma/hollymoviehd, hexa/vidlink,
-# delta/allmovies) have each their own response shape (catflix/beta/hexa
-# return a single url, gama/lamda/zeta/prime return a "streams" array) and
-# weren't needed for the one path actually evidenced, so they're left for
-# a future resolver if a site using one of them shows up.
+# all through the same decrypt function). "catflix" (-> /yflix/movie) is
+# the default server vidnest.fun's own UI opens with and the one Cineby's
+# embed actually uses, so it's the primary/default path. The other 11 were
+# originally left unimplemented ("future resolver if a site needs one") --
+# a second, larger JS bundle the user pulled from vidnest.fun (the actual
+# movie-player component, not just the crypto helper) turned out to
+# contain the FULL per-provider response-handling logic for all twelve,
+# so they're implemented below too, each matched against that real code:
+#
+#   catflix/filxer  -> {"url": ...}                         (direct)
+#   beta            -> {"status":"success","url":...}       (direct)
+#   ophim           -> {"sources":[{"url","quality","type"}]}
+#   gama/lamda      -> {"streams":[{"url","quality"/"language","type"}]}
+#   delta           -> {"streams":[...]}, keep only language=="hindi"
+#   prime           -> {"streams":[{"url","type"}]}, headers forced to
+#                      {Referer/Origin: https://vidora.stream/} (static,
+#                      from the JS -- not per-response)
+#   zeta/sigma      -> {"streams":[{"url","headers":{...}}]}; sigma also
+#                      filters to type=="hls" and language=="GS-25"
+#   hexa            -> {"data":{"stream":{"playlist":...}},"headers":{...}}
+#   alfa            -> {"status":"success","streams":[{"url","language"}]},
+#                      keep only language in (original, multi)
+#
+# IMPORTANT caveat: only catflix was ever seen with a REAL captured
+# ciphertext/plaintext pair (verified byte-for-byte earlier). The other 11
+# are implemented straight from the verified decrypt algorithm + this
+# verified response-handling JS, but have NOT been exercised against a
+# real device capture -- if one behaves differently in practice, a device
+# log will show it and the fix is narrow (this function only).
+# The real browser additionally proxies prime/zeta/sigma/hexa through
+# rotating workers.dev URLs purely to dodge browser CORS and inject
+# per-request headers client-side -- our plugin's player isn't a browser
+# and already has a working "<url>|Header=Value&..." convention (used by
+# catflix today), so those are passed straight through with their real
+# headers instead of reimplementing that proxy hop.
 _VIDNEST_BASE = "https://new.vidnest.fun"
 _VIDNEST_SECRET = "F9k2mR8vL4qP7wY1zN0fG3bS6tH5jC8d_x4R7vN2mP9qL1"
+
+# provider key -> (new.vidnest.fun path prefix, response "kind")
+_VIDNEST_PROVIDERS = {
+    "catflix": ("/yflix/movie", "catflix"),
+    "filxer":  ("/rogflix/movie", "filxer"),
+    "gama":    ("/vidzee/movie", "gama"),
+    "lamda":   ("/ophim/movie", "lamda"),
+    "beta":    ("/flixhq/movie", "beta"),
+    "alfa":    ("/onehd/movie", "alfa"),
+    "prime":   ("/rpmvid/movie", "prime"),
+    "zeta":    ("/nextgencloudfabric/movie", "zeta"),
+    "ophim":   ("/klikxxi/movie", "ophim"),
+    "sigma":   ("/hollymoviehd/movie", "sigma"),
+    "hexa":    ("/vidlink/movie", "hexa"),
+    "delta":   ("/allmovies/movie", "delta"),
+}
+
+
+def _vidnest_headers_suffix(stream_url, headers):
+    if headers:
+        ref = headers.get("Referer") or headers.get("referer")
+        if ref:
+            return "{}|Referer={}".format(stream_url, ref)
+    return stream_url
+
+
+def _vidnest_pick_from_decrypted(kind, decrypted):
+    """Returns (stream_url, headers_dict) or (None, None) if this
+    provider's decrypted payload doesn't have a usable stream, per the
+    real response-handling logic for each `kind` (see module comment)."""
+    if not isinstance(decrypted, dict):
+        return None, None
+
+    if kind in ("catflix", "filxer"):
+        # catflix's decrypted payload carries its own per-response headers
+        # (confirmed from the real captured example: {"headers":{"Referer":
+        # "https://pwcloud.animanga.fun/"}, "url": "...master.m3u8"});
+        # filxer's JS only ever reads `.url`, no headers field used.
+        return decrypted.get("url"), (decrypted.get("headers") if kind == "catflix" else None)
+
+    if kind == "beta":
+        if decrypted.get("status") != "success" or not decrypted.get("url"):
+            return None, None
+        return decrypted.get("url"), None
+
+    if kind == "ophim":
+        for s in (decrypted.get("sources") or []):
+            if isinstance(s, dict) and s.get("url"):
+                return s["url"], None
+        return None, None
+
+    if kind in ("gama", "lamda"):
+        for s in (decrypted.get("streams") or []):
+            if isinstance(s, dict) and s.get("url"):
+                return s["url"], None
+        return None, None
+
+    if kind == "delta":
+        for s in (decrypted.get("streams") or []):
+            if isinstance(s, dict) and s.get("url") and str(s.get("language", "")).lower() == "hindi":
+                return s["url"], None
+        return None, None
+
+    if kind == "prime":
+        for s in (decrypted.get("streams") or []):
+            if isinstance(s, dict) and s.get("url"):
+                return s["url"], {"Referer": "https://vidora.stream/", "Origin": "https://vidora.stream"}
+        return None, None
+
+    if kind == "zeta":
+        for s in (decrypted.get("streams") or []):
+            if isinstance(s, dict) and s.get("url"):
+                return s["url"], (s.get("headers") or None)
+        return None, None
+
+    if kind == "sigma":
+        for s in (decrypted.get("streams") or []):
+            if isinstance(s, dict) and s.get("url") and s.get("type") == "hls" and s.get("language") == "GS-25":
+                return s["url"], (s.get("headers") or None)
+        return None, None
+
+    if kind == "hexa":
+        stream = ((decrypted.get("data") or {}).get("stream") or {})
+        playlist = stream.get("playlist")
+        if not playlist:
+            return None, None
+        return playlist, (decrypted.get("headers") or None)
+
+    if kind == "alfa":
+        if decrypted.get("status") != "success":
+            return None, None
+        for s in (decrypted.get("streams") or []):
+            if isinstance(s, dict) and s.get("url") and str(s.get("language", "")).lower() in ("original", "multi"):
+                return s["url"], None
+        return None, None
+
+    return None, None
 
 
 def _vidnest_nonce():
@@ -1963,19 +2086,33 @@ def _vidnest_decrypt(d, n):
 
 def resolve_vidnest(url, referer=None):
     try:
-        m = re.search(r'/(movie|tv)/(\d+)(?:/(\d+)/(\d+))?', urlparse(url).path)
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        provider = (qs.get("provider") or ["catflix"])[0].strip().lower()
+        if provider not in _VIDNEST_PROVIDERS:
+            log("resolve_vidnest: unknown provider '{}', falling back to catflix".format(provider))
+            provider = "catflix"
+        backend_path, kind = _VIDNEST_PROVIDERS[provider]
+
+        m = re.search(r'/(movie|tv)/(\d+)(?:/(\d+)/(\d+))?', parsed.path)
         if not m:
             log("resolve_vidnest: couldn't parse media id from {}".format(url))
             return None
         media_type, tmdb_id, season, episode = m.groups()
         if media_type == "tv" and season and episode:
+            if provider != "catflix":
+                # [NOTE] TV was only ever evidenced (as an extrapolation,
+                # not a real capture) for catflix/yflix; no evidence at all
+                # for the other 11 providers' TV path/shape, so don't guess.
+                log("resolve_vidnest: TV not supported for provider '{}' (unconfirmed)".format(provider))
+                return None
             # [NOTE] unconfirmed -- no TV capture was available, only the
             # movie path. Mirrors the movie shape (the one piece of real
             # evidence) on the reasonable assumption vidnest keeps the same
             # /<season>/<episode> suffix convention its own site URLs use.
             api_path = "/yflix/tv/{}/{}/{}".format(tmdb_id, season, episode)
         else:
-            api_path = "/yflix/movie/{}".format(tmdb_id)
+            api_path = "{}/{}".format(backend_path, tmdb_id)
 
         nonce = _vidnest_nonce()
         api_url = "{}{}?_n={}".format(_VIDNEST_BASE, api_path, nonce)
@@ -1994,16 +2131,13 @@ def resolve_vidnest(url, referer=None):
             return None
 
         decrypted = _vidnest_decrypt(data["d"], data.get("n") or nonce)
-        if not isinstance(decrypted, dict) or not decrypted.get("url"):
-            log("resolve_vidnest: decrypted payload has no usable url")
+        stream_url, headers = _vidnest_pick_from_decrypted(kind, decrypted)
+        if not stream_url:
+            log("resolve_vidnest: provider '{}' decrypted payload has no usable stream".format(provider))
             return None
 
-        stream_url = _correct_stream_url(decrypted["url"])
-        headers = decrypted.get("headers") or {}
-        stream_referer = headers.get("Referer")
-        if stream_referer:
-            return "{}|Referer={}".format(stream_url, stream_referer)
-        return stream_url
+        stream_url = _correct_stream_url(stream_url)
+        return _vidnest_headers_suffix(stream_url, headers)
     except Exception as e:
         log("resolve_vidnest: error for {}: {}".format(url, e))
         return None
