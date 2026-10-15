@@ -2531,6 +2531,13 @@ def resolve_viduki(url):
         return None
 
 
+# Confirmed static constant from moviesapi.to's own JS bundle (see
+# resolve_moviesapi's docstring "[UPDATE 2]") -- not a secret, not
+# per-session, just a fixed value every real client sends as
+# x-player-key on moviesapi.to's own /api/vidora/v1/* calls.
+_MOVIESAPI_PLAYER_KEY = "3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13"
+
+
 def resolve_moviesapi(url):
     """Resolver for moviesapi.to and netrocdn.site URLs.
 
@@ -2551,18 +2558,20 @@ def resolve_moviesapi(url):
     what's already embedded in it (t=/s=/e=/srv= query params the server
     hands back, usable as-is).
 
-    The one wrinkle: the real request carries a custom `x-player-key`
-    header -- a 64-hex-char (32-byte) token. It was NOT the same value
-    across the two different page loads captured (one for the movie, one
-    for a TV episode), and nothing in the captured responses hands it
-    back to the page, so it's generated client-side per page view, not
-    server-issued. There's no evidence here of it being checked against
-    anything else (no matching cookie, no signature tied to the TMDB id),
-    so the best-evidenced approach is to synthesize a same-shaped random
-    token rather than guess a fixed/hardcoded one -- if moviesapi.to
-    actually validates it more strictly than "present and correctly
-    shaped", a device log will show a specific auth-style failure here
-    and that's narrow to fix.
+    [UPDATE 2] The x-player-key question is resolved: it looked like a
+    per-page-view random token (two different captured page loads used
+    two different-looking 64-hex-char values), but the user pulled
+    moviesapi.to's own JS bundle and it's actually a STATIC constant
+    baked into the bundle, not generated at all:
+        var fz = `3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13`
+    and every one of moviesapi.to's own /api/vidora/v1/* calls (movie,
+    tv, subtitles, ice) passes this exact same `fz` constant as the
+    header value -- confirmed by both captured sessions (movie page, tv
+    page) using the identical value for every one of their own calls.
+    (The *other* differently-looking key seen in the earlier capture
+    belonged to a completely different host, cdn.vidspark.to, which
+    isn't used by this resolver.) So this is now a real, confirmed
+    constant, not a guess -- no more need to synthesize anything.
     """
     try:
         log("resolve_moviesapi: Processing {}".format(url[:100]))
@@ -2580,11 +2589,10 @@ def resolve_moviesapi(url):
                 api_path = "/api/vidora/v1/movie/{}".format(tmdb_id)
                 page_url = "https://moviesapi.to/movie/{}".format(tmdb_id)
 
-            player_key = "".join("{:02x}".format(random.getrandbits(8)) for _ in range(32))
             data = fetch_json(
                 "https://moviesapi.to{}".format(api_path),
                 referer=page_url,
-                extra_headers={"x-player-key": player_key, "Accept": "*/*"},
+                extra_headers={"x-player-key": _MOVIESAPI_PLAYER_KEY, "Accept": "*/*"},
             )
             if data and data.get("result") and data.get("sources"):
                 for src in data["sources"]:
