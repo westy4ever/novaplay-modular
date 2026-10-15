@@ -252,7 +252,21 @@ class EgyDeadExtractor(BaseExtractor):
         if not base:
             return False
 
-        test_url = urljoin(base, "serie/")
+        # [FIX] a real device log showed EVERY single mirror in DOMAINS --
+        # all 20 of them, including the one the code falls back to anyway
+        # at the end -- failing this probe on "/serie/" with 0 movieItem
+        # markers, every time, taking the full loop from a few seconds
+        # (the earlier fix's intent) to 3.5+ minutes. "/serie/" with no
+        # slug is apparently no longer a real listing page on this site at
+        # all. Confirmed directly in the same log: once the loop gives up
+        # and falls back to the hardcoded MAIN_URL, the very next real
+        # request -- /category/english-movies/ -- returns a real 49-item
+        # page using the exact same "movieItem" <li> marker this probe
+        # already looks for (egydead.py's own category parser matches on
+        # it). Testing that path instead means a genuinely working domain
+        # passes on the very first probe instead of this check rejecting
+        # every domain including the eventual fallback.
+        test_url = urljoin(base, "category/english-movies/")
         try:
             html, final = fetch(test_url, referer=base,
                                 extra_headers=_PROBE_HEADERS)
@@ -267,13 +281,13 @@ class EgyDeadExtractor(BaseExtractor):
             log("EgyDead: deep-content probe blocked for {}".format(base))
             return False
 
-        # A real /serie/ listing contains many movieItem <li> entries.
+        # A real category listing contains many movieItem <li> entries.
         # A landing page does not.
         n_items = html.count("movieItem")
         if n_items < 10:
             log("EgyDead: {} responded but only {} movieItem markers on "
-                "/serie/ — likely a landing, not a content mirror".format(
-                    base, n_items))
+                "/category/english-movies/ — likely a landing, not a "
+                "content mirror".format(base, n_items))
             return False
 
         return True
