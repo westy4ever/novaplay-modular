@@ -614,21 +614,43 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         # failure (unlike a timeout/network blip), so retry
                         # the SAME attempt immediately with the next
                         # candidate rather than let the outer retry loop
-                        # sleep 1.5s and burn 2 more attempts on the exact
+                        # sleep 1.5s and burn more attempts on the exact
                         # same doomed call.
+                        #
+                        # [FIX] a second real device log showed this single-
+                        # substitution retry wasn't enough: on a build where
+                        # every single candidate is rejected (6 for 6), each
+                        # outer "attempt" only burned through ONE extra
+                        # candidate before bubbling out to the outer retry
+                        # loop's 1.5s sleep, so draining the whole candidate
+                        # list cost 2 wasted sleeps (~3s) spread across 3
+                        # outer attempts before falling back to plain
+                        # urllib -- every single time the process started.
+                        # Loop through every remaining candidate (and finally
+                        # None) within this same attempt instead, so the
+                        # cascade converges in one shot with zero extra
+                        # sleeps, no matter how many candidates are dead.
                         if _imp and "not supported" in str(e).lower() and "imperson" in str(e).lower():
                             _mark_cffi_impersonate_broken(_imp)
-                            _next_imp = _get_cffi_impersonate()
-                            if not _next_imp:
-                                # last candidate just got marked broken too --
-                                # this call is about to drop impersonation
-                                # entirely, so it needs the same explicit,
-                                # decodable Accept-Encoding as the no-
-                                # impersonation path above, or it hits the
-                                # same "(61) Unrecognized content encoding
-                                # type" failure on this very attempt.
-                                cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
-                            r = _do_cffi_request(_next_imp)
+                            while True:
+                                _next_imp = _get_cffi_impersonate()
+                                if not _next_imp:
+                                    # cascade exhausted -- dropping
+                                    # impersonation entirely needs the same
+                                    # explicit, decodable Accept-Encoding as
+                                    # the no-impersonation path above, or it
+                                    # hits the same "(61) Unrecognized
+                                    # content encoding type" failure on this
+                                    # very attempt.
+                                    cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
+                                try:
+                                    r = _do_cffi_request(_next_imp)
+                                    break
+                                except Exception as e2:
+                                    if _next_imp and "not supported" in str(e2).lower() and "imperson" in str(e2).lower():
+                                        _mark_cffi_impersonate_broken(_next_imp)
+                                        continue
+                                    raise
                         else:
                             raise
 
