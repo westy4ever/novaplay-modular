@@ -208,6 +208,17 @@ class CinebyExtractor(BaseExtractor):
 
         total_pages = data.get("total_pages", 1)
         current_page = data.get("page", page)
+        if action == "trending" and current_page == 1:
+            # [TOP 10] mirrors the site's own "TOP 01".."TOP 10" poster
+            # badges on its trending row: TMDB's trending endpoint returns
+            # titles in rank order, so the rank is just the position on
+            # page 1. Rendered through the home grid's existing site-label
+            # chip (item["label"], top-left under the year badge), so no
+            # skin/widget changes are needed. "rank" is kept as a plain int
+            # for anything that wants it later.
+            for _i, _it in enumerate(items[:10], start=1):
+                _it["rank"] = _i
+                _it["label"] = "TOP {:02d}".format(_i)
         if current_page < total_pages:
             items.append({
                 "title": "➡️ Page {} (Next)".format(current_page + 1),
