@@ -1979,11 +1979,30 @@ _VIDNEST_PROVIDERS = {
 
 
 def _vidnest_headers_suffix(stream_url, headers):
-    if headers:
-        ref = headers.get("Referer") or headers.get("referer")
-        if ref:
-            return "{}|Referer={}".format(stream_url, ref)
-    return stream_url
+    # [FIX] previously forwarded ONLY Referer and silently dropped every
+    # other header -- e.g. the Origin that "prime" (vidora.stream) needs,
+    # and whatever per-stream headers zeta/sigma/hexa hand back. Both the
+    # player (_build_remote_play_candidates) and the proxy accept any
+    # number of "Key=Value" pairs joined with "&" after the pipe, so pass
+    # them all through. Referer first, to keep the old URL shape for the
+    # common catflix case.
+    if not isinstance(headers, dict) or not headers:
+        return stream_url
+    parts = []
+    seen = set()
+    ordered = sorted(headers.items(), key=lambda kv: str(kv[0]).lower() != "referer")
+    for k, v in ordered:
+        k = str(k or "").strip()
+        if not k or v is None or str(v).strip() == "":
+            continue
+        canon = "-".join(w[:1].upper() + w[1:].lower() for w in k.split("-"))
+        if canon.lower() in seen:
+            continue
+        seen.add(canon.lower())
+        parts.append("{}={}".format(canon, str(v).strip()))
+    if not parts:
+        return stream_url
+    return "{}|{}".format(stream_url, "&".join(parts))
 
 
 def _vidnest_pick_from_decrypted(kind, decrypted):
