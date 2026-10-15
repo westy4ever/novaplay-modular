@@ -497,21 +497,14 @@ class Shahid4uSolarExtractor(BaseExtractor):
                     else:
                         name = "سيرفر"
                     
-                    from .base import extract_stream_all
-                    variants = []        # [PATCH 73] resolved lazily on play
-                    if variants:
-                        for stream_url, quality in variants:
-                            servers.append({
-                                "name": f"{name} - {quality}",
-                                "url": stream_url,
-                                "type": "direct" if stream_url.endswith(('.m3u8', '.mp4')) else "embed"
-                            })
-                    else:
-                        servers.append({
-                            "name": name,
-                            "url": server_url,
-                            "type": "embed"
-                        })
+                    # [PATCH 73] streams are resolved lazily on play, so
+                    # the server is listed as-is (was a dead `if variants:`
+                    # branch around an always-empty list).
+                    servers.append({
+                        "name": name,
+                        "url": server_url,
+                        "type": "embed"
+                    })
                 
                 result["servers"] = servers
             
@@ -528,21 +521,12 @@ class Shahid4uSolarExtractor(BaseExtractor):
                     if any(x in src.lower() for x in skip_domains):
                         continue
                     
-                    from .base import extract_stream_all
-                    variants = []        # [PATCH 73]
-                    if variants:
-                        for stream_url, quality in variants:
-                            servers.append({
-                                "name": f"Embed Player - {quality}",
-                                "url": stream_url,
-                                "type": "direct" if stream_url.endswith(('.m3u8', '.mp4')) else "embed"
-                            })
-                    else:
-                        servers.append({
-                            "name": "Embed Player",
-                            "url": src,
-                            "type": "iframe"
-                        })
+                    # [PATCH 73] resolved lazily on play (see above).
+                    servers.append({
+                        "name": "Embed Player",
+                        "url": src,
+                        "type": "iframe"
+                    })
                 
                 result["servers"] = servers
     
