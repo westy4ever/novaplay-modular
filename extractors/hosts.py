@@ -2732,6 +2732,95 @@ def resolve_vaplayer(url):
         return None
 
 
+
+# ─── VaPlayer stream-data API (nextgencloudfabric.com / vidsrc-embed.ru) ─────
+# [NEW 2026-10-15] Confirmed from a real Stream Recorder Pro capture of SFlix's
+# "VidSrc-Embed" server (vidsrc-embed.ru/embed/movie/1153576), which loads the
+# nextgencloudfabric.com/embed player. That player page sits behind a Cloudflare
+# Turnstile check (embed/turnstile-verify.php), so scraping its HTML can't work
+# -- but its own player.min.js gets the stream list from ONE plain JSON API,
+# needing nothing but the TMDB id:
+#     API = 'https://streamdata.vaplayer.ru/api.php'
+#     ?tmdb=<id>&type=movie            (or &type=tv&season=<s>&episode=<e>)
+# fetched with credentials 'omit' and no special headers. Captured reply:
+#     {"status_code":"200","data":{"title":...,"stream_urls":["https://...
+#      /pl/H4sI.../master.m3u8", ...]}, ...}
+# The page's vsdec.js can also decrypt an ENCRYPTED form of stream_urls (a
+# string plus a "vp"/"vs" field, decrypted by a WebAssembly module). The
+# capture returned the plain list; if the encrypted form ever shows up, this
+# logs it clearly and returns None (no WASM runtime on the box).
+# Calling the API directly also sidesteps vidsrc-embed.ru itself, which
+# refused connections from the box (device log, 2026-10-15).
+_VAPLAYER_API = "https://streamdata.vaplayer.ru/api.php"
+_VAPLAYER_PLAYER_ORIGIN = "https://nextgencloudfabric.com"
+
+
+def _parse_tmdb_media(url):
+    """(media_type, tmdb_id, season, episode) from embed-style URLs:
+    /embed/movie/<id>, /movie/<id>, /embed/tv/<id>/<s>/<e>, /embed/tv/<id>/<s>-<e>,
+    or ?season=&episode= query params. Returns None if no TMDB id is found."""
+    p = urlparse(url)
+    m = re.search(r'/(movie|tv)/(\d+)(?:/(\d+)(?:[/-](\d+))?)?', p.path)
+    if not m:
+        return None
+    media_type, tmdb_id, season, episode = m.groups()
+    if media_type == "tv" and not (season and episode):
+        q = parse_qs(p.query)
+        season = (q.get("season") or q.get("s") or [None])[0]
+        episode = (q.get("episode") or q.get("e") or [None])[0]
+    return media_type, tmdb_id, season, episode
+
+
+def resolve_vaplayer_api(url, referer=None):
+    try:
+        parsed = _parse_tmdb_media(url)
+        if not parsed:
+            log("resolve_vaplayer_api: no TMDB id in {}".format(url[:100]))
+            return None
+        media_type, tmdb_id, season, episode = parsed
+        api_url = "{}?tmdb={}&type={}".format(_VAPLAYER_API, tmdb_id, media_type)
+        if media_type == "tv":
+            if not (season and episode):
+                log("resolve_vaplayer_api: TV URL without season/episode: {}".format(url[:100]))
+                return None
+            api_url += "&season={}&episode={}".format(season, episode)
+
+        data = fetch_json(api_url, referer=_VAPLAYER_PLAYER_ORIGIN + "/",
+                          extra_headers={"Origin": _VAPLAYER_PLAYER_ORIGIN, "Accept": "*/*"})
+        if not isinstance(data, dict):
+            log("resolve_vaplayer_api: no JSON from {}".format(api_url))
+            return None
+        streams = (data.get("data") or {}).get("stream_urls")
+        if isinstance(streams, str):
+            log("resolve_vaplayer_api: stream_urls is ENCRYPTED (vp/vs={}) -- "
+                "needs the site's WASM decryptor, not supported".format(
+                    data.get("vp") or data.get("vs")))
+            return None
+        if not isinstance(streams, list) or not streams:
+            log("resolve_vaplayer_api: no stream_urls (status_code={})".format(data.get("status_code")))
+            return None
+        for stream_url in streams:
+            if isinstance(stream_url, str) and stream_url.startswith("http"):
+                stream_url = _correct_stream_url(stream_url.replace("\\/", "/"))
+                log("resolve_vaplayer_api: SUCCESS ({} of {}): {}".format(
+                    streams.index(stream_url) + 1 if stream_url in streams else 1,
+                    len(streams), stream_url[:100]))
+                # the browser played this from the nextgencloudfabric.com player page
+                return _vidnest_headers_suffix(stream_url, {
+                    "Referer": _VAPLAYER_PLAYER_ORIGIN + "/",
+                    "Origin": _VAPLAYER_PLAYER_ORIGIN,
+                })
+        return None
+    except Exception as e:
+        log("resolve_vaplayer_api error for {}: {}".format(url[:100], e))
+        return None
+
+
+def resolve_nextgencloudfabric(url, referer=None):
+    """API first (works past the Turnstile gate); old HTML scrape as fallback."""
+    return resolve_vaplayer_api(url) or resolve_scalablecontentengine(url)
+
+
 # ─── MedMedia03 (OnlyFlix "Server 3") Resolver ──────────────────────────────
 # [NEW 2026-10-14] `balance.medmedia03.wiki/embed/movie/<tmdb_id>` (or an
 # analogous /embed/tv/<tmdb_id>/<season>/<episode> shape) is a VidSrc-clone
@@ -3766,7 +3855,9 @@ HOST_RESOLVERS = {
     "xpass.top":            resolve_xpass,
     "1x2.space":            resolve_xpass,
     "scalablecontentengine.site": resolve_scalablecontentengine,
-    "nextgencloudfabric.com": resolve_scalablecontentengine,
+    "nextgencloudfabric.com": resolve_nextgencloudfabric,
+    # [NEW] SFlix "VidSrc-Embed": skip the (box-blocked) host, go straight to the API
+    "vidsrc-embed.ru":    resolve_vaplayer_api,
     "cloudorchestranova.com": resolve_cloudorchestra,
     "panoplypalaver.site":  resolve_cloudorchestra,
     "viduki.net":           resolve_viduki,
