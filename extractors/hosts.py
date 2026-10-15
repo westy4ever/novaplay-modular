@@ -2123,7 +2123,16 @@ def resolve_vidnest(url, referer=None):
         try:
             data = json.loads(body)
         except Exception:
-            log("resolve_vidnest: non-JSON response for {}".format(api_url))
+            # [NOTE] confirmed real-device: hexa (vidlink) and alfa (onehd)
+            # both hit this on a real run even after the automatic 502
+            # retry already succeeded (curl_cffi OK) -- the upstream
+            # backend itself returned something that isn't JSON (an error
+            # page, a challenge page, etc.), not a shape our decrypt logic
+            # misunderstood. Log a short preview so a future failure like
+            # this is diagnosable from the log alone instead of just
+            # "non-JSON response".
+            preview = body[:200].replace("\n", " ") if isinstance(body, str) else repr(body)[:200]
+            log("resolve_vidnest: non-JSON response for {} -- body preview: {}".format(api_url, preview))
             return None
 
         if not (data and data.get("v") == 2 and data.get("d")):

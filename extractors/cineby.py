@@ -221,16 +221,26 @@ class CinebyExtractor(BaseExtractor):
     def _servers_for(self, tmdb_id, season=None, episode=None):
         """Build the server list for a given TMDB id.
 
-        Server 1 is the real embed Cineby itself uses (vidnest.fun,
-        confirmed via the capture) -- left in even though its own
-        encrypted resolution isn't implemented, in case a future
-        resolver covers it. Server 2 (medmedia03) is the one most
-        likely to actually produce a stream right now: same TMDB-id
-        addressing, a provider literally named "vidnest" among its
-        options, and an already-confirmed-working resolver in this
-        codebase (hosts.py resolve_medmedia03, proven via OnlyFlix).
-        Servers 3-5 are the same public multi-embed providers vidsrc.py
-        already relies on successfully, as further fallbacks.
+        Server 1 is the real embed Cineby itself uses (vidnest.fun /
+        catflix). For movies the rest of the Vidnest-backed fallbacks are
+        ordered by a real end-to-end device test of all 12 providers on
+        this exact TMDB id (969681, "Spider-Man: Brand New Day"):
+          - zeta, prime, delta, beta, lamda: resolver succeeded AND the
+            device actually confirmed playback -- ordered first as the
+            fallbacks most likely to work.
+          - sigma, filxer, gama, ophim: resolver succeeded (a real stream
+            URL came back) but the device never got a "Play confirmed"
+            for any of them that run -- kept, lower priority, since a
+            resolved-but-unplayed stream can still be a transient/dead
+            CDN rather than a permanent problem.
+          - hexa, alfa: the resolver itself failed on that run (new.
+            vidnest.fun's vidlink/onehd backends returned a non-JSON
+            response even after the automatic retry -- an upstream outage,
+            not a decrypt-logic bug) -- kept last since they currently
+            don't work at all.
+        MedMedia03/tvembed/2Embed/VidSrc.win (public multi-embed, not
+        Vidnest) sit after the confirmed-playable Vidnest servers as
+        independent fallbacks if Vidnest itself has a bad day.
         """
         if season and episode:
             return [
@@ -241,26 +251,39 @@ class CinebyExtractor(BaseExtractor):
                 {"name": "Server 5 (VidSrc.win)", "url": "https://vidsrc.win/watch/{}?s={}&e={}".format(tmdb_id, season, episode), "quality": "HD"},
             ]
         servers = [
-            {"name": "Server 1 (Vidnest)", "url": "https://vidnest.fun/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 2 (MedMedia03)", "url": "https://balance.medmedia03.wiki/embed/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 3 (tvembed)", "url": "https://tvembed.cc/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 4 (2Embed)", "url": "https://www.2embed.skin/embed/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 5 (VidSrc.win)", "url": "https://vidsrc.win/watch/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "Vidnest", "url": "https://vidnest.fun/movie/{}".format(tmdb_id), "quality": "HD"},
         ]
-        # Extra Vidnest-backed fallbacks (movie-only -- see module docstring
-        # "[UPDATE 2]"), one per remaining provider resolve_vidnest() now
-        # understands via ?provider=<key>. Not re-verified against a real
-        # device capture the way catflix (Server 1) was.
-        for i, (provider, label) in enumerate((
-            ("beta", "Beta"), ("gama", "Gama"), ("ophim", "Ophim"), ("lamda", "Lamda"),
-            ("prime", "Prime"), ("zeta", "Zeta"), ("sigma", "Sigma"), ("hexa", "Hexa"),
-            ("alfa", "Alfa"), ("delta", "Delta (Hindi)"), ("filxer", "Filxer"),
-        ), start=6):
+        # Vidnest-backed fallbacks (movie-only -- TV is unconfirmed for
+        # every provider except catflix above), ordered by the real
+        # device-test results documented in the docstring.
+        for provider, label in (
+            ("zeta", "Zeta"), ("prime", "Prime"), ("delta", "Delta (Hindi)"),
+            ("beta", "Beta"), ("lamda", "Lamda"),
+            ("sigma", "Sigma"), ("filxer", "Filxer"), ("gama", "Gama"), ("ophim", "Ophim"),
+        ):
             servers.append({
-                "name": "Server {} (Vidnest-{})".format(i, label),
+                "name": "Vidnest-{}".format(label),
                 "url": "https://vidnest.fun/movie/{}?provider={}".format(tmdb_id, provider),
                 "quality": "HD",
             })
+        servers.extend([
+            {"name": "MedMedia03", "url": "https://balance.medmedia03.wiki/embed/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "tvembed", "url": "https://tvembed.cc/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "2Embed", "url": "https://www.2embed.skin/embed/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "VidSrc.win", "url": "https://vidsrc.win/watch/{}".format(tmdb_id), "quality": "HD"},
+        ])
+        # Currently broken on the real backend (non-JSON response from
+        # new.vidnest.fun even after retry) -- kept at the very end so
+        # they're only reached if everything else fails, in case the
+        # upstream outage is transient.
+        for provider, label in (("hexa", "Hexa"), ("alfa", "Alfa")):
+            servers.append({
+                "name": "Vidnest-{}".format(label),
+                "url": "https://vidnest.fun/movie/{}?provider={}".format(tmdb_id, provider),
+                "quality": "HD",
+            })
+        for i, s in enumerate(servers, start=1):
+            s["name"] = "Server {} ({})".format(i, s["name"])
         return servers
 
     # ─── Detail pages ─────────────────────────────────────────────────────
