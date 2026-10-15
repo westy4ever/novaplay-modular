@@ -123,6 +123,7 @@ from .aflaam import AflaamExtractor
 from .onlyflix import OnlyFlixExtractor
 from .fivetv import FivetvExtractor
 from .cineby import CinebyExtractor
+from .sflix_pro import SflixProExtractor
 
 # Site registry: maps site names to extractor classes.
 # "short" (optional) = the compact tagline shown on the home grid;
@@ -158,6 +159,7 @@ _SITE_REGISTRY = {
     "onlyflix":        {"class": OnlyFlixExtractor, "title": "OnlyFlix", "tagline": "OnlyFlix — أفلام ومسلسلات أجنبية بجودة عالية", "short": "أفلام ومسلسلات أجنبية"},
     "fivetv":          {"class": FivetvExtractor, "title": "Fivetv", "tagline": "فايف تي في — أفلام ومسلسلات وحلقات مترجمة بجودة عالية", "short": "فايف تي في — أفلام ومسلسلات"},
     "cineby":          {"class": CinebyExtractor, "title": "Cineby", "tagline": "Cineby — Movies & TV Shows in HD", "short": "أفلام ومسلسلات أجنبية بجودة عالية"},
+    "sflix_pro":       {"class": SflixProExtractor, "title": "SFlix", "tagline": "SFlix — Movies & TV Shows in HD", "short": "أفلام ومسلسلات أجنبية بجودة عالية"},
 }
 
 # Aggregated-search priority.
@@ -173,7 +175,7 @@ _SEARCH_SITE_ORDER = (
     "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx",
     "shaheed", "shahid4u", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
-    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby",
+    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby", "sflix_pro",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
 
@@ -193,7 +195,7 @@ _HOME_SITE_ORDER = (
     "arabseed",
     "wecima", "shaheed", "topcinema",
     "fasel", "arablionz", "mywecima",
-    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby",
+    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby", "sflix_pro",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
 

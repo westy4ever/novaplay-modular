@@ -2532,13 +2532,73 @@ def resolve_viduki(url):
 
 
 def resolve_moviesapi(url):
-    """Resolver for moviesapi.to and netrocdn.site URLs"""
+    """Resolver for moviesapi.to and netrocdn.site URLs.
+
+    [UPDATE, SFlix] The old version of this resolver scraped the raw
+    moviesapi.to embed-page HTML for an .m3u8 URL with a couple of regex
+    patterns -- that was always going to miss, because moviesapi.to's own
+    page is a client-rendered app that fetches its stream data from its
+    own JSON API after load; the m3u8 URL was never actually sitting in
+    the server-rendered HTML to find. Confirmed directly from a real
+    browser capture (SFlix's own default embed, Server 1 of 6): the page
+    calls GET https://moviesapi.to/api/vidora/v1/movie/<tmdb_id> (or
+    /tv/<tmdb_id>/<season>/<episode> for a show) and gets back a clean,
+    UNENCRYPTED JSON response:
+        {"result":true,"type":"movie","title":"...","sources":[
+            {"file_code":"...","url":"<direct .m3u8>","source":"vidora",
+             "tracks":[]}]}
+    -- no decryption, no signed token in the stream URL itself beyond
+    what's already embedded in it (t=/s=/e=/srv= query params the server
+    hands back, usable as-is).
+
+    The one wrinkle: the real request carries a custom `x-player-key`
+    header -- a 64-hex-char (32-byte) token. It was NOT the same value
+    across the two different page loads captured (one for the movie, one
+    for a TV episode), and nothing in the captured responses hands it
+    back to the page, so it's generated client-side per page view, not
+    server-issued. There's no evidence here of it being checked against
+    anything else (no matching cookie, no signature tied to the TMDB id),
+    so the best-evidenced approach is to synthesize a same-shaped random
+    token rather than guess a fixed/hardcoded one -- if moviesapi.to
+    actually validates it more strictly than "present and correctly
+    shaped", a device log will show a specific auth-style failure here
+    and that's narrow to fix.
+    """
     try:
         log("resolve_moviesapi: Processing {}".format(url[:100]))
 
         if '.m3u8' in url or '.mp4' in url:
             return _correct_stream_url(url)
 
+        m = re.search(r'/(movie|tv)/(\d+)(?:/(\d+)/(\d+))?', urlparse(url).path)
+        if m:
+            media_type, tmdb_id, season, episode = m.groups()
+            if media_type == "tv" and season and episode:
+                api_path = "/api/vidora/v1/tv/{}/{}/{}".format(tmdb_id, season, episode)
+                page_url = "https://moviesapi.to/tv/{}/{}/{}".format(tmdb_id, season, episode)
+            else:
+                api_path = "/api/vidora/v1/movie/{}".format(tmdb_id)
+                page_url = "https://moviesapi.to/movie/{}".format(tmdb_id)
+
+            player_key = "".join("{:02x}".format(random.getrandbits(8)) for _ in range(32))
+            data = fetch_json(
+                "https://moviesapi.to{}".format(api_path),
+                referer=page_url,
+                extra_headers={"x-player-key": player_key, "Accept": "*/*"},
+            )
+            if data and data.get("result") and data.get("sources"):
+                for src in data["sources"]:
+                    src_url = (src or {}).get("url")
+                    if src_url:
+                        log("resolve_moviesapi: vidora API SUCCESS: {}".format(src_url[:100]))
+                        return _correct_stream_url(src_url)
+            elif data:
+                log("resolve_moviesapi: vidora API returned no sources: {}".format(
+                    str(data.get("message") or data)[:200]))
+
+        # Fallback: the old HTML-scrape path, kept in case the vidora API
+        # call above is blocked/rate-limited or the page uses a different
+        # backend for some titles.
         html, final_url = fetch(url, referer="https://moviesapi.to/")
         if not html:
             return None
@@ -3685,6 +3745,11 @@ HOST_RESOLVERS = {
     "zxcstream.xyz": resolve_zxcstream,
     "braflix.win": resolve_braflix,
     "vidcore.io": resolve_vidcore,
+    # [SFlix] Server 2's static href is vidcore.NET, which the real
+    # browser capture showed redirecting straight to vidcore.IO (same
+    # app, domain rotation) -- same resolver, unconfirmed independently
+    # for .net specifically but same family by evidence.
+    "vidcore.net": resolve_vidcore,
     "vidcloud.icu": resolve_vidcore,
     "embed.su": resolve_vidcore,
 }
