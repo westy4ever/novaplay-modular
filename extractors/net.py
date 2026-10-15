@@ -555,11 +555,33 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         if not isinstance(post_data, dict) and not any(
                                 k.lower() == "content-type" for k in cf_headers):
                             cf_headers["Content-Type"] = "application/x-www-form-urlencoded"
-                    # [FIX] declaring impersonate="chrome120" but then hand-setting
-                    # Accept-Encoding without "br" is a fingerprint mismatch real
-                    # Chrome never produces -- let curl_cffi's impersonation layer
-                    # fill this in itself (matches the browser header set exactly).
-                    cf_headers.pop("Accept-Encoding", None)
+                    _imp = _get_cffi_impersonate()
+
+                    if _imp:
+                        # declaring impersonate="chrome120" (or whichever
+                        # candidate) but then hand-setting Accept-Encoding
+                        # without "br"/"zstd" is a fingerprint mismatch real
+                        # Chrome never produces -- let curl_cffi's
+                        # impersonation layer fill this in itself (matches
+                        # the browser header set exactly, and that layer's
+                        # own bundled libcurl build actually decodes
+                        # whatever it advertises).
+                        cf_headers.pop("Accept-Encoding", None)
+                    else:
+                        # [FIX] a real device log showed this exact failure:
+                        # once every impersonate candidate is exhausted and
+                        # curl_cffi falls back to no impersonation at all,
+                        # popping Accept-Encoding here left curl_cffi/libcurl
+                        # to advertise ITS OWN default encoding list (which
+                        # includes br/zstd on a normal build) while this
+                        # device's actual libcurl can only decode gzip/
+                        # deflate -- every single request then failed with
+                        # "(61) Unrecognized content encoding type", 100% of
+                        # the time, once impersonation was given up on. Keep
+                        # an explicit, honest Accept-Encoding (matching what
+                        # PATH B below already advertises) so curl never
+                        # negotiates a compression this build can't decode.
+                        cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
 
                     _cffi_timeout = 30 if timeout is None else timeout
 
@@ -572,7 +594,6 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                             return cffi_client.get(url, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout)
                         return cffi_client.get(url, headers=cf_headers, timeout=_cffi_timeout)
 
-                    _imp = _get_cffi_impersonate()
                     try:
                         r = _do_cffi_request(_imp)
                     except TypeError:
@@ -583,6 +604,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         # rest of this process rather than retry it.
                         if _imp:
                             _mark_cffi_impersonate_broken(_imp)
+                        cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
                         r = _do_cffi_request(None)
                     except Exception as e:
                         # [FIX] a device log confirmed this exact string: the
@@ -596,7 +618,17 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         # same doomed call.
                         if _imp and "not supported" in str(e).lower() and "imperson" in str(e).lower():
                             _mark_cffi_impersonate_broken(_imp)
-                            r = _do_cffi_request(_get_cffi_impersonate())
+                            _next_imp = _get_cffi_impersonate()
+                            if not _next_imp:
+                                # last candidate just got marked broken too --
+                                # this call is about to drop impersonation
+                                # entirely, so it needs the same explicit,
+                                # decodable Accept-Encoding as the no-
+                                # impersonation path above, or it hits the
+                                # same "(61) Unrecognized content encoding
+                                # type" failure on this very attempt.
+                                cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
+                            r = _do_cffi_request(_next_imp)
                         else:
                             raise
 
