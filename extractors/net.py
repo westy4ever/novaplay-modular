@@ -130,6 +130,49 @@ def _get_curl_session():
     return session
 
 
+# [FIX] curl_cffi's set of valid `impersonate` target strings changes
+# between library versions ("chrome120" exists on some releases, not
+# others) -- a real device log showed impersonate="chrome120" failing
+# with "Impersonating chrome120 is not supported" on 100% of attempts,
+# for every single fetch() call across an entire session (confirmed:
+# ~20 domain probes, each burning all 3 retries on the identical,
+# permanently-doomed call before ever reaching the plain urllib
+# fallback that actually works -- pure wasted time, since retrying the
+# exact same unsupported string can never succeed). Discover a working
+# target (or that none work) ONCE per process and cache it here, instead
+# of rediscovering "chrome120 is broken" from scratch on every fetch.
+_CFFI_IMPERSONATE_CANDIDATES = ("chrome120", "chrome124", "chrome131", "chrome110", "chrome101", "chrome")
+_cffi_impersonate_state = {"index": 0}
+_cffi_impersonate_lock = threading.Lock()
+
+
+def _get_cffi_impersonate():
+    """Current best-guess impersonate target, or None once every
+    candidate has been confirmed unsupported (meaning: call curl_cffi
+    without impersonate at all rather than keep failing)."""
+    with _cffi_impersonate_lock:
+        idx = _cffi_impersonate_state["index"]
+        if idx >= len(_CFFI_IMPERSONATE_CANDIDATES):
+            return None
+        return _CFFI_IMPERSONATE_CANDIDATES[idx]
+
+
+def _mark_cffi_impersonate_broken(value):
+    """Advances past `value` if it's still the current candidate (a
+    concurrent thread may have already advanced past it first) and logs
+    once -- every subsequent fetch() call in this process reuses the
+    result instead of re-discovering the same breakage."""
+    with _cffi_impersonate_lock:
+        idx = _cffi_impersonate_state["index"]
+        if idx < len(_CFFI_IMPERSONATE_CANDIDATES) and _CFFI_IMPERSONATE_CANDIDATES[idx] == value:
+            _cffi_impersonate_state["index"] = idx + 1
+            nxt = (_CFFI_IMPERSONATE_CANDIDATES[idx + 1]
+                   if idx + 1 < len(_CFFI_IMPERSONATE_CANDIDATES) else None)
+            log("curl_cffi: impersonate target '{}' unsupported by the installed "
+                "curl_cffi version -- switching to {} for the rest of this "
+                "session".format(value, repr(nxt) if nxt else "no impersonation"))
+
+
 def _get_opener():
     global _opener, _cookiejar
     if _opener:
@@ -519,16 +562,43 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                     cf_headers.pop("Accept-Encoding", None)
 
                     _cffi_timeout = 30 if timeout is None else timeout
+
+                    def _do_cffi_request(imp):
+                        if _pd is not None:
+                            if imp:
+                                return cffi_client.post(url, data=_pd, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout)
+                            return cffi_client.post(url, data=_pd, headers=cf_headers, timeout=_cffi_timeout)
+                        if imp:
+                            return cffi_client.get(url, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout)
+                        return cffi_client.get(url, headers=cf_headers, timeout=_cffi_timeout)
+
+                    _imp = _get_cffi_impersonate()
                     try:
-                        if _pd is not None:
-                            r = cffi_client.post(url, data=_pd, headers=cf_headers, impersonate="chrome120", timeout=_cffi_timeout)
-                        else:
-                            r = cffi_client.get(url, headers=cf_headers, impersonate="chrome120", timeout=_cffi_timeout)
+                        r = _do_cffi_request(_imp)
                     except TypeError:
-                        if _pd is not None:
-                            r = cffi_client.post(url, data=_pd, headers=cf_headers, timeout=_cffi_timeout)
+                        # curl_cffi version doesn't accept `impersonate` as a
+                        # kwarg at all (very old release) -- same permanent
+                        # breakage as the "not supported" case below, just a
+                        # different error shape; drop impersonation for the
+                        # rest of this process rather than retry it.
+                        if _imp:
+                            _mark_cffi_impersonate_broken(_imp)
+                        r = _do_cffi_request(None)
+                    except Exception as e:
+                        # [FIX] a device log confirmed this exact string: the
+                        # installed curl_cffi version rejects "chrome120" as
+                        # an impersonate target with "Impersonating chrome120
+                        # is not supported" -- a permanent, deterministic
+                        # failure (unlike a timeout/network blip), so retry
+                        # the SAME attempt immediately with the next
+                        # candidate rather than let the outer retry loop
+                        # sleep 1.5s and burn 2 more attempts on the exact
+                        # same doomed call.
+                        if _imp and "not supported" in str(e).lower() and "imperson" in str(e).lower():
+                            _mark_cffi_impersonate_broken(_imp)
+                            r = _do_cffi_request(_get_cffi_impersonate())
                         else:
-                            r = cffi_client.get(url, headers=cf_headers, timeout=_cffi_timeout)
+                            raise
 
                     html = r.text
                     final_url = r.url
