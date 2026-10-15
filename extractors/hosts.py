@@ -2618,7 +2618,19 @@ def resolve_moviesapi(url):
                     src_url = (src or {}).get("url")
                     if src_url:
                         log("resolve_moviesapi: vidora API SUCCESS: {}".format(src_url[:100]))
-                        return _correct_stream_url(src_url)
+                        # [FIX] a device log showed this URL (a
+                        # *.workers.dev HLS relay) resolving fine but then
+                        # failing in all 10 play modes: it was handed to
+                        # the player with no Referer/Origin, and these
+                        # relays only serve requests that look like they
+                        # come from the embedding page. Send what the real
+                        # moviesapi.to player sends; a per-source "headers"
+                        # dict from the API, if it ever has one, wins.
+                        _hdrs = {"Referer": "https://moviesapi.to/",
+                                 "Origin": "https://moviesapi.to"}
+                        if isinstance((src or {}).get("headers"), dict):
+                            _hdrs.update(src["headers"])
+                        return _vidnest_headers_suffix(_correct_stream_url(src_url), _hdrs)
             elif data:
                 log("resolve_moviesapi: vidora API returned no sources: {}".format(
                     str(data.get("message") or data)[:200]))

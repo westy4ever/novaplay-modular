@@ -440,6 +440,58 @@ def _fetch_via_browser_proxy(url, referer=None, post_data=None):
     return None, url
 
 
+# [FIX] dead-host short-circuit. A device log showed a host that
+# refused every connection (Errno 111 / curl (7)) being retried 9 times
+# over ~19s for ONE server: urllib x3, curl_cffi x2, then the generic
+# resolver's own "retry once", then the iframe-chain fetch -- each a fresh
+# fetch() with its own full retry budget. "Connection refused" is a
+# definite answer (the host actively rejected us), not a blip, so mark the
+# host dead for a short TTL: fetch() stops retrying it immediately and
+# skips it instantly for the next _DEAD_HOST_TTL seconds. Local/LAN
+# addresses (TorrServer, the browser proxy, ...) are never marked, so a
+# service the user starts a moment later is picked up right away.
+_DEAD_HOST_TTL = 120
+_dead_hosts = {}
+_dead_hosts_lock = threading.Lock()
+
+
+def _is_local_host(host):
+    h = (host or "").split(":")[0].strip("[]").lower()
+    return (not h or h == "localhost" or h.endswith(".local") or h == "::1"
+            or h.startswith("127.") or h.startswith("10.")
+            or h.startswith("192.168.") or h.startswith("169.254.")
+            or any(h.startswith("172.%d." % i) for i in range(16, 32)))
+
+
+def _is_connection_refused(err):
+    t = str(err).lower()
+    return ("connection refused" in t or "errno 111" in t
+            or "curl: (7)" in t or "could not connect to server" in t)
+
+
+def _mark_host_dead(url, err):
+    host = urlparse(url).netloc.lower()
+    if not host or _is_local_host(host):
+        return False
+    with _dead_hosts_lock:
+        _dead_hosts[host] = time.time() + _DEAD_HOST_TTL
+    log("Host {} refused the connection -- skipping it for {}s ({})".format(
+        host, _DEAD_HOST_TTL, str(err)[:80]))
+    return True
+
+
+def _host_is_dead(url):
+    host = urlparse(url).netloc.lower()
+    with _dead_hosts_lock:
+        exp = _dead_hosts.get(host)
+        if exp is None:
+            return False
+        if time.time() >= exp:
+            _dead_hosts.pop(host, None)
+            return False
+        return True
+
+
 def fetch(url, referer=None, extra_headers=None, post_data=None,
            timeout=None, max_retries=None):
     """
@@ -463,6 +515,9 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
     # could move to the next server). None preserves today's
     # behavior exactly for every other caller.
     max_retries = 2 if max_retries is None else max_retries
+    if _host_is_dead(url):
+        log("Fetch skipped (host refused connections recently): {}".format(url))
+        return None, url
     use_cffi = False
     parsed_quick = urlparse(url)
     domain_quick = parsed_quick.netloc.lower()
@@ -680,6 +735,8 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         return html, final_url
                 except Exception as e:
                     log("curl_cffi attempt {} failed: {}".format(attempt + 1, e))
+                    if _is_connection_refused(e) and _mark_host_dead(url, e):
+                        return None, url
                     err_str = str(e).lower()
                     if "timeout" in err_str or "network" in err_str or "dns" in err_str:
                         set_curl_failed_needs_proxy(False)
@@ -805,6 +862,9 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
             return None, url
 
         except URLError as e:
+            if _is_connection_refused(getattr(e, "reason", e)) and _mark_host_dead(url, e):
+                _opener = None
+                return None, url
             if attempt < max_retries:
                 log("Fetch URLError (retry {}): {} → {}".format(attempt + 1, url, e))
                 _opener = None
