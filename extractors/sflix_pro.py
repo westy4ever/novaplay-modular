@@ -279,15 +279,20 @@ class SflixProExtractor(BaseExtractor):
         if season and episode:
             return [
                 {"name": "Server 1 (MoviesAPI)", "url": "https://moviesapi.to/tv/{}/{}/{}".format(tmdb_id, season, episode), "quality": "HD"},
-                {"name": "Server 4 (VidFast)", "url": "https://vidfast.vc/tv/{}/{}/{}".format(tmdb_id, season, episode), "quality": "HD"},
+                {"name": "Server 2 (VidFast)", "url": "https://vidfast.vc/tv/{}/{}/{}".format(tmdb_id, season, episode), "quality": "HD"},
             ]
         return [
             {"name": "Server 1 (MoviesAPI)", "url": "https://moviesapi.to/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 2 (VidCore)", "url": "https://vidcore.net/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 3 (YapGrid)", "url": "https://yapgrid.com/embed/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 4 (VidFast)", "url": "https://vidfast.vc/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 5 (VidSrc-Embed)", "url": "https://vidsrc-embed.ru/embed/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 6 (EmbedMaster)", "url": "https://embedmaster.link/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "Server 2 (YapGrid)", "url": "https://yapgrid.com/embed/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "Server 3 (VidFast)", "url": "https://vidfast.vc/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
+            {"name": "Server 4 (VidSrc-Embed)", "url": "https://vidsrc-embed.ru/embed/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "Server 5 (EmbedMaster)", "url": "https://embedmaster.link/movie/{}".format(tmdb_id), "quality": "HD"},
+            # [CHANGE] VidCore moved last: a 2026-10-15 capture showed it replaced its old
+            # /api/play endpoint with obfuscated, runtime-built POST URLs (/likzi/coc/v/<build>/...)
+            # returning encrypted replies, so resolve_vidcore can't extract a stream any more.
+            # Kept as a last-resort entry rather than removed, in case the generic fallback
+            # ever succeeds or a browser-proxy route is added later.
+            {"name": "Server 6 (VidCore)", "url": "https://vidcore.net/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
         ]
 
     # ─── Detail pages ─────────────────────────────────────────────────────
