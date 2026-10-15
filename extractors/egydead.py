@@ -331,28 +331,48 @@ class EgyDeadExtractor(BaseExtractor):
                     log("EgyDead: blocked {}".format(final_url))
                     continue
 
-                if html and self._looks_like_egydead_page(html):
-                    # Strip any rotating homepage prefix (/h1/, /h2/,
-                    # /h3/, ...) — content pages are served at bare
-                    # paths on the same domain.
-                    candidate = self._site_root(final_url)
+                # Strip any rotating homepage prefix (/h1/, /h2/, /h3/,
+                # ...) — content pages are served at bare paths on the
+                # same domain.
+                candidate = self._site_root(final_url)
 
-                    # Deep-content probe: a landing domain passes the
-                    # shallow check but returns the same page for every
-                    # deep URL.  Reject it before locking it in.
-                    if not self._base_serves_deep_content(candidate):
-                        log("EgyDead: {} is not a content mirror — "
-                            "trying next domain".format(candidate))
-                        continue
+                # [FIX] a real device log showed the bare "/" on EVERY
+                # mirror now redirecting through a generic rotating
+                # interstitial (e.g. "/h3/") that carries none of
+                # _looks_like_egydead_page's markers -- even though the
+                # SAME domain serves real content fine on deep paths
+                # (confirmed directly: the plugin's own later
+                # /category/english-movies/ fetch on this exact,
+                # rejected-by-this-loop host returned a real 49-item
+                # listing). Since `_looks_like_egydead_page` returning
+                # False logs nothing, this silently rejected every
+                # single domain in the list, burning the full ~20-domain
+                # probe loop (each paying the curl_cffi retry cost) every
+                # time the base cache expired, before falling back to
+                # the very first domain anyway. The shallow check is now
+                # only a fast-accept; when it doesn't match, fall through
+                # to the deep-content probe (which actually fetches
+                # /serie/ and checks for real listing markers) instead of
+                # rejecting the domain outright.
+                _shallow_ok = bool(html and self._looks_like_egydead_page(html))
+                accepted = self._base_serves_deep_content(candidate)
+                if accepted and not _shallow_ok:
+                    log("EgyDead: {} has no homepage markers but serves "
+                        "real deep content — accepting anyway".format(candidate))
 
-                    self._resolved_base = candidate
-                    self.main_url = candidate
-                    with _base_cache_lock:
-                        _base_cache["url"] = candidate
-                        _base_cache["resolved_at"] = now
-                        _base_cache["probed_at"] = now
-                    log("EgyDead: selected base {}".format(candidate))
-                    return candidate
+                if not accepted:
+                    log("EgyDead: {} is not a content mirror — "
+                        "trying next domain".format(candidate))
+                    continue
+
+                self._resolved_base = candidate
+                self.main_url = candidate
+                with _base_cache_lock:
+                    _base_cache["url"] = candidate
+                    _base_cache["resolved_at"] = now
+                    _base_cache["probed_at"] = now
+                log("EgyDead: selected base {}".format(candidate))
+                return candidate
 
             # Fallback: the stable alias.  All mirrors redirect through
             # it anyway, so its origin is the safest guess we have.
