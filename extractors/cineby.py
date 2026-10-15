@@ -31,17 +31,26 @@ Site architecture, confirmed directly from the capture:
     server-side endpoint for this exposed anywhere in the capture, and
     reverse-engineering a rotating client-side cipher from minified JS
     isn't attempted here.
-  * Instead of that, the real working path already in this codebase is
-    reused: hosts.py's medmedia03.wiki resolver (added for OnlyFlix) is
-    ALSO purely TMDB-id-addressed (/embed/movie/<id> or
-    /embed/tv/<id>/<season>/<episode>) and queries a provider literally
-    named "vidnest" among others via a clean, unauthenticated JSON API
-    -- so the same TMDB id Cineby uses gets a synthesized
-    balance.medmedia03.wiki embed URL as a server option, which already
-    has a confirmed-working resolver registered. A few of the same
-    public multi-embed providers vidsrc.py already relies on
-    (tvembed.cc, 2Embed, VidSrc.win) round out the server list as
-    further fallbacks, in the same order/style vidsrc.py uses them.
+  * [UPDATE] That encrypted blob is no longer a dead end: the user pulled
+    vidnest.fun's own client JS chunk via DevTools (confirmed via a
+    Sources-panel search for "decryptCipherResponse") and it decrypts
+    with AES-256-GCM: key = SHA256(f"{nonce}|{SECRET}") where SECRET is
+    a static string baked into the bundle and nonce is the response's
+    own "n" field; the ciphertext is base64url in "d", first 12 bytes
+    IV, rest is ciphertext+tag. hosts.py's resolve_vidnest() is a
+    faithful, verified port of this (reproduces the exact same
+    pwcloud.animanga.fun master.m3u8 URL the real browser got for this
+    same TMDB id, byte for byte, through both the `cryptography`-backed
+    path and the pure-Python fallback that actually runs on the user's
+    C-compiler-less device). Registered in HOST_RESOLVERS under
+    "vidnest"/"vidnest.fun", so Server 1 below now actually works rather
+    than being a placeholder.
+  * MedMedia03 (added for OnlyFlix) is ALSO purely TMDB-id-addressed and
+    queries a provider literally named "vidnest" among others via its
+    own clean JSON API -- kept as Server 2, a legitimate independent
+    fallback if vidnest.fun's own encryption scheme changes. A couple of
+    the same public multi-embed providers vidsrc.py already relies on
+    (tvembed.cc, VidSrc.win) round out the list as further fallbacks.
 """
 import re
 import urllib.parse

@@ -25,6 +25,7 @@ import json
 import time
 import base64
 import random
+import hashlib
 import html as html_module  # aliased: every resolver uses a local `html` variable for page text
 from urllib.parse import urlparse, urljoin, parse_qs, unquote
 
@@ -1896,6 +1897,118 @@ def resolve_n1mwq(url, referer=None):
         return None
 
 
+# ─── VidNest (new.vidnest.fun / vidnest.fun) resolver ──────────────────────
+#
+# [FIX] Added for the Cineby extractor, which embeds vidnest.fun directly
+# (confirmed from a real browser capture of a Cineby movie page). vidnest's
+# own page calls new.vidnest.fun/<provider>/movie/<tmdb_id> and gets back
+# an opaque {"d": "<ciphertext>", "n": "<nonce>", "v": 2} blob -- the user
+# pulled the exact client-side chunk that defines this (confirmed via
+# DevTools Sources search for "decryptCipherResponse"), so this is a
+# faithful port, not a guess:
+#
+#   key    = SHA-256(f"{nonce}|{SECRET}")           (nonce = response's "n")
+#   raw    = base64url_decode(ciphertext)             (ciphertext = response's "d")
+#   iv     = raw[:12]
+#   ct+tag = raw[12:]                                  (GCM tag is the last 16 bytes)
+#   plaintext = AES-256-GCM-decrypt(key, iv, ct+tag)  (no AAD)
+#   result = JSON.parse(plaintext)
+#
+# SECRET is the literal static string baked into vidnest's own bundle
+# (not a per-session secret -- the only per-request variable is the
+# nonce). Verified end-to-end against a real captured response (TMDB id
+# 969681, "Spider-Man: Brand New Day"): this exact algorithm reproduces
+# the identical plaintext {"headers": {...}, "url": "https://pwcloud...
+# master.m3u8"} that the real browser's own JS produced for that same
+# response, byte for byte.
+#
+# vidnest proxies TWELVE providers this way (all through new.vidnest.fun,
+# all through the same decrypt function) -- "catflix" (-> /yflix/movie)
+# is the default server and the one actually used by Cineby, so that's
+# the only one implemented here; the others (filxer/rogflix, gama/vidzee,
+# lamda/ophim, beta/flixhq, alfa/onehd, prime/rpmvid, zeta/
+# nextgencloudfabric, ophim/klikxxi, sigma/hollymoviehd, hexa/vidlink,
+# delta/allmovies) have each their own response shape (catflix/beta/hexa
+# return a single url, gama/lamda/zeta/prime return a "streams" array) and
+# weren't needed for the one path actually evidenced, so they're left for
+# a future resolver if a site using one of them shows up.
+_VIDNEST_BASE = "https://new.vidnest.fun"
+_VIDNEST_SECRET = "F9k2mR8vL4qP7wY1zN0fG3bS6tH5jC8d_x4R7vN2mP9qL1"
+
+
+def _vidnest_nonce():
+    """Port of withStreamNonceUrl()'s own nonce generator: 16 random bytes,
+    base64url with the '=' padding stripped (matches btoa().replace(...)
+    in the client JS, modulo the raw-byte-string vs base64url framing --
+    this produces the same alphabet/length nonce the real client sends)."""
+    raw = bytes(random.getrandbits(8) for _ in range(16))
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _vidnest_decrypt(d, n):
+    """Port of secureDecrypt()/decryptCipherResponse(): see module comment
+    above for the algorithm. Reuses the n1mwq AES-GCM backend dispatcher
+    (cryptography / pycryptodome / pure-python fallback) -- it's generic
+    AES-256-GCM, nothing n1mwq-specific about the math itself."""
+    key = hashlib.sha256("{}|{}".format(n, _VIDNEST_SECRET).encode("utf-8")).digest()
+    raw = _n1mwq_b64url_decode(d)
+    iv, ct_and_tag = raw[:12], raw[12:]
+    plaintext = _n1mwq_aes_gcm_decrypt(key, iv, ct_and_tag)
+    text = plaintext.decode("utf-8")
+    try:
+        return json.loads(text)
+    except Exception:
+        return text
+
+
+def resolve_vidnest(url, referer=None):
+    try:
+        m = re.search(r'/(movie|tv)/(\d+)(?:/(\d+)/(\d+))?', urlparse(url).path)
+        if not m:
+            log("resolve_vidnest: couldn't parse media id from {}".format(url))
+            return None
+        media_type, tmdb_id, season, episode = m.groups()
+        if media_type == "tv" and season and episode:
+            # [NOTE] unconfirmed -- no TV capture was available, only the
+            # movie path. Mirrors the movie shape (the one piece of real
+            # evidence) on the reasonable assumption vidnest keeps the same
+            # /<season>/<episode> suffix convention its own site URLs use.
+            api_path = "/yflix/tv/{}/{}/{}".format(tmdb_id, season, episode)
+        else:
+            api_path = "/yflix/movie/{}".format(tmdb_id)
+
+        nonce = _vidnest_nonce()
+        api_url = "{}{}?_n={}".format(_VIDNEST_BASE, api_path, nonce)
+        body, _ = fetch(api_url, referer="https://vidnest.fun/")
+        if not body:
+            log("resolve_vidnest: empty response for {}".format(api_url))
+            return None
+        try:
+            data = json.loads(body)
+        except Exception:
+            log("resolve_vidnest: non-JSON response for {}".format(api_url))
+            return None
+
+        if not (data and data.get("v") == 2 and data.get("d")):
+            log("resolve_vidnest: unexpected response shape (no v2 cipher payload)")
+            return None
+
+        decrypted = _vidnest_decrypt(data["d"], data.get("n") or nonce)
+        if not isinstance(decrypted, dict) or not decrypted.get("url"):
+            log("resolve_vidnest: decrypted payload has no usable url")
+            return None
+
+        stream_url = _correct_stream_url(decrypted["url"])
+        headers = decrypted.get("headers") or {}
+        stream_referer = headers.get("Referer")
+        if stream_referer:
+            return "{}|Referer={}".format(stream_url, stream_referer)
+        return stream_url
+    except Exception as e:
+        log("resolve_vidnest: error for {}: {}".format(url, e))
+        return None
+
+
 def resolve_byselapuix(url):
     try:
         html, final = fetch(url, referer="https://byselapuix.com/")
@@ -3347,6 +3460,8 @@ HOST_RESOLVERS = {
     # byselapuix/byseraguci landing page that needs following first.
     "n1mwq":           resolve_n1mwq,
     "n1mwq.org":       resolve_n1mwq,
+    "vidnest":         resolve_vidnest,
+    "vidnest.fun":     resolve_vidnest,
     # [PATCH MM1] megamax.me's download-mirror aggregator, confirmed via
     # a real network capture of arabseed.wine's single "MegaMax" server
     # -- only this specific vanity domain is mapped, on direct evidence.
