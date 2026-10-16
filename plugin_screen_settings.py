@@ -16,9 +16,9 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ScrollLabel import ScrollLabel
 
-from plugin_common import PLUGIN_PATH, _PLUGIN_VERSION
+from plugin_common import _PLUGIN_VERSION
 from plugin_gridlist import scale_skin_xml
-from plugin_state import _get_config, _set_config, _PLUGIN_OWNER, _favorite_items, _history_items
+from plugin_state import _get_config, _set_config, _PLUGIN_OWNER, _favorite_items, _history_items, _DEFAULT_TMDB_API_KEY
 from plugin_util import _site_label, _site_tagline
 from novaplay_diagnostics import NovaDiagnosticsScreen
 from install_dependencies import open_installer_with_restart, open_restart_prompt
@@ -28,7 +28,6 @@ from plugin_screen_downloads import NovaPlayDownloads
 class NovaPlaySettings(Screen):
     skin = scale_skin_xml("""
     <screen name="NovaPlaySettings" position="center,center" size="1920,1080" flags="wfNoBorder">
-        <ePixmap position="0,0" size="1920,1080" pixmap="{}/images/bg_settings.png" zPosition="0" alphatest="blend" />
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
         <widget name="title" position="60,30" size="900,57" font="Regular;45" foregroundColor="#00E5FF" transparent="1" zPosition="3" />
         <widget name="owner" position="60,96" size="600,36" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="3" />
@@ -41,7 +40,7 @@ class NovaPlaySettings(Screen):
         <widget name="key_yellow_label" position="990,987" size="450,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="3" halign="center" />
         <widget name="key_blue_label" position="1500,987" size="360,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="3" halign="center" />
     </screen>
-    """.format(PLUGIN_PATH))
+    """)
 
     def __init__(self, session, current_site):
         Screen.__init__(self, session)
@@ -115,7 +114,7 @@ class NovaPlaySettings(Screen):
             "طريقة الاستخدام:\n• أخضر: تبديل عرض محتوى الكبار\n"
             "• أحمر: Proxy\n• أصفر: TMDb API Key\n• أزرق: TorrServer URL\n"
             "• Menu: الأدوات والتشخيص (ترجمة، تشخيص، تثبيت، إعادة تشغيل، التنزيلات)\n"
-            "• Info: حذف مفتاح TMDb"
+            "• Info: حذف مفتاحك والعودة للمفتاح المدمج"
         ).format(
             version=_PLUGIN_VERSION,
             layout_style=layout.upper(),
@@ -123,7 +122,10 @@ class NovaPlaySettings(Screen):
             maxq=maxq,
             nxdelay=_nxdelay,
             tmdb_status="مفعل" if api_key else "غير مفعل",
-            tmdb_key=("********" + api_key[-4:]) if api_key else "غير مضبوط",
+            # [FIX] after "clear" (Info) the plugin falls back to its built-in key;
+            # say so, instead of showing a key as if clearing did nothing
+            tmdb_key=("المفتاح المدمج (الافتراضي)" if api_key == _DEFAULT_TMDB_API_KEY
+                      else ("********" + api_key[-4:]) if api_key else "غير مضبوط"),
             ts_status="مفعل" if ts_url else "غير مفعل",
             ts_url=ts_url or "غير مضبوط",
             proxy_status="مفعل" if proxy else "غير مفعل",

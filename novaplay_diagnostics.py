@@ -2,7 +2,8 @@
 """
 novaplay_diagnostics.py — self-test screen (StreamProxy diagnostics pattern)
 ==============================================================================
-Checks: dependencies (curl_cffi/brotli), API keys, network/DNS, per-site
+Checks: dependencies (curl_cffi, brotli, Pillow, cryptography, requests,
+yt-dlp, ffmpeg, ServiceApp, exteplayer3), TorrServer, API keys, network/DNS, per-site
 base-domain resolution, download disk space, local proxy stats.
 
 Fast checks run first and fill the list; slow site probes (each may
@@ -73,9 +74,51 @@ def run_diagnostics(on_row, on_done):
 
     add("curl_cffi (Cloudflare bypass)", lambda: _n._CURL_CFFI_OK)
     add("brotli decompression", lambda: _n.brotli is not None)
+
+    # [NEW] the same optional dependencies "Install Missing Dependencies"
+    # installs, so this screen shows whether that install worked. Checked
+    # without importing (yt_dlp alone takes seconds to import on a box).
+    def _has_module(name):
+        try:
+            import importlib.util
+            return importlib.util.find_spec(name) is not None
+        except Exception:
+            try:
+                __import__(name)
+                return True
+            except Exception:
+                return False
+
+    def _has_program(name):
+        for d in os.environ.get("PATH", "/usr/bin:/bin").split(os.pathsep) + ["/usr/bin", "/usr/local/bin"]:
+            if os.access(os.path.join(d, name), os.X_OK):
+                return True
+        return False
+
+    add("Pillow (posters, ribbons)", lambda: _has_module("PIL"))
+    add("cryptography (fast decryption)", lambda: _has_module("cryptography") or _has_module("Crypto"))
+    add("requests (Shahid4u)", lambda: _has_module("requests"))
+    add("yt-dlp (trailers)", lambda: _has_module("yt_dlp"))
+    add("ffmpeg (trailers)", lambda: _has_program("ffmpeg"))
+    add("ServiceApp (player 5001/5002)",
+        lambda: os.path.isdir("/usr/lib/enigma2/python/Plugins/SystemPlugins/ServiceApp"))
+    add("exteplayer3 (player)", lambda: _has_program("exteplayer3"))
     add("external browser proxy configured", lambda: bool(_n._BROWSER_PROXY_URL))
     add("network / DNS", _net_ok)
     add("TMDB API key", lambda: bool(str(_get_config("tmdb_api_key", "")).strip()))
+
+    def _torrserver_ok():
+        url = str(_get_config("torrserver_url", "") or "").strip().rstrip("/")
+        if not url:
+            return None                      # not configured -> SKIP
+        try:
+            r = _urlreq.urlopen(url + "/echo", timeout=4)
+            ok = r.getcode() == 200
+            r.close()
+            return ok
+        except Exception:
+            return False
+    add("TorrServer reachable", _torrserver_ok)
     add("SubSource API key (optional)", lambda: bool(str(_get_config("subsource_api_key", "")).strip()))
     add("OpenSubtitles API key (optional)", lambda: bool(str(_get_config("opensubtitles_api_key", "")).strip()))
 
