@@ -19,19 +19,63 @@ Hook (from your plugin.py settings screen):
     open_installer(self.session)
 """
 
+# [UPDATE] Everything NovaPlay uses that isn't part of Enigma2 itself. Each item is
+# optional -- the plugin degrades gracefully without it -- but each one switches a
+# real feature on:
+#   module / program   what it enables                                   how
+#   curl_cffi          Cloudflare-protected sites (browser fingerprint)  pip (no opkg pkg)
+#   brotli             'br'-compressed pages                              opkg, else pip
+#   PIL (Pillow)       poster scaling, ribbons, watched (grey) posters    opkg
+#   cryptography       fast AES for player decryption (pure-Python
+#                      fallback works, just slower)                       opkg
+#   requests           Shahid4u's own session path                        opkg
+#   yt_dlp + ffmpeg    trailers (fetch + mux into one file)               opkg
+#   ServiceApp         player modes 5001/5002 (more streams play)         opkg
+#   exteplayer3        the exteplayer3 player mode                        opkg
+# Package names differ between images, so every item tries its known names in
+# turn, skips anything already installed, and never stops the run. TorrServer and
+# Transmission are separate services you set up yourself -- not installed here.
+
+
+def _py_item(label, module, opkg_names, pip_name=None):
+    """Shell line: skip if `module` imports; else opkg (each name), else pip."""
+    tries = " || ".join("opkg install {} >/dev/null 2>&1".format(n) for n in opkg_names)
+    if pip_name:
+        tries = (tries + " || " if tries else "") + \
+            "pip3 install {0} >/dev/null 2>&1 || pip3 install --user {0} >/dev/null 2>&1".format(pip_name)
+    check = "python3 -c 'import {}' >/dev/null 2>&1".format(module)
+    return ("if {c}; then echo 'OK    {l} (already installed)'; "
+            "elif {t}; then {c} && echo 'OK    {l} (installed)' || echo 'FAIL  {l} (installed but cannot import)'; "
+            "else echo 'SKIP  {l} (not available for this image)'; fi; true").format(c=check, t=tries, l=label)
+
+
+def _bin_item(label, check, opkg_names):
+    """Shell line for a program/plugin: skip if `check` passes, else opkg."""
+    tries = " || ".join("opkg install {} >/dev/null 2>&1".format(n) for n in opkg_names)
+    return ("if {c}; then echo 'OK    {l} (already installed)'; "
+            "elif {t}; then echo 'OK    {l} (installed)'; "
+            "else echo 'SKIP  {l} (not available for this image)'; fi; true").format(c=check, t=tries, l=label)
+
+
 _DEPS_CMD = [
-    # 1. make sure pip exists (opkg fallback; 'true' keeps going if not)
-    "pip3 --version >/dev/null 2>&1 || opkg install python3-pip; true",
-    # 2. try a user install first (no root needed), then a plain install
-    "pip3 install --user curl_cffi brotli || pip3 install curl_cffi brotli",
-    # 3. verify — try python3 then python (image-dependent binary names)
-    "python3 -c 'import curl_cffi; print(\"VERIFY: curl_cffi OK\")' 2>&1 "
-    "|| python -c 'import curl_cffi; print(\"VERIFY: curl_cffi OK\")' 2>&1 "
-    "|| echo 'VERIFY: curl_cffi MISSING (browser proxy fallback applies)'",
-    "python3 -c 'import brotli; print(\"VERIFY: brotli OK\")' 2>&1 "
-    "|| python -c 'import brotli; print(\"VERIFY: brotli OK\")' 2>&1 "
-    "|| echo 'VERIFY: brotli MISSING (gzip fallback applies)'",
-    "echo 'If VERIFY lines say OK, restart Enigma2 to activate.'",
+    "echo 'NovaPlay dependency installer -- updating package lists...'",
+    "opkg update >/dev/null 2>&1 && echo 'opkg update: OK' || echo 'opkg update: FAILED (no internet?) -- continuing'; true",
+    # pip is needed only for curl_cffi (and brotli where opkg has none)
+    "pip3 --version >/dev/null 2>&1 || opkg install python3-pip >/dev/null 2>&1; true",
+    _py_item("curl_cffi    (Cloudflare sites)", "curl_cffi", [], pip_name="curl_cffi"),
+    _py_item("brotli       (compressed pages)", "brotli", ["python3-brotli"], pip_name="brotli"),
+    _py_item("Pillow       (posters, ribbons)", "PIL", ["python3-pillow", "python3-imaging"]),
+    _py_item("cryptography (fast decryption)", "cryptography", ["python3-cryptography"]),
+    _py_item("requests     (Shahid4u)", "requests", ["python3-requests"]),
+    _py_item("yt-dlp       (trailers)", "yt_dlp", ["python3-yt-dlp", "yt-dlp"], pip_name="yt-dlp"),
+    _bin_item("ffmpeg       (trailers)", "command -v ffmpeg >/dev/null 2>&1", ["ffmpeg"]),
+    _bin_item("ServiceApp   (player 5001/5002)",
+              "[ -d /usr/lib/enigma2/python/Plugins/SystemPlugins/ServiceApp ]",
+              ["enigma2-plugin-systemplugins-serviceapp"]),
+    _bin_item("exteplayer3  (player)", "[ -x /usr/bin/exteplayer3 ]", ["exteplayer3"]),
+    "echo ''",
+    "echo 'OK = ready.  SKIP = this image has no package for it; NovaPlay still works without it.'",
+    "echo 'Restart Enigma2 so NovaPlay can use what was installed.'",
 ]
 
 _RESTART_CMD = [

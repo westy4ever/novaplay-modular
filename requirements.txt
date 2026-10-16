@@ -1,2 +1,9 @@
-curl_cffi
-brotli
+# NovaPlay optional Python packages. All are optional: NovaPlay works without
+# them, each one switches a feature on. On the box, prefer Settings >
+# "Install missing dependencies" (uses opkg packages first, pip as fallback).
+curl_cffi      # Cloudflare-protected sites
+brotli         # 'br'-compressed pages
+Pillow         # poster scaling, ribbons, grey "watched" posters
+cryptography   # fast AES decryption (pure-Python fallback otherwise)
+requests       # Shahid4u session path
+yt-dlp         # trailers (also needs the ffmpeg program)
