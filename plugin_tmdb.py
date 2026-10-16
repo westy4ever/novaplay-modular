@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Arabic Player - TMDb client
+NovaPlay - TMDb client
 =======================================
 Self-contained TMDb (themoviedb.org) lookups used to enrich scraped
 titles/posters/plots. No Enigma2 or UI dependency.
@@ -41,8 +41,8 @@ _TMDB_IMG_BASE  = "https://image.tmdb.org/t/p/w500"
 _TMDB_BACKDROP_BASE = "https://image.tmdb.org/t/p/w1280"
 
 # --- Metadata Cache Configuration ---
-_CACHE_BASE_HDD = "/media/hdd/AdvancedArabicPlayer/cache"
-_CACHE_BASE_TMP = "/tmp/AdvancedArabicPlayer/cache"
+_CACHE_BASE_HDD = "/media/hdd/NovaPlay/cache"
+_CACHE_BASE_TMP = "/tmp/NovaPlay/cache"
 _CACHE_DIRNAME = "tmdb"
 _CACHE_MAX_AGE = 60 * 60 * 24 * 365 * 100  # effectively no expiry (100 years)
 

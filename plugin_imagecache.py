@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Arabic Player - async poster/artwork cache
+NovaPlay - async poster/artwork cache
 =======================================================
 Ported from westy4ever's XtreamNew plugin (imagecache.py), renamed to fit
 this project. No business-logic dependency - pure disk cache + a bounded
@@ -11,7 +11,7 @@ check the local cache instantly (no network call from the Enigma2 UI
 thread), and requestImageAsync()/requestImageAsyncPriority() to queue a
 background download if it's not cached yet. There is no completion
 callback - callers are expected to poll getCachedImage() again on a
-short timer (see AdvancedArabicPlayerHome._artworkPollTimer in plugin.py),
+short timer (see NovaPlayHome._artworkPollTimer in plugin.py),
 which is the same pattern the source plugin's carousel screens use.
 
 Changes in this revision (audit fix):
@@ -50,14 +50,14 @@ except Exception:
     def _log(msg):
         try:
             ts = time.strftime("%Y-%m-%d %H:%M:%S")
-            with open("/tmp/arabicplayer.log", "a") as f:
+            with open("/tmp/novaplay.log", "a") as f:
                 f.write("[{}] {}\n".format(ts, msg))
         except Exception:
             pass
 
 
-CACHE_BASE_HDD = "/media/hdd/AdvancedArabicPlayer/cache"
-CACHE_BASE_TMP = "/tmp/AdvancedArabicPlayer/cache"
+CACHE_BASE_HDD = "/media/hdd/NovaPlay/cache"
+CACHE_BASE_TMP = "/tmp/NovaPlay/cache"
 CACHE_IMAGES_DIRNAME = "images"
 CACHE_MAX_AGE = 60 * 60 * 24 * 365 * 100   # effectively no expiry
 

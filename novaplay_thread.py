@@ -22,7 +22,7 @@ Changes in this revision (audit fixes):
     idempotent; on a pending one it just resets the 50ms.
   * Timer-construction failure now drains via the twisted reactor —
     items can't sit in the queue forever if eTimer is unavailable.
-  * Callback exceptions are logged to /tmp/arabicplayer.log instead of
+  * Callback exceptions are logged to /tmp/novaplay.log instead of
     vanishing. A swallowed NameError from a half-applied edit used to
     look like "the screen just didn't update" with zero trace.
 """
@@ -45,7 +45,7 @@ def _log_crash(exc):
     # the docstring above advertises.
     try:
         import traceback
-        with open("/tmp/arabicplayer.log", "a") as f:
+        with open("/tmp/novaplay.log", "a") as f:
             f.write("[thread] callback crashed: {} {}\n".format(
                 exc, traceback.format_exc()[-400:]))
     except Exception:

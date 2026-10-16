@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Arabic Player - Utility helpers
+NovaPlay - Utility helpers
 =========================================
 Pure text/formatting/ranking helpers plus poster-cache download helpers.
 
@@ -21,7 +21,7 @@ Deliberately excluded from this module: anything that is mutated via a
 bare `global` statement from inside plugin.py's Screen classes (the live
 playback position tracker and the local proxy hit/byte counters). Those
 stay in plugin.py itself so the `global NAME` idiom used throughout
-AdvancedArabicPlayerSimplePlayer / LocalProxyHandler keeps working exactly
+NovaPlaySimplePlayer / LocalProxyHandler keeps working exactly
 as before without having to rewrite every read/write site to go through
 a module attribute. See plugin.py's module docstring note for details.
 """

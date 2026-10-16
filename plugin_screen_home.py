@@ -106,8 +106,8 @@ from plugin_util import (_site_label, _site_tagline, _site_search_item,
     _wrap_ui_text, _single_line_text, _dedupe_items, _rank_search_items,
     _strip_arabic_from_english_title)
 from plugin_tmdb import _tmdb_enabled, _tmdb_search_metadata, fill_item_rating_async
-from plugin_screen_detail import AdvancedArabicPlayerDetail
-from plugin_screen_search import AdvancedArabicPlayerSearch
+from plugin_screen_detail import NovaPlayDetail
+from plugin_screen_search import NovaPlaySearch
 from novaplay_thread import callInMainThread
 
 from novaplay_dualclock import format_dual_dates
@@ -144,9 +144,9 @@ def _label_chip_height(is_big=False):
     return sc(28) if is_big else sc(24)
 
 
-class AdvancedArabicPlayerHome(Screen):
+class NovaPlayHome(Screen):
     skin = """
-    <screen name="AdvancedArabicPlayerHome" position="center,center" size="1920,1080" title="NovaPlay Media Center" flags="wfNoBorder" backgroundColor="#0D1117">
+    <screen name="NovaPlayHome" position="center,center" size="1920,1080" title="NovaPlay Media Center" flags="wfNoBorder" backgroundColor="#0D1117">
         <eLabel position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="0" />
         <widget name="staticBackground" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" />
         <widget name="backdropImg" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" scale="1" />
@@ -204,7 +204,7 @@ class AdvancedArabicPlayerHome(Screen):
     _NAV_HINT_Y        = 600        # legacy default; real Y comes from _navHintBaseY()
 
     def __init__(self, session):
-        self.skin = AdvancedArabicPlayerHome.skin.format(
+        self.skin = NovaPlayHome.skin.format(
             plugin_path=PLUGIN_PATH,
             home_grid_pics=build_pixmap_widgets_xml(
                 self._HOME_GRID_X + HOME_CENTER_OFFSET_X, self._HOME_GRID_Y,
@@ -2811,8 +2811,8 @@ class AdvancedArabicPlayerHome(Screen):
         self._showSiteCategories()
 
     def _openSettings(self):
-        from plugin_screen_settings import AdvancedArabicPlayerSettings
-        self.session.open(AdvancedArabicPlayerSettings, self._site)
+        from plugin_screen_settings import NovaPlaySettings
+        self.session.open(NovaPlaySettings, self._site)
 
     def _showLibrary(self, kind):
         if kind == "favorites":
@@ -2825,7 +2825,7 @@ class AdvancedArabicPlayerHome(Screen):
         self._setStatus("")
 
     def _onSearch(self, forced_scope=None):
-        self.session.openWithCallback(self._onSearchQuery, AdvancedArabicPlayerSearch, current_site=self._site, default_scope=forced_scope or "all", query=self._last_query)
+        self.session.openWithCallback(self._onSearchQuery, NovaPlaySearch, current_site=self._site, default_scope=forced_scope or "all", query=self._last_query)
 
     def _onSearchQuery(self, result=None):
         if not result:
@@ -2875,7 +2875,7 @@ class AdvancedArabicPlayerHome(Screen):
         self._setList(_rank_search_items(items, query))
 
     def _openItem(self, item):
-        self.session.open(AdvancedArabicPlayerDetail, item=item, site=item.get("_site", self._site), m_type=item.get("type", self._m_type))
+        self.session.open(NovaPlayDetail, item=item, site=item.get("_site", self._site), m_type=item.get("type", self._m_type))
 
     def _nextPage(self):
         next_url = getattr(self, "_next_page_url", None)

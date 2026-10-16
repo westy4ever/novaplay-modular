@@ -9,18 +9,18 @@ from enigma import eTimer, ePicLoad
 
 from plugin_common import PLUGIN_PATH
 from plugin_gridlist import scale_skin_xml, SCREEN_W, SCREEN_H
-from plugin_screen_home import AdvancedArabicPlayerHome
+from plugin_screen_home import NovaPlayHome
 
 
-class AdvancedArabicPlayerSplash(Screen):
+class NovaPlaySplash(Screen):
     skin = scale_skin_xml("""
-    <screen name="AdvancedArabicPlayerSplash" position="0,0" size="1920,1080" flags="wfNoBorder" backgroundColor="#000000">
+    <screen name="NovaPlaySplash" position="0,0" size="1920,1080" flags="wfNoBorder" backgroundColor="#000000">
         <widget name="splash_pic" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" />
     </screen>
     """.format(PLUGIN_PATH))
 
     def __init__(self, session):
-        self.skin = AdvancedArabicPlayerSplash.skin
+        self.skin = NovaPlaySplash.skin
         Screen.__init__(self, session)
         self["splash_pic"] = Pixmap()
         self._timer = eTimer()
@@ -49,5 +49,5 @@ class AdvancedArabicPlayerSplash(Screen):
             self.picLoad.PictureData.get().remove(self._paintSplash)
         except Exception:
             pass
-        self.session.open(AdvancedArabicPlayerHome)
+        self.session.open(NovaPlayHome)
         self.close()

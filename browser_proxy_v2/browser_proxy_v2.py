@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ArabicPlayer Browser Proxy v2.1 — persistent per-domain contexts.
+"""NovaPlay Browser Proxy v2.1 — persistent per-domain contexts.
 
 v2.1 changes:
   - FETCH LOCK: Playwright sync API is not thread-safe; v2's
@@ -257,7 +257,7 @@ def stats():
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("ArabicPlayer Browser Proxy v2.1")
+    print("NovaPlay Browser Proxy v2.1")
     print("  persistent per-domain contexts, serialized fetches")
     print("  POST /fetch   GET /health   GET /stats")
     print("Running on http://0.0.0.0:5000")

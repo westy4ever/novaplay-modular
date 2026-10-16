@@ -10,7 +10,7 @@ restore full context instantly.
 1. After ANY file edit, restart Enigma2 before testing:   init 4 && init 3
    (Edits are invisible to the running system until restart.)
 2. Always check the log when something misbehaves:
-   tail -50 /tmp/arabicplayer.log
+   tail -50 /tmp/novaplay.log
 3. python3 -m py_compile FILENAME  — checks a file for typos after editing.
 4. Positions/badges/strip update LIVE in state; a plugin restart is only
    needed after editing FILES, not after watching something.
@@ -94,7 +94,7 @@ Never fully reviewed: plugin.py, plugin_util.py, plugin_downloads.py,
 ## MAINTENANCE WORKFLOW
 1. Notice issue → collect evidence:
    grep -n "SOMETHING" FILE.py
-   tail -50 /tmp/arabicplayer.log
+   tail -50 /tmp/novaplay.log
 2. Paste evidence + question to your assistant.
 3. Apply the patch it gives (edit file, or nano + paste).
 4. python3 -m py_compile THE_FILE.py
@@ -271,6 +271,6 @@ Two separate false leads this session were both eventually traced to STALE STATE
 actual source: applying a fix and seeing no behavior change turned out, more than once, to be
 Python loading old cached .pyc bytecode rather than the freshly-edited .py file. When a patch
 is confirmed present in the source (grep on the markers) but nothing changes on-device, clearing
-__pycache__ (`find / -name "__pycache__" -path "*AdvancedArabicPlayer*" -exec rm -rf {} +`) and
+__pycache__ (`find / -name "__pycache__" -path "*NovaPlay*" -exec rm -rf {} +`) and
 the log before the next test is worth doing on principle, not just as a last resort.
 

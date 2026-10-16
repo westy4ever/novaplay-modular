@@ -3,7 +3,7 @@
 
 Adds (this revision):
   * [A2] "📥 Downloads Manager" entry in the tools menu, opening
-    the new AdvancedArabicPlayerDownloads screen.
+    the new NovaPlayDownloads screen.
   * [A3] "⏭️ Next-Episode Delay" entry — a ChoiceBox for the seconds
     the auto-next card counts down before auto-starting.
 """
@@ -22,12 +22,12 @@ from plugin_state import _get_config, _set_config, _PLUGIN_OWNER, _favorite_item
 from plugin_util import _site_label, _site_tagline
 from novaplay_diagnostics import NovaDiagnosticsScreen
 from install_dependencies import open_installer_with_restart, open_restart_prompt
-from plugin_screen_downloads import AdvancedArabicPlayerDownloads
+from plugin_screen_downloads import NovaPlayDownloads
 
 
-class AdvancedArabicPlayerSettings(Screen):
+class NovaPlaySettings(Screen):
     skin = scale_skin_xml("""
-    <screen name="AdvancedArabicPlayerSettings" position="center,center" size="1920,1080" flags="wfNoBorder">
+    <screen name="NovaPlaySettings" position="center,center" size="1920,1080" flags="wfNoBorder">
         <ePixmap position="0,0" size="1920,1080" pixmap="{}/images/bg_settings.png" zPosition="0" alphatest="blend" />
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
         <widget name="title" position="60,30" size="900,57" font="Regular;45" foregroundColor="#00E5FF" transparent="1" zPosition="3" />
@@ -197,7 +197,7 @@ class AdvancedArabicPlayerSettings(Screen):
         if action == "diagnostics":
             self.session.open(NovaDiagnosticsScreen)
         elif action == "downloads":
-            self.session.open(AdvancedArabicPlayerDownloads)
+            self.session.open(NovaPlayDownloads)
         elif action == "install_deps":
             open_installer_with_restart(self.session)
         elif action == "subtitles":

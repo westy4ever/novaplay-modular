@@ -65,7 +65,7 @@ try:
 except Exception:
     def _log(msg):
         try:
-            with open("/tmp/arabicplayer.log", "a") as f:
+            with open("/tmp/novaplay.log", "a") as f:
                 f.write("[downloads] {}\n".format(msg))
         except Exception:
             pass

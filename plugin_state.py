@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Arabic Player - State / persistence
+NovaPlay - State / persistence
 ==============================================
 Config, favorites, history and saved-playback-position storage.
 
@@ -22,7 +22,7 @@ import threading
 
 from extractors.base import log as _log
 
-_PLUGIN_OWNER = "ArabicPlayer Team"
+_PLUGIN_OWNER = "NovaPlay Team"
 _DEFAULT_TMDB_API_KEY = "46b050dc88e3c52e9d1bca4b656036e4"
 
 PLUGIN_PATH = os.path.dirname(__file__)
@@ -38,17 +38,87 @@ _KEY_NAMES = ("tmdb_api_key", "subsource_api_key", "opensubtitles_api_key",
               "opensubtitles_user", "opensubtitles_pass")
 
 
+_STATE_FILE = "novaplay_state.json"
+
+# ─── one-time migration from the old "Advanced Arabic Player" name ────────
+# The plugin used to live in Extensions/AdvancedArabicPlayer and keep its
+# settings in advanced_arabic_player_state.json and its caches under
+# /media/hdd/AdvancedArabicPlayer. After the rename to NovaPlay, carry all of
+# that over ONCE, so settings, favourites, history, watch positions, API keys
+# and the poster cache survive. Old files are copied, never deleted, so going
+# back to the old version still works. Safe to run on every start: each step
+# only acts when the new file is missing and the old one exists.
+_LEGACY_STATE_FILE = "advanced_arabic_player_state.json"
+_LEGACY_PLUGIN_DIR = "/usr/lib/enigma2/python/Plugins/Extensions/AdvancedArabicPlayer"
+_MIGRATED = [False]
+
+
+def _migrate_legacy_files():
+    if _MIGRATED[0]:
+        return
+    _MIGRATED[0] = True
+    import shutil
+    # settings / favourites / history / positions
+    for old, new in (
+            ("/etc/enigma2/" + _LEGACY_STATE_FILE, "/etc/enigma2/" + _STATE_FILE),
+            (os.path.join(_LEGACY_PLUGIN_DIR, _LEGACY_STATE_FILE), "/etc/enigma2/" + _STATE_FILE),
+            (os.path.join(PLUGIN_PATH, _LEGACY_STATE_FILE), os.path.join(PLUGIN_PATH, _STATE_FILE)),
+            ("/tmp/" + _LEGACY_STATE_FILE, "/tmp/" + _STATE_FILE)):
+        try:
+            if os.path.isfile(old) and not os.path.exists(new) and os.access(os.path.dirname(new), os.W_OK):
+                shutil.copy2(old, new)
+                if os.path.isfile(old + ".bak") and not os.path.exists(new + ".bak"):
+                    shutil.copy2(old + ".bak", new + ".bak")
+                _log("NovaPlay: migrated settings {} -> {}".format(old, new))
+        except Exception as e:
+            _log("NovaPlay: settings migration skipped ({}): {}".format(old, e))
+    # API keys file lived inside the old plugin folder
+    try:
+        old_keys = os.path.join(_LEGACY_PLUGIN_DIR, "api_keys.conf")
+        new_keys = os.path.join(PLUGIN_PATH, "api_keys.conf")
+        if (os.path.realpath(_LEGACY_PLUGIN_DIR) != os.path.realpath(PLUGIN_PATH)
+                and os.path.isfile(old_keys) and not os.path.exists(new_keys)):
+            shutil.copy2(old_keys, new_keys)
+            os.chmod(new_keys, 0o600)
+            _log("NovaPlay: migrated api_keys.conf from the old plugin folder")
+    except Exception as e:
+        _log("NovaPlay: api_keys.conf migration skipped: {}".format(e))
+    # poster / TMDB / trailer cache: move entries the new tree doesn't have yet
+    for old_root, new_root in (("/media/hdd/AdvancedArabicPlayer", "/media/hdd/NovaPlay"),
+                               ("/tmp/AdvancedArabicPlayer", "/tmp/NovaPlay")):
+        try:
+            if not os.path.isdir(old_root):
+                continue
+            if not os.path.exists(new_root):
+                os.rename(old_root, new_root)
+                _log("NovaPlay: moved cache {} -> {}".format(old_root, new_root))
+                continue
+            for dirpath, dirnames, filenames in os.walk(old_root):
+                rel = os.path.relpath(dirpath, old_root)
+                dest_dir = os.path.normpath(os.path.join(new_root, rel))
+                if not os.path.isdir(dest_dir):
+                    os.makedirs(dest_dir)
+                for fn in filenames:
+                    dest = os.path.join(dest_dir, fn)
+                    if not os.path.exists(dest):
+                        os.rename(os.path.join(dirpath, fn), dest)
+            _log("NovaPlay: merged cache {} into {}".format(old_root, new_root))
+        except Exception as e:
+            _log("NovaPlay: cache migration skipped ({}): {}".format(old_root, e))
+
+
 def _state_path():
-    for candidate in ("/etc/enigma2/advanced_arabic_player_state.json",
-                      os.path.join(PLUGIN_PATH, "advanced_arabic_player_state.json"),
-                      "/tmp/advanced_arabic_player_state.json"):
+    _migrate_legacy_files()
+    for candidate in ("/etc/enigma2/" + _STATE_FILE,
+                      os.path.join(PLUGIN_PATH, _STATE_FILE),
+                      "/tmp/" + _STATE_FILE):
         try:
             parent = os.path.dirname(candidate)
             if parent and os.path.isdir(parent) and os.access(parent, os.W_OK):
                 return candidate
         except Exception:
             pass
-    return "/tmp/advanced_arabic_player_state.json"
+    return "/tmp/" + _STATE_FILE
 
 
 def _default_state():
@@ -112,6 +182,9 @@ def _load_state():
             except Exception:
                 pass
         state.setdefault("hidden_sites", [])
+        # the owner label saved by the old name
+        if (state.get("config") or {}).get("owner") == "ArabicPlayer Team":
+            state["config"]["owner"] = _PLUGIN_OWNER
         _STATE_CACHE = state
         _load_api_keys_file(state)
         return _STATE_CACHE

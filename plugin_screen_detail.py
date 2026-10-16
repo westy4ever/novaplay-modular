@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """NovaPlay — Detail screen (servers / episodes / qualities / chain).
-MODULAR EXTRACTION of AdvancedArabicPlayerDetail with:
+MODULAR EXTRACTION of NovaPlayDetail with:
   * episode chain + auto-server (next-episode support, _playNextEpisode)
   * health hooks on load/extract
   * quality-choices kept populated (variants → Back → servers → grid)
@@ -55,7 +55,7 @@ from plugin_util import (_single_line_text, _wrap_ui_text,
                           _get_cached_poster, _fetch_poster_bytes)
 from plugin_tmdb import _tmdb_enabled, _merge_tmdb_data
 from plugin_util import _split_episode_label                    # [PATCH 81]
-from plugin_screen_player import AdvancedArabicPlayerSimplePlayer, _play
+from plugin_screen_player import NovaPlaySimplePlayer, _play
 from plugin_widgets import StreamList
 import plugin_health
 import plugin_imagecache
@@ -77,7 +77,7 @@ _BACKDROP_WIDTH_BOOST = 1.3
 # bigger than a poster thumbnail) go there too rather than risking a
 # RAM-backed /tmp filling up and taking the box down. /tmp is only the
 # fallback for a device with no HDD mounted at all.
-_TRAILER_CACHE_BASE_HDD = "/media/hdd/AdvancedArabicPlayer/cache/trailers"
+_TRAILER_CACHE_BASE_HDD = "/media/hdd/NovaPlay/cache/trailers"
 _TRAILER_CACHE_BASE_TMP = "/tmp/ap_trailers"
 _TRAILER_CACHE_MAX_FILES = 8
 # [detail-trailer] Trailers are a quick preview, not the main feature, so
@@ -148,13 +148,13 @@ def _quality_pref_key(title):
 # [row-compact] Site keys (extractors/registry.py) whose server rows carry
 # a real torrent seeder count and so need StreamList's taller, two-line
 # row. Every other site gets the shorter single-line row -- see
-# AdvancedArabicPlayerDetail._applyMenuRowHeight().
+# NovaPlayDetail._applyMenuRowHeight().
 _TORRENT_SEEDER_SITES = ("torrentio", "yts")
 
 
-class AdvancedArabicPlayerDetail(Screen):
+class NovaPlayDetail(Screen):
     skin = """
-    <screen name="AdvancedArabicPlayerDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
+    <screen name="NovaPlayDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
 
         <!-- [detail-tmdb] poster_box, info_box and plot_box merged into one
@@ -268,7 +268,7 @@ class AdvancedArabicPlayerDetail(Screen):
 
     def __init__(self, session, item, site="egydead", m_type="movie",
                  episode_chain=None, episode_index=-1, auto_server_idx=None):
-        self.skin = AdvancedArabicPlayerDetail.skin.format(plugin_path=PLUGIN_PATH)
+        self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH)
         Screen.__init__(self, session)
         self.session = session
         self._item   = item
@@ -673,7 +673,7 @@ class AdvancedArabicPlayerDetail(Screen):
         elif self._episodes:
             if idx >= len(self._episodes): return
             ep = self._episodes[idx]
-            self.session.open(AdvancedArabicPlayerDetail, ep, self._site, ep.get("type", "episode"),
+            self.session.open(NovaPlayDetail, ep, self._site, ep.get("type", "episode"),
                               episode_chain=self._episodes, episode_index=idx)
         elif self._servers:
             if idx >= len(self._servers): return
@@ -1711,7 +1711,7 @@ class AdvancedArabicPlayerDetail(Screen):
             return
         self._closed = True
         self.session.open(
-            AdvancedArabicPlayerDetail, next_ep, self._site,
+            NovaPlayDetail, next_ep, self._site,
             next_ep.get("type", "episode"),
             episode_chain=self._episode_chain,
             episode_index=self._episode_index + 1,
@@ -2036,7 +2036,7 @@ class AdvancedArabicPlayerDetail(Screen):
             return
         self["status"].setText("جاري فتح التريلر...")
         try:
-            # [FIX] switched to the app's own AdvancedArabicPlayerSimplePlayer
+            # [FIX] switched to the app's own NovaPlaySimplePlayer
             # instead of either _play() or the stock Screens.InfoBar.MoviePlayer
             # tried before. Two real-device-confirmed problems with the stock
             # player are just how it's built, not something fixable from the
@@ -2045,7 +2045,7 @@ class AdvancedArabicPlayerDetail(Screen):
             # even after forcing that setting to "stop" for the duration --
             # it didn't take effect on this device/image), and its exit key
             # goes through the SAME near-end/leave-player logic regardless of
-            # what's playing. AdvancedArabicPlayerSimplePlayer's own __onEOF
+            # what's playing. NovaPlaySimplePlayer's own __onEOF
             # (used for every other stream in this app already) just calls
             # __onExit() and closes -- no movielist, no global setting
             # involved -- and __onCancelKey does the same unless playback is
@@ -2055,7 +2055,7 @@ class AdvancedArabicPlayerDetail(Screen):
             # screen (by EOF or by exit) just reveals the detail screen
             # underneath, same as any other screen on the stack.
             candidates = [(4097, local_path, u"تريلر محلي", False)]
-            self.session.open(AdvancedArabicPlayerSimplePlayer, trailer_title, candidates,
+            self.session.open(NovaPlaySimplePlayer, trailer_title, candidates,
                                previous_service=None, resume_pos=0, item_url="",
                                next_episode=None, on_next=None,
                                poster_url=self._osd_poster, quality_variants=None,

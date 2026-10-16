@@ -37,9 +37,9 @@ _STATUS_LABELS = {
 }
 
 
-class AdvancedArabicPlayerDownloads(Screen):
+class NovaPlayDownloads(Screen):
     skin = scale_skin_xml("""
-    <screen name="AdvancedArabicPlayerDownloads" position="center,center" size="1700,940" title="Downloads — التنزيلات" flags="wfNoBorder">
+    <screen name="NovaPlayDownloads" position="center,center" size="1700,940" title="Downloads — التنزيلات" flags="wfNoBorder">
         <eLabel position="0,0" size="1700,940" backgroundColor="#0D1117" zPosition="0" />
         <eLabel position="0,0" size="1700,90" backgroundColor="#161B22" zPosition="1" />
         <widget name="header" position="50,20" size="1600,50" font="Regular;38" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
@@ -52,7 +52,7 @@ class AdvancedArabicPlayerDownloads(Screen):
 
     def __init__(self, session):
         Screen.__init__(self, session)
-        self.skinName = ["AdvancedArabicPlayerDownloads"]
+        self.skinName = ["NovaPlayDownloads"]
         self["header"] = Label("التنزيلات")
         self["footer"] = Label("")
         self["list"] = MenuList([])

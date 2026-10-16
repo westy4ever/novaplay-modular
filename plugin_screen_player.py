@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """NovaPlay — playback screen + service orchestration.
 
-MODULAR EXTRACTION of AdvancedArabicPlayerSimplePlayer plus _play /
+MODULAR EXTRACTION of NovaPlaySimplePlayer plus _play /
 _build_remote_play_candidates / service capture-restore. Full feature
 set with ALL session patches baked in:
 
@@ -261,9 +261,9 @@ def _restore_previous_service(session, previous_service):
 
 # ─── The player screen ───────────────────────────────────────────────────
 
-class AdvancedArabicPlayerSimplePlayer(Screen):
+class NovaPlaySimplePlayer(Screen):
     skin = scale_skin_xml("""
-    <screen name="AdvancedArabicPlayerSimplePlayer" position="0,0" size="1920,1080" flags="wfNoBorder" backgroundColor="transparent">
+    <screen name="NovaPlaySimplePlayer" position="0,0" size="1920,1080" flags="wfNoBorder" backgroundColor="transparent">
         <widget name="aspect_bar_l" position="0,0" size="1,1080" backgroundColor="#000000" zPosition="5" />
         <widget name="aspect_bar_r" position="1919,0" size="1,1080" backgroundColor="#000000" zPosition="5" />
         <widget name="recBlink" position="1660,42" size="190,54" font="Regular;36" halign="center" valign="center" foregroundColor="#00FF0000" backgroundColor="#AA000000" transparent="0" zPosition="95" cornerRadius="16" />
@@ -3508,7 +3508,7 @@ def _play(session, url, title, resume_pos=0, item_url="",
         is_remote = svc_url.startswith("http://") or svc_url.startswith("https://")
         previous_service = _capture_previous_service(session)
         if is_remote:
-            session.open(AdvancedArabicPlayerSimplePlayer, title,
+            session.open(NovaPlaySimplePlayer, title,
                          _build_remote_play_candidates(svc_url), previous_service,
                          resume_pos=resume_pos, item_url=item_url,
                          next_episode=next_episode, on_next=on_next,
@@ -3530,7 +3530,7 @@ def _play(session, url, title, resume_pos=0, item_url="",
                 session.openWithCallback(callback, MoviePlayer, sref)
         except Exception as e:
             my_log("[PLAY_INFOBAR_FALLBACK] " + str(e))
-            session.open(AdvancedArabicPlayerSimplePlayer, title,
+            session.open(NovaPlaySimplePlayer, title,
                          _build_remote_play_candidates(svc_url), previous_service,
                          resume_pos=resume_pos, item_url=item_url,
                          next_episode=next_episode, on_next=on_next,

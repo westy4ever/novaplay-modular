@@ -21,7 +21,7 @@ class StreamList(GUIComponent):
     # ROW_H_NORMAL (95px) is the original two-line layout (quality +
     # source tag stacked, size + seeders stacked) -- needed only by
     # sites that report a REAL torrent seeder count (torrentio, yts):
-    # AdvancedArabicPlayerDetail._format_server_item only ever fills in
+    # NovaPlayDetail._format_server_item only ever fills in
     # "Seeders: N" when the server name's metadata starts with a digit,
     # which is a torrent-only convention. Every other site's server
     # list is really one line of text (name, maybe a size/source tag),

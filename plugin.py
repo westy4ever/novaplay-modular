@@ -34,16 +34,16 @@ from Plugins.Plugin import PluginDescriptor
 
 import plugin_common                                  # sys.path shim + constants
 from plugin_common import _PLUGIN_NAME
-from plugin_screen_splash import AdvancedArabicPlayerSplash
+from plugin_screen_splash import NovaPlaySplash
 
 # Re-exported so external references (diagnostics, tools, any skin
 # patches) keep working against the old names:
-from plugin_screen_home import AdvancedArabicPlayerHome            # noqa: F401
-from plugin_screen_detail import AdvancedArabicPlayerDetail        # noqa: F401
-from plugin_screen_player import (AdvancedArabicPlayerSimplePlayer,  # noqa: F401
+from plugin_screen_home import NovaPlayHome            # noqa: F401
+from plugin_screen_detail import NovaPlayDetail        # noqa: F401
+from plugin_screen_player import (NovaPlaySimplePlayer,  # noqa: F401
                                   _play, _build_remote_play_candidates)
-from plugin_screen_search import AdvancedArabicPlayerSearch        # noqa: F401
-from plugin_screen_settings import AdvancedArabicPlayerSettings    # noqa: F401
+from plugin_screen_search import NovaPlaySearch        # noqa: F401
+from plugin_screen_settings import NovaPlaySettings    # noqa: F401
 
 # Restore the browser proxy setting at boot (was in the monolith).
 try:
@@ -55,7 +55,7 @@ except Exception:
 
 
 def main(session, **kwargs):
-    session.open(AdvancedArabicPlayerSplash)
+    session.open(NovaPlaySplash)
 
 
 def Plugins(**kwargs):

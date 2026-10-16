@@ -70,7 +70,7 @@ def gate_tests():
 
 def snapshot():
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    dest = os.path.join(os.path.dirname(HERE), "AdvancedArabicPlayer.bak-" + stamp)
+    dest = os.path.join(os.path.dirname(HERE), "NovaPlay.bak-" + stamp)
     shutil.copytree(HERE, dest)
     print("snapshot: {}".format(dest))
     return dest

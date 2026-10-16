@@ -22,9 +22,9 @@ from plugin_util import (_wrap_ui_text, _single_line_text,
 from novaplay_thread import callInMainThread
 
 
-class AdvancedArabicPlayerSearch(Screen):
+class NovaPlaySearch(Screen):
     skin = scale_skin_xml("""
-    <screen name="AdvancedArabicPlayerSearch" position="center,center" size="1920,1080" flags="wfNoBorder">
+    <screen name="NovaPlaySearch" position="center,center" size="1920,1080" flags="wfNoBorder">
         <ePixmap position="0,0" size="1920,1080" pixmap="{}/images/bg_search.png" zPosition="0" alphatest="blend" />
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
         <widget name="title" position="60,30" size="900,54" font="Regular;45" foregroundColor="#00E5FF" transparent="1" zPosition="3" />

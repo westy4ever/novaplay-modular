@@ -92,7 +92,7 @@ _cookiejar = None
 _curl_session_local = threading.local()
 
 # ─── Log ────────────────────────────────────────────────────────────────────
-_LOG_PATH = "/tmp/arabicplayer.log"
+_LOG_PATH = "/tmp/novaplay.log"
 _LOG_MAX_BYTES = 2 * 1024 * 1024  # 2 MB cap
 
 

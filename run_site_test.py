@@ -8,7 +8,7 @@ plugin uses, against the real site, and reports PASS / WARN / FAIL per step.
 
 Run on the box (no Enigma2 needed, nothing is played or changed):
 
-    cd /usr/lib/enigma2/python/Plugins/Extensions/AdvancedArabicPlayer
+    cd /usr/lib/enigma2/python/Plugins/Extensions/NovaPlay
     python3 run_site_test.py sflix_pro              # one registered site
     python3 run_site_test.py --all                  # quick check of every site
     python3 run_site_test.py --list                 # show site keys
@@ -18,7 +18,7 @@ Run on the box (no Enigma2 needed, nothing is played or changed):
     python3 run_site_test.py sflix_pro --servers 8  # try more servers
 
 The report is printed and also saved to /tmp/site_test_<site>.txt; the
-plugin's own detailed log keeps going to /tmp/arabicplayer.log as usual.
+plugin's own detailed log keeps going to /tmp/novaplay.log as usual.
 Exit code: 0 = all passed, 1 = a step failed, 2 = bad arguments.
 """
 
@@ -142,7 +142,7 @@ def check_items(items, what):
     content = [i for i in items if not is_nav_item(i)]
     if not items:
         return "FAIL", ("returned an empty list -- site unreachable/blocked, or its page "
-                        "layout changed so nothing matched (details: /tmp/arabicplayer.log)"), []
+                        "layout changed so nothing matched (details: /tmp/novaplay.log)"), []
     if not content:
         return "FAIL", "no {} returned ({} entries, all navigation/next-page)".format(
             what, len(items)), []

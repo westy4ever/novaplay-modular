@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Advanced Arabic Player - Custom grid widgets (resolution-aware)
+NovaPlay - Custom grid widgets (resolution-aware)
 ================================================================
 
 FINAL SET (12 features kept from the UX batch):
@@ -534,7 +534,7 @@ class TextListGrid(_BaseCardGrid):
 
     # [catlist-effects] Screen-space Y of a visible row's top edge, relative
     # to the listbox widget. Returns None when the row is off-page. Used by
-    # AdvancedArabicPlayerHome to park the accent bar next to the selection.
+    # NovaPlayHome to park the accent bar next to the selection.
     def getRowY(self, row_idx):
         s = self._getPageStart()
         e = self._getPageEnd()
