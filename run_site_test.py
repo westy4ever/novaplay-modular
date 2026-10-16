@@ -106,16 +106,33 @@ def short(s, n=90):
     return s if len(s) <= n else s[:n - 3] + "..."
 
 
-def is_nav_item(it):
-    """Next/prev-page tiles and separators aren't content."""
+def is_page_link(it):
+    """Next/prev-page tiles."""
     if not isinstance(it, dict):
         return True
     if it.get("_is_next_page") or it.get("_is_prev_page"):
         return True
-    if it.get("type") in ("separator", "category") or it.get("_action") == "category":
-        return True
     t = str(it.get("title", ""))
-    return any(k in t for k in ("Next", "التالي", "Page ", "صفحة"))
+    return any(k in t for k in ("Next", "Prev", "التالي", "السابق", "Page ", "صفحة"))
+
+
+def is_subfolder(it):
+    """A category inside a category -- the plugin opens it with
+    get_category_items(), not get_page()."""
+    return (isinstance(it, dict) and not is_page_link(it) and it.get("url")
+            and (it.get("type") == "category" or it.get("_action") == "category"))
+
+
+def is_nav_item(it):
+    """Anything that isn't a playable/openable title: separators, page links,
+    sub-folders."""
+    if not isinstance(it, dict) or is_page_link(it):
+        return True
+    return it.get("type") in ("separator", "category") or it.get("_action") == "category"
+
+
+# exactly the sub-item types plugin_screen_detail.py lists as seasons/episodes
+DETAIL_CHILD_TYPES = ("episode", "series", "season")
 
 
 def check_items(items, what):
@@ -249,6 +266,20 @@ def check_stream(stream_url, referer=None):
     return "WARN", "reachable (HTTP {}, type {!r}) but not recognisably video".format(code, ctype)
 
 
+def resolve_like_plugin(ext, url):
+    """extract_stream() then attach_cookies(), in the SAME thread -- exactly what
+    plugin_screen_detail._bgExtract does. The scraper's cookies are thread-local,
+    so attaching them from another thread would silently add nothing and
+    cookie-protected streams would wrongly look broken."""
+    result = ext.extract_stream(url)
+    try:
+        from novaplay_proxy import attach_cookies
+        result = attach_cookies(result)
+    except Exception:
+        pass
+    return result
+
+
 # ─── loading ─────────────────────────────────────────────────────────────────
 
 def load_extractor(target):
@@ -309,13 +340,22 @@ def test_site(name, ext, args, quick=False):
         # 2. items in the first category that actually has content
         content = []
         for cat in usable[:3]:
-            items, err, secs = run_with_timeout(ext.get_category_items, STEP_TIMEOUT, cat["url"])
-            title = "get_category_items({!r})".format(short(cat.get("title", ""), 40))
-            if err:
-                rep.step("FAIL", title, err, secs)
-                continue
-            status, detail, content = check_items(items, "items")
-            rep.step(status, title, detail, secs)
+            cat_url, cat_title = cat["url"], cat.get("title", "")
+            for _level in range(3):          # category -> sub-folder -> sub-folder
+                items, err, secs = run_with_timeout(ext.get_category_items, STEP_TIMEOUT, cat_url)
+                title = "get_category_items({!r})".format(short(cat_title, 40))
+                if err:
+                    rep.step("FAIL", title, err, secs)
+                    break
+                folders = [i for i in (items or []) if is_subfolder(i)] if isinstance(items, list) else []
+                if folders and not [i for i in items if not is_nav_item(i)]:
+                    rep.step("PASS", title, "{} sub-folder(s), no titles at this level -> opening {!r}".format(
+                        len(folders), short(folders[0].get("title", ""), 40)), secs)
+                    cat_url, cat_title = folders[0]["url"], folders[0].get("title", "")
+                    continue
+                status, detail, content = check_items(items, "items")
+                rep.step(status, title, detail, secs)
+                break
             if content:
                 break
         if not content:
@@ -345,7 +385,8 @@ def test_site(name, ext, args, quick=False):
             rep.step("FAIL", title, err or "returned {}".format(type(data).__name__), secs)
             return rep
         servers = [s for s in (data.get("servers") or []) if isinstance(s, dict) and s.get("url")]
-        children = [i for i in (data.get("items") or []) if not is_nav_item(i) and i.get("url")]
+        children = [i for i in (data.get("items") or [])
+                    if isinstance(i, dict) and i.get("url") and i.get("type") in DETAIL_CHILD_TYPES]
         info = "title: {!r} | type: {} | servers: {} | sub-items: {}".format(
             short(data.get("title", ""), 40), data.get("type"), len(servers), len(children))
         if servers:
@@ -355,6 +396,11 @@ def test_site(name, ext, args, quick=False):
             rep.step("PASS", title, info + "\n-> opening first sub-item (season/episode)", secs)
             page_url = children[0]["url"]
             continue
+        if data.get("downloads"):
+            rep.step("WARN", title, info + "\nno stream servers, but {} download link(s) "
+                     "(the blue key in the plugin) -- downloads aren't tested here".format(
+                         len(data["downloads"])), secs)
+            return rep
         rep.step("FAIL", title, info + "\nno servers and nothing to open", secs)
         return rep
     else:
@@ -371,7 +417,14 @@ def test_site(name, ext, args, quick=False):
     for srv in servers[:max(1, args.servers)]:
         tried += 1
         label = "server {}/{}: {}".format(tried, len(servers), short(srv.get("name") or srv.get("url"), 45))
-        res, err, secs = run_with_timeout(ext.extract_stream, STEP_TIMEOUT, srv["url"])
+        if str(srv["url"]).startswith("magnet:"):
+            # the plugin hands magnets straight to TorrServer, never to extract_stream()
+            playable += 1
+            rep.step("PASS", label, "magnet link -> TorrServer (not streamed by this test)")
+            if not args.all_servers:
+                break
+            continue
+        res, err, secs = run_with_timeout(resolve_like_plugin, STEP_TIMEOUT, ext, srv["url"])
         if err:
             rep.step("BAD", label, "extract_stream error: " + err, secs)
             continue
@@ -402,7 +455,19 @@ def test_site(name, ext, args, quick=False):
     return rep
 
 
+def apply_plugin_settings():
+    """Use the same browser-proxy setting the plugin applies at startup
+    (plugin.py), so Cloudflare-protected sites behave exactly as on screen."""
+    try:
+        from plugin_state import _get_config
+        from extractors.net import set_browser_proxy
+        set_browser_proxy(_get_config("browser_proxy", ""))
+    except Exception:
+        pass
+
+
 def main():
+    apply_plugin_settings()
     ap = argparse.ArgumentParser(description="Live-test a NovaPlay extractor against its real site.")
     ap.add_argument("target", nargs="?", help="registry site key, or path to an extractor .py file")
     ap.add_argument("--all", action="store_true", help="quick check (categories + items) of every registered site")
