@@ -2,3 +2,11 @@ cd /usr/lib/enigma2/python/Plugins/Extensions/AdvancedArabicPlayer
 python3 run_tests.py
 
 python3 run_release_gate.py
+
+# Live-test one site against the real website (categories -> items -> page -> servers -> stream)
+python3 run_site_test.py sflix_pro
+# Quick check of every site (categories + items only)
+python3 run_site_test.py --all
+# Test a new or generated extractor file before registering it
+python3 run_site_test.py extractors/new_site.py
+# Site keys:  python3 run_site_test.py --list     Reports are saved to /tmp/site_test_<site>.txt
