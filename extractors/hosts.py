@@ -2971,11 +2971,16 @@ def _em_probe(stream, headers, xor_key=None):
     if xor_key:
         # Box: the same link answered 404 five seconds after this check, so hand the
         # playlist we already have to the local proxy instead of fetching it again.
+        # The level playlists it lists die just as fast (404 a few seconds later on the
+        # box), so fetch them now as well.
         try:
             import novaplay_proxy
             novaplay_proxy.remember_playlist(stream, data.decode("utf-8", "ignore"), stream)
+            ph = {"User-Agent": novaplay_proxy.SAFE_UA}
+            ph.update({k: v for k, v in headers.items() if k in ("Referer", "Origin")})
+            novaplay_proxy.prefetch_hls(stream, ph, xor_key, wait=True)
         except Exception as e:
-            log("resolve_embedmaster: could not hand playlist to the proxy: {}".format(e))
+            log("resolve_embedmaster: could not hand playlists to the proxy: {}".format(e))
     return True
 
 

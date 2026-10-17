@@ -219,6 +219,105 @@ def _cached_playlist(url):
     return None
 
 
+# Single-flight playlist fetch + background warm-up.
+# [NEW 2026-10-17] Box: bx.netrocdn.site took 30 s for a master playlist and
+# 75 s for its 467 KB level playlist, while the player fired several identical
+# requests at once (each starting its own slow download). One download per URL
+# now; others wait for it. prefetch_hls() starts it the moment playback is
+# requested, so it runs while the player is still trying its other candidates.
+_INFLIGHT = {}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def playlist_fetch_in_progress():
+    with _INFLIGHT_LOCK:
+        return bool(_INFLIGHT)
+
+
+def wait_inflight(url, timeout=120):
+    with _INFLIGHT_LOCK:
+        ev = _INFLIGHT.get(url)
+    if ev is None:
+        return False
+    _log("Proxy: waiting for the playlist download already running: {}".format(url[:90]))
+    ev.wait(timeout)
+    return True
+
+
+def fetch_playlist_text(url, headers, xor_key="", timeout=90):
+    """(text, base_url) of an HLS playlist, from cache, from a download already
+    running, or downloaded now. None on failure."""
+    hit = _cached_playlist(url)
+    if hit:
+        return hit
+    with _INFLIGHT_LOCK:
+        ev = _INFLIGHT.get(url)
+        mine = ev is None
+        if mine:
+            ev = _INFLIGHT[url] = threading.Event()
+    if not mine:
+        ev.wait(timeout)
+        return _cached_playlist(url)
+    try:
+        fetch_url = _XOR_M3U8_RE.sub(r".txt\1", url, count=1) if xor_key else url
+        h = dict(headers)
+        h.pop("Range", None)
+        h.setdefault("Accept", "*/*")
+        h["Accept-Encoding"] = "identity"
+        t0 = time.time()
+        resp = _urlreq.urlopen(_urlreq.Request(fetch_url, headers=h), timeout=timeout)
+        raw = resp.read(_SNIFF_MAX)
+        base = url if xor_key else (resp.geturl() or url)
+        if xor_key:
+            raw = _xor_bytes(raw, xor_key)
+        text = raw.decode("utf-8", "ignore")
+        if not text.lstrip().startswith("#EXTM3U"):
+            _log("Proxy: not a playlist ({}): {}".format("XOR key changed?" if xor_key else "decoy", fetch_url[:90]))
+            return None
+        _log("Proxy: downloaded playlist in {:.1f}s ({} bytes): {}".format(time.time() - t0, len(raw), url[:90]))
+        if "#EXT-X-ENDLIST" in text or "#EXT-X-STREAM-INF" in text:
+            remember_playlist(url, text, base)
+        else:
+            # live playlist: hand it to waiters once, but don't keep it
+            with _PL_LOCK:
+                _PL_CACHE[url] = (time.time() - _PL_TTL + 5, text, base)
+        return text, base
+    except Exception as e:
+        _log("Proxy: playlist download failed: {} ({})".format(e, url[:90]))
+        return None
+    finally:
+        with _INFLIGHT_LOCK:
+            _INFLIGHT.pop(url, None)
+        ev.set()
+
+
+def _variant_urls(text, base):
+    out, want = [], False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("#EXT-X-STREAM-INF"):
+            want = True
+        elif s and not s.startswith("#") and want:
+            out.append(urljoin(base, s))
+            want = False
+    return out
+
+
+def prefetch_hls(url, headers, xor_key="", wait=False, max_variants=3):
+    """Download the master playlist and its first level playlists into the cache."""
+    def run():
+        got = fetch_playlist_text(url, headers, xor_key)
+        if got:
+            for v in _variant_urls(got[0], got[1])[:max_variants]:
+                fetch_playlist_text(v, headers, xor_key)
+    if wait:
+        run()
+    else:
+        t = threading.Thread(target=run, name="np-prefetch")
+        t.daemon = True
+        t.start()
+
+
 # curl_cffi: "chrome" maps to the newest Chrome the Python side knows, which the
 # box's libcurl-impersonate may not have ("Impersonating chrome146 is not
 # supported"). Walk down to a supported target once, then stick with it.
@@ -532,6 +631,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 self._serve_xor_manifest(method, stream_url, headers, xor_key)
                 return
             if method in ("GET", "HEAD"):
+                if wait_inflight(stream_url):
+                    pass   # the shared download finished (or timed out); cache checked next
                 hit = _cached_playlist(stream_url)
                 if hit:
                     _log("Proxy: playlist from cache {}".format(stream_url[:100]))
@@ -543,7 +644,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 headers["Range"] = range_hdr
 
             cffi_headers = dict(headers)
-            cffi_headers.pop("Accept-Encoding", None)
+            # the box's libcurl can't decode br/zstd ("curl: (61) Unrecognized content encoding")
+            cffi_headers["Accept-Encoding"] = "gzip, deflate"
             cffi_headers.setdefault("Accept", "*/*")
             # [FIX] confirmed live: s1.egybestvid.com (and likely other
             # Arabic-audience CDN edges) gate on Accept-Language actually
@@ -838,27 +940,14 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             _log("Proxy: XOR playlist from cache {}".format(stream_url[:100]))
             self._send_manifest(method, hit[0], hit[1], headers, xor_key)
             return
-        txt_url = _XOR_M3U8_RE.sub(r".txt\1", stream_url, count=1)
-        h = dict(headers)
-        h.pop("Range", None)
-        h.setdefault("Accept", "*/*")
-        _log("Proxy: XOR playlist {}".format(txt_url[:120]))
+        _log("Proxy: XOR playlist {}".format(stream_url[:120]))
         _bump("requests")
-        try:
-            raw = _urlreq.urlopen(_urlreq.Request(txt_url, headers=h), timeout=20).read(_SNIFF_MAX)
-            text = _xor_bytes(raw, xor_key).decode("utf-8", "ignore")
-        except Exception as e:
+        got = fetch_playlist_text(stream_url, headers, xor_key, timeout=30)
+        if not got:
             _bump("upstream_errors")
-            _log("Proxy: XOR playlist fetch failed: {}".format(e))
-            self._safe_send_error(502, str(e))
+            self._safe_send_error(502, "XOR playlist unavailable")
             return
-        if not text.lstrip().startswith("#EXTM3U"):
-            _bump("upstream_errors")
-            _log("Proxy: XOR playlist did not decode (key changed?) for {}".format(txt_url[:90]))
-            self._safe_send_error(502, "XOR playlist did not decode")
-            return
-        remember_playlist(stream_url, text, stream_url)
-        self._send_manifest(method, text, stream_url, headers, xor_key)
+        self._send_manifest(method, got[0], got[1], headers, xor_key)
 
     def _send_manifest(self, method, text, base_url, headers, xor_key):
         global _PROXY_LAST_BYTES

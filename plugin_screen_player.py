@@ -180,6 +180,17 @@ def _build_remote_play_candidates(url):
             if xor_key:
                 q += "&xor=" + quote(xor_key, safe="")
             proxied = "http://127.0.0.1:{}/stream?{}".format(_PROXY_PORT, q)
+            # start downloading the playlists now (slow CDNs: 30-75 s on the box), so they
+            # are ready by the time a proxy candidate asks for them
+            if xor_key or any(x in plain_url.lower() for x in (".m3u8", "master.txt")):
+                try:
+                    _ph = {"User-Agent": headers.get("User-Agent") or novaplay_proxy.SAFE_UA}
+                    for _k in ("Referer", "Origin", "Cookie"):
+                        if headers.get(_k):
+                            _ph[_k] = headers[_k]
+                    novaplay_proxy.prefetch_hls(plain_url, _ph, xor_key)
+                except Exception:
+                    pass
             legacy_raw = url.replace("#", "|") if "#" in url else url
             legacy_proxied = "http://127.0.0.1:{}/{}".format(_PROXY_PORT, legacy_raw)
 
@@ -1825,6 +1836,11 @@ class NovaPlaySimplePlayer(Screen):
         if self._candidate_uses_proxy and novaplay_proxy._PROXY_LAST_HIT >= self._candidate_start_ts and novaplay_proxy._PROXY_LAST_BYTES > 50000:
             my_log("Play proxy confirmed by traffic: {} bytes".format(novaplay_proxy._PROXY_LAST_BYTES))
             self.__onConfirmed()
+            return
+        if (self._candidate_uses_proxy and novaplay_proxy.playlist_fetch_in_progress()
+                and time.time() - self._candidate_start_ts < 120):
+            my_log("Play: still downloading a slow playlist, waiting ({})".format(self._candidate_label))
+            self._retry_timer.start(15000, True)
             return
         my_log("Play timeout: {}".format(self._candidate_label))
         self.__playNext()
