@@ -27,7 +27,7 @@ import base64
 import random
 import hashlib
 import html as html_module  # aliased: every resolver uses a local `html` variable for page text
-from urllib.parse import urlparse, urljoin, parse_qs, unquote
+from urllib.parse import urlparse, urljoin, parse_qs, unquote, quote
 
 import threading  # [PATCH H1] for the vidsrc-family recursion guard below
 from .net import fetch, fetch_json, log, UA, get_cookie_header_for_url
@@ -2821,6 +2821,172 @@ def resolve_nextgencloudfabric(url, referer=None):
     return resolve_vaplayer_api(url) or resolve_scalablecontentengine(url)
 
 
+# ─── EmbedMaster (SFlix "EmbedMaster" server) ───────────────────────────────
+# [NEW 2026-10-17] From a Stream Recorder Pro capture (Matchbox the Movie,
+# tmdb 1148365) plus the box log of 2026-10-15:
+#   1. embedmaster.link/movie/<tmdb> redirects to embdmstrplayer.com/v2/<token>,
+#      a "welcome" page whose Play button is a plain form POST (tr=<site>);
+#      the Turnstile div on it is empty (its script is never loaded).
+#   2. The POST answers with the player page. Its config is an XOR-wrapped
+#      script: atob(blob)[i] ^ ((C + K[i % len(K)] + i) & 255), which sets
+#      window.__EM_PLAYER__ = {ticket, pk, scrapeToken, feedUrl,
+#      feedUrlBackup, resolveUrl, order, kinds, obfHosts, ...}.
+#   3. GET feedUrl + scrapeToken -> NDJSON lines {"type":"server",
+#      "source_type", "source_name", "source_url"(opaque)} ... {"type":"done"}.
+#   4. GET resolveUrl?src=<source_url> with X-EM-Player: 1 and
+#      X-EM-Ticket: <ticket>. The reply is JSON, or base64url text decrypted
+#      with pk (em-crypto.min.js EMCrypto.decrypt, verified byte-for-byte
+#      against the site's own JS): nonce = first 16 bytes, then XOR with
+#      sha256(key + nonce + uint32_be(block)) per 32-byte block.
+#      Decrypted: {"ok":true,"url":...,"type":"hls","subtitles":[...]}.
+#   "direct" kinds give an m3u8; "embed" kinds (MixDrop, StreamWish, Dood,
+#   Abyss, ...) give an embed page that the normal host resolvers handle.
+#   Hosts in obfHosts need the player's own playlist rewriter (em-hls-obf,
+#   not captured yet), so those are skipped.
+_EM_ORIGIN = "https://embdmstrplayer.com"
+
+
+def _em_b64url(text):
+    text = re.sub(r"\s+", "", text or "").replace("-", "+").replace("_", "/")
+    return base64.b64decode(text + "=" * (-len(text) % 4))
+
+
+def _em_decrypt(text, key_hex):
+    raw = _em_b64url(text)
+    if len(raw) < 16:
+        return ""
+    key = bytes.fromhex(key_hex)
+    nonce, data = raw[:16], raw[16:]
+    out = bytearray(len(data))
+    for block, start in enumerate(range(0, len(data), 32)):
+        ks = hashlib.sha256(key + nonce + block.to_bytes(4, "big")).digest()
+        for i, b in enumerate(data[start:start + 32]):
+            out[start + i] = b ^ ks[i]
+    return out.decode("utf-8", "replace")
+
+
+def _em_player_config(html):
+    """Decode the XOR-wrapped script that defines window.__EM_PLAYER__."""
+    if not html:
+        return None
+    for m in re.finditer(r'var\s+\w+\s*=\s*"([A-Za-z0-9+/=]{100,})"\s*,\s*\w+\s*=\s*\[([\d,\s]+)\]\s*,\s*\w+\s*=\s*(\d+)', html):
+        try:
+            blob = base64.b64decode(m.group(1))
+            keys = [int(x) for x in m.group(2).split(",") if x.strip()]
+            c = int(m.group(3))
+            js = bytes(blob[i] ^ ((c + keys[i % len(keys)] + i) & 255)
+                       for i in range(len(blob))).decode("utf-8", "replace")
+        except Exception:
+            continue
+        cm = re.search(r"__EM_PLAYER__\s*=\s*(\{.*\})\s*;?\s*$", js, re.S)
+        if cm:
+            try:
+                return json.loads(cm.group(1))
+            except ValueError:
+                pass
+    return None
+
+
+def _em_feed(cfg, page_url):
+    token = quote(cfg.get("scrapeToken") or "", safe="")
+    for base in (cfg.get("feedUrl"), cfg.get("feedUrlBackup")):
+        if not base or not token:
+            continue
+        text, _ = fetch(base + token, referer=page_url, timeout=20, max_retries=0,
+                        extra_headers={"Accept": "application/x-ndjson", "Origin": _EM_ORIGIN})
+        servers = []
+        for line in (text or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                o = json.loads(line)
+            except ValueError:
+                continue
+            if o.get("type") == "server" and o.get("source_url"):
+                servers.append(o)
+            elif o.get("type") == "error":
+                log("resolve_embedmaster: feed error {} {}".format(o.get("code"), o.get("message")))
+        if servers:
+            return servers
+        log("resolve_embedmaster: no servers from {}".format(base))
+    return []
+
+
+def resolve_embedmaster(url, referer=None, max_servers=8):
+    try:
+        site_ref = referer or "https://ssflix.pro/"
+        html, page_url = fetch(url, referer=site_ref, timeout=15)
+        page_url = page_url or url
+        cfg = _em_player_config(html)
+        if not cfg and html and "welcome-play-form" in html:
+            tm = re.search(r'name=["\']tr["\'][^>]*value=["\']([^"\']*)', html)
+            tr = html_module.unescape(tm.group(1)) if tm else site_ref
+            log("resolve_embedmaster: posting the Play form")
+            html, final = fetch(page_url, referer=page_url, post_data="tr=" + quote(tr, safe=""),
+                                extra_headers={"Origin": _EM_ORIGIN}, timeout=15)
+            page_url = final or page_url
+            cfg = _em_player_config(html)
+        if not cfg:
+            log("resolve_embedmaster: no player config on {} ({} bytes)".format(
+                page_url[:100], len(html or "")))
+            return None
+        ticket, pk = cfg.get("ticket") or "", cfg.get("pk") or ""
+        servers = _em_feed(cfg, page_url)
+        if not servers:
+            return None
+        order = [str(x) for x in cfg.get("order") or []]
+        kinds = cfg.get("kinds") or {}
+        obf = [str(h).lower() for h in cfg.get("obfHosts") or []]
+        rank = lambda s: order.index(str(s.get("source_type"))) if str(s.get("source_type")) in order else 999
+        servers.sort(key=rank)
+        log("resolve_embedmaster: {} servers: {}".format(
+            len(servers), ", ".join(str(s.get("source_name")) for s in servers)))
+        resolve_base = urljoin(page_url, cfg.get("resolveUrl") or "/v2/api/resolve.php")
+        tried = 0
+        for srv in servers:
+            if tried >= max_servers:
+                break
+            tried += 1
+            name = srv.get("source_name") or srv.get("source_type")
+            body, _ = fetch(resolve_base + "?src=" + quote(srv["source_url"], safe=""),
+                            referer=page_url, timeout=15, max_retries=0,
+                            extra_headers={"X-EM-Player": "1", "X-EM-Ticket": ticket, "Accept": "*/*"})
+            body = (body or "").strip()
+            if not body:
+                log("resolve_embedmaster: {}: empty reply".format(name))
+                continue
+            try:
+                d = json.loads(body if body.startswith("{") else _em_decrypt(body, pk))
+            except Exception as e:
+                log("resolve_embedmaster: {}: cannot read reply ({})".format(name, e))
+                continue
+            if not (isinstance(d, dict) and d.get("ok") and d.get("url")):
+                log("resolve_embedmaster: {}: {}".format(name, (d or {}).get("error") if isinstance(d, dict) else d))
+                continue
+            stream = str(d["url"])
+            if stream.startswith("//"):
+                stream = "https:" + stream
+            kind = kinds.get(str(srv.get("source_type")), "direct")
+            if kind == "embed":
+                log("resolve_embedmaster: {}: embed {}".format(name, stream[:100]))
+                result = resolve_host(stream, referer=_EM_ORIGIN + "/")
+                if result:
+                    return result
+                continue
+            host = urlparse(stream).netloc.lower()
+            if any(h and h in host for h in obf):
+                log("resolve_embedmaster: {}: {} needs the player's playlist rewriter, skipped".format(name, host))
+                continue
+            log("resolve_embedmaster: SUCCESS {}: {}".format(name, stream[:100]))
+            return _vidnest_headers_suffix(stream, {"Referer": _EM_ORIGIN + "/", "Origin": _EM_ORIGIN})
+        log("resolve_embedmaster: no playable server")
+        return None
+    except Exception as e:
+        log("resolve_embedmaster error for {}: {}".format(url[:100], e))
+        return None
+
+
 # ─── MedMedia03 (OnlyFlix "Server 3") Resolver ──────────────────────────────
 # [NEW 2026-10-14] `balance.medmedia03.wiki/embed/movie/<tmdb_id>` (or an
 # analogous /embed/tv/<tmdb_id>/<season>/<episode> shape) is a VidSrc-clone
@@ -3856,6 +4022,8 @@ HOST_RESOLVERS = {
     "1x2.space":            resolve_xpass,
     "scalablecontentengine.site": resolve_scalablecontentengine,
     "nextgencloudfabric.com": resolve_nextgencloudfabric,
+    "embedmaster.link":     resolve_embedmaster,
+    "embdmstrplayer.com":   resolve_embedmaster,
     # [NEW] SFlix "VidSrc-Embed": skip the (box-blocked) host, go straight to the API
     "vidsrc-embed.ru":    resolve_vaplayer_api,
     "cloudorchestranova.com": resolve_cloudorchestra,

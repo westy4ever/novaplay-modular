@@ -288,6 +288,8 @@ class SflixProExtractor(BaseExtractor):
             # that played in a desktop browser in a real capture.
             {"name": "Server 1 (VidSrc-Embed)", "url": "https://vidsrc-embed.ru/embed/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 2 (MoviesAPI)", "url": "https://moviesapi.to/movie/{}".format(tmdb_id), "quality": "HD"},
+            # [CHANGE 2026-10-17] real resolver now: hosts.resolve_embedmaster (welcome POST ->
+            # decoded __EM_PLAYER__ config -> source feed -> decrypted resolve.php replies).
             {"name": "Server 3 (EmbedMaster)", "url": "https://embedmaster.link/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 4 (YapGrid)", "url": "https://yapgrid.com/embed/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 5 (VidFast)", "url": "https://vidfast.vc/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
