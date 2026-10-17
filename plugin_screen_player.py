@@ -188,7 +188,9 @@ def _build_remote_play_candidates(url):
                     for _k in ("Referer", "Origin", "Cookie"):
                         if headers.get(_k):
                             _ph[_k] = headers[_k]
-                    novaplay_proxy.prefetch_hls(plain_url, _ph, xor_key)
+                    # first quality only: the player starts on it, and on a slow CDN
+                    # (81 s per level playlist on the box) a second one only delays the start
+                    novaplay_proxy.prefetch_hls(plain_url, _ph, xor_key, max_variants=1)
                 except Exception:
                     pass
             legacy_raw = url.replace("#", "|") if "#" in url else url
