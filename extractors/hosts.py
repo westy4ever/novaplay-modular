@@ -2958,7 +2958,8 @@ def _em_probe(stream, headers, xor_key=None):
     h = {"User-Agent": UA, "Accept": "*/*", "Accept-Encoding": "identity"}
     h.update(headers)
     try:
-        data = _net._get_opener().open(Request(url, headers=h), timeout=8).read(4096)
+        data = _net._get_opener().open(Request(url, headers=h), timeout=8).read(
+            4 * 1024 * 1024 if xor_key else 4096)
     except Exception as e:
         log("resolve_embedmaster: probe failed for {}: {}".format(url[:90], e))
         return False
@@ -2967,6 +2968,14 @@ def _em_probe(stream, headers, xor_key=None):
     if not data.lstrip().startswith(b"#EXTM3U"):
         log("resolve_embedmaster: probe got no playlist from {} ({!r})".format(url[:90], data[:40]))
         return False
+    if xor_key:
+        # Box: the same link answered 404 five seconds after this check, so hand the
+        # playlist we already have to the local proxy instead of fetching it again.
+        try:
+            import novaplay_proxy
+            novaplay_proxy.remember_playlist(stream, data.decode("utf-8", "ignore"), stream)
+        except Exception as e:
+            log("resolve_embedmaster: could not hand playlist to the proxy: {}".format(e))
     return True
 
 

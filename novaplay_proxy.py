@@ -183,6 +183,72 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
 _XOR_M3U8_RE = re.compile(r"\.m3u8(\?|#|$)", re.I)
 
 
+# ─── Playlist cache ──────────────────────────────────────────────────────────
+# [NEW 2026-10-17] Seen on the box: a CDN took 46 s to answer a playlist; the
+# player had given up after 12 s and every new attempt started the slow fetch
+# again. Finished playlists are kept for 2 minutes, so the next attempt (or a
+# late answer to an abandoned one) is served instantly. Resolvers that already
+# downloaded a playlist (EmbedMaster's check) hand it over via
+# remember_playlist(), so a short-lived link is fetched only once.
+_PL_CACHE = {}
+_PL_LOCK = threading.Lock()
+_PL_TTL = 120
+
+
+def remember_playlist(url, text, base_url=None):
+    # only playlists that never change: a VOD list (ENDLIST) or a master list of
+    # qualities. A live playlist is re-fetched every few seconds and must not be cached.
+    if not text or ("#EXT-X-ENDLIST" not in text and "#EXT-X-STREAM-INF" not in text):
+        return
+    try:
+        with _PL_LOCK:
+            _PL_CACHE[url] = (time.time(), text, base_url or url)
+            if len(_PL_CACHE) > 200:
+                for k in sorted(_PL_CACHE, key=lambda k: _PL_CACHE[k][0])[:50]:
+                    _PL_CACHE.pop(k, None)
+    except Exception:
+        pass
+
+
+def _cached_playlist(url):
+    with _PL_LOCK:
+        hit = _PL_CACHE.get(url)
+        if hit and time.time() - hit[0] < _PL_TTL:
+            return hit[1], hit[2]
+        _PL_CACHE.pop(url, None)
+    return None
+
+
+# curl_cffi: "chrome" maps to the newest Chrome the Python side knows, which the
+# box's libcurl-impersonate may not have ("Impersonating chrome146 is not
+# supported"). Walk down to a supported target once, then stick with it.
+_CFFI_TARGETS = ["chrome120", "chrome124", "chrome131", "chrome110", "chrome101", "chrome", None]
+_cffi_target_idx = [0]
+_cffi_target_lock = threading.Lock()
+
+
+def _cffi_get(url, headers, **kw):
+    while True:
+        with _cffi_target_lock:
+            idx = _cffi_target_idx[0]
+        if idx >= len(_CFFI_TARGETS):
+            raise RuntimeError("no usable curl_cffi impersonation target")
+        target = _CFFI_TARGETS[idx]
+        try:
+            if target:
+                return _cffi_requests.get(url, headers=headers, impersonate=target, **kw)
+            return _cffi_requests.get(url, headers=headers, **kw)
+        except Exception as e:
+            msg = str(e).lower()
+            if "impersonat" in msg or "not supported" in msg:
+                with _cffi_target_lock:
+                    if _cffi_target_idx[0] == idx:
+                        _cffi_target_idx[0] = idx + 1
+                _log("Proxy: curl_cffi target {} unsupported, trying the next one".format(target))
+                continue
+            raise
+
+
 def _xor_bytes(data, key_hex):
     key = bytes.fromhex(key_hex)
     return bytes(b ^ key[i % len(key)] for i, b in enumerate(bytearray(data))) if key else bytes(data)
@@ -465,6 +531,12 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             if xor_key and _XOR_M3U8_RE.search(stream_url):
                 self._serve_xor_manifest(method, stream_url, headers, xor_key)
                 return
+            if method in ("GET", "HEAD"):
+                hit = _cached_playlist(stream_url)
+                if hit:
+                    _log("Proxy: playlist from cache {}".format(stream_url[:100]))
+                    self._send_manifest(method, hit[0], hit[1], headers, "")
+                    return
 
             range_hdr = self.headers.get("Range") or self.headers.get("range")
             if range_hdr:
@@ -512,8 +584,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             # exception handling, but does the exact same thing.
             if _HAS_CURL_CFFI:
                 try:
-                    cffi_resp = _cffi_requests.get(
-                        stream_url, headers=cffi_headers, impersonate="chrome",
+                    cffi_resp = _cffi_get(
+                        stream_url, cffi_headers,
                         timeout=30, stream=True, allow_redirects=True,
                     )
                     m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip()) if range_hdr else None
@@ -529,8 +601,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                         except Exception:
                             pass
                         try:
-                            cffi_resp = _cffi_requests.get(
-                                stream_url, headers=retry_headers, impersonate="chrome",
+                            cffi_resp = _cffi_get(
+                                stream_url, retry_headers,
                                 timeout=30, stream=True, allow_redirects=True,
                             )
                             emulated_range = True
@@ -643,11 +715,13 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                     base = resp.geturl() or stream_url
                 except Exception:
                     base = stream_url
+                remember_playlist(stream_url, text, base)
                 body = _rewrite_manifest(
                     text, base,
                     headers.get("Referer", ""),
                     headers.get("User-Agent", ""),
-                    headers.get("Cookie", ""))
+                    headers.get("Cookie", ""),
+                    "", headers.get("Origin", ""))
                 pending_head = b""
                 _bump("manifests_rewritten")
                 _log("Proxy: rewrote manifest {} ({} bytes out)".format(
@@ -759,6 +833,11 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def _serve_xor_manifest(self, method, stream_url, headers, xor_key):
         global _PROXY_LAST_BYTES
+        hit = _cached_playlist(stream_url)
+        if hit:
+            _log("Proxy: XOR playlist from cache {}".format(stream_url[:100]))
+            self._send_manifest(method, hit[0], hit[1], headers, xor_key)
+            return
         txt_url = _XOR_M3U8_RE.sub(r".txt\1", stream_url, count=1)
         h = dict(headers)
         h.pop("Range", None)
@@ -778,7 +857,12 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             _log("Proxy: XOR playlist did not decode (key changed?) for {}".format(txt_url[:90]))
             self._safe_send_error(502, "XOR playlist did not decode")
             return
-        body = _rewrite_manifest(text, stream_url, headers.get("Referer", ""),
+        remember_playlist(stream_url, text, stream_url)
+        self._send_manifest(method, text, stream_url, headers, xor_key)
+
+    def _send_manifest(self, method, text, base_url, headers, xor_key):
+        global _PROXY_LAST_BYTES
+        body = _rewrite_manifest(text, base_url, headers.get("Referer", ""),
                                  headers.get("User-Agent", ""), headers.get("Cookie", ""),
                                  xor_key, headers.get("Origin", ""))
         _bump("manifests_rewritten")

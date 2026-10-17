@@ -175,10 +175,10 @@ def _build_remote_play_candidates(url):
                 q += "&ua=" + quote(headers["User-Agent"], safe="")
             if headers.get("Cookie"):
                 q += "&cookie=" + quote(headers["Cookie"], safe="")
+            if headers.get("Origin"):
+                q += "&origin=" + quote(headers["Origin"], safe="")
             if xor_key:
                 q += "&xor=" + quote(xor_key, safe="")
-                if headers.get("Origin"):
-                    q += "&origin=" + quote(headers["Origin"], safe="")
             proxied = "http://127.0.0.1:{}/stream?{}".format(_PROXY_PORT, q)
             legacy_raw = url.replace("#", "|") if "#" in url else url
             legacy_proxied = "http://127.0.0.1:{}/{}".format(_PROXY_PORT, legacy_raw)
@@ -1714,7 +1714,9 @@ class NovaPlaySimplePlayer(Screen):
         except: pass
         try:
             self.session.nav.playService(self.sref)
-            self._retry_timer.start(12000, True)
+            # proxy attempts that are broken fail within a second or two; one that is
+            # still waiting on a slow CDN playlist gets 30 s (seen: 16-46 s on the box)
+            self._retry_timer.start(30000 if uses_proxy else 12000, True)
             self._force_confirmation_timer.start(3000, True)
             self._armSkipHint()
         except Exception as e:
