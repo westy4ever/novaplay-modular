@@ -227,6 +227,8 @@ def _cached_playlist(url):
 # requested, so it runs while the player is still trying its other candidates.
 _INFLIGHT = {}
 _INFLIGHT_LOCK = threading.Lock()
+_DEAD_PL = {}          # playlist url -> time it answered 403/404/410
+_DEAD_PL_TTL = 300
 
 
 def playlist_fetch_in_progress():
@@ -283,12 +285,44 @@ def fetch_playlist_text(url, headers, xor_key="", timeout=90):
                 _PL_CACHE[url] = (time.time() - _PL_TTL + 5, text, base)
         return text, base
     except Exception as e:
+        if getattr(e, "code", None) in (403, 404, 410):
+            _DEAD_PL[url] = time.time()
         _log("Proxy: playlist download failed: {} ({})".format(e, url[:90]))
         return None
     finally:
         with _INFLIGHT_LOCK:
             _INFLIGHT.pop(url, None)
         ev.set()
+
+
+def _drop_dead_variants(text, base):
+    """[NEW 2026-10-17] Box: EmbedMaster listed two qualities, one of which answered
+    404 even straight away; the box's player picked it and failed instead of using
+    the working one. Leave out qualities known to be gone (if any remain)."""
+    if "#EXT-X-STREAM-INF" not in text or not _DEAD_PL:
+        return text
+    now = time.time()
+    lines = text.splitlines()
+    out, pending, kept, dropped = [], None, 0, 0
+    for line in lines:
+        s = line.strip()
+        if s.startswith("#EXT-X-STREAM-INF"):
+            pending = line
+            continue
+        if pending is not None and s and not s.startswith("#"):
+            u = urljoin(base, s)
+            if now - _DEAD_PL.get(u, 0) < _DEAD_PL_TTL:
+                dropped += 1
+            else:
+                out.extend([pending, line])
+                kept += 1
+            pending = None
+            continue
+        out.append(line)
+    if not dropped or not kept:
+        return text
+    _log("Proxy: left out {} dead quality level(s), {} kept".format(dropped, kept))
+    return "\n".join(out) + "\n"
 
 
 def _variant_urls(text, base):
@@ -951,6 +985,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_manifest(self, method, text, base_url, headers, xor_key):
         global _PROXY_LAST_BYTES
+        text = _drop_dead_variants(text, base_url)
         body = _rewrite_manifest(text, base_url, headers.get("Referer", ""),
                                  headers.get("User-Agent", ""), headers.get("Cookie", ""),
                                  xor_key, headers.get("Origin", ""))

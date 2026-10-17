@@ -2557,6 +2557,32 @@ def resolve_viduki(url):
 _MOVIESAPI_PLAYER_KEY = "3a67e8866ae1d2bb9e81fe7f73315a56eb3bdf5e3e755c7554c8be6910aa6b13"
 
 
+def _moviesapi_pick_host(src_url, headers):
+    """[NEW 2026-10-17] The vidora API hands out the same /hls2/... path and token
+    on different hosts: the Cloudflare *.workers.dev mirror (the browser's) or
+    bx.netrocdn.site (the origin). On the box the mirror answers 403 (it checks
+    the client's TLS fingerprint, which the box's curl_cffi can't imitate) while
+    netrocdn answered 200 for the same kind of link. Quick-check the mirror and
+    switch to netrocdn if it refuses."""
+    host = urlparse(src_url).netloc.lower()
+    if not host.endswith(".workers.dev") or "/hls2/" not in src_url:
+        return src_url
+    from urllib.request import Request
+    from . import net as _net
+    h = {"User-Agent": UA, "Accept": "*/*", "Accept-Encoding": "identity"}
+    h.update(headers)
+    try:
+        data = _net._get_opener().open(Request(src_url, headers=h), timeout=6).read(512)
+        if data.lstrip().startswith(b"#EXTM3U"):
+            return src_url
+        why = "not a playlist"
+    except Exception as e:
+        why = str(e)
+    alt = src_url.replace("://" + urlparse(src_url).netloc + "/", "://bx.netrocdn.site/", 1)
+    log("resolve_moviesapi: mirror {} refused ({}); using {}".format(host, why[:60], alt[:90]))
+    return alt
+
+
 def resolve_moviesapi(url):
     """Resolver for moviesapi.to and netrocdn.site URLs.
 
@@ -2630,7 +2656,8 @@ def resolve_moviesapi(url):
                                  "Origin": "https://moviesapi.to"}
                         if isinstance((src or {}).get("headers"), dict):
                             _hdrs.update(src["headers"])
-                        return _vidnest_headers_suffix(_correct_stream_url(src_url), _hdrs)
+                        src_url = _moviesapi_pick_host(_correct_stream_url(src_url), _hdrs)
+                        return _vidnest_headers_suffix(src_url, _hdrs)
             elif data:
                 log("resolve_moviesapi: vidora API returned no sources: {}".format(
                     str(data.get("message") or data)[:200]))
