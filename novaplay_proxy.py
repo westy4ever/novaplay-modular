@@ -337,12 +337,29 @@ def _variant_urls(text, base):
     return out
 
 
+def _rendition_urls(text, base):
+    """Playlists listed as #EXT-X-MEDIA URI="..." (separate audio / subtitle tracks).
+    [FIX 2026-10-17] Box: EmbedMaster's master had one video level plus a separate
+    audio playlist; only the video level was prefetched, the audio link expired
+    (404) and the player could not start."""
+    out = []
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("#EXT-X-MEDIA") and "URI=" in s:
+            m = _URI_ATTR_RE.search(s)
+            if m:
+                out.append(urljoin(base, m.group(1)))
+    return out
+
+
 def prefetch_hls(url, headers, xor_key="", wait=False, max_variants=3):
-    """Download the master playlist and its first level playlists into the cache."""
+    """Download the master playlist, its first level playlists and every
+    separate audio/subtitle playlist into the cache."""
     def run():
         got = fetch_playlist_text(url, headers, xor_key)
         if got:
-            for v in _variant_urls(got[0], got[1])[:max_variants]:
+            kids = _variant_urls(got[0], got[1])[:max_variants] + _rendition_urls(got[0], got[1])
+            for v in kids:
                 fetch_playlist_text(v, headers, xor_key)
     if wait:
         run()
