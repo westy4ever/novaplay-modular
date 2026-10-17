@@ -359,8 +359,17 @@ def prefetch_hls(url, headers, xor_key="", wait=False, max_variants=3):
         got = fetch_playlist_text(url, headers, xor_key)
         if got:
             kids = _variant_urls(got[0], got[1])[:max_variants] + _rendition_urls(got[0], got[1])
+            # in parallel: on a slow CDN each one takes ~80 s, and the player may
+            # switch quality right after starting (box: MoviesAPI h -> x)
+            ths = []
             for v in kids:
-                fetch_playlist_text(v, headers, xor_key)
+                t = threading.Thread(target=fetch_playlist_text, args=(v, headers, xor_key),
+                                     name="np-prefetch-level")
+                t.daemon = True
+                t.start()
+                ths.append(t)
+            for t in ths:
+                t.join(150)
     if wait:
         run()
     else:
@@ -898,7 +907,9 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if method == "GET":
                 self.wfile.write(body)
-                _PROXY_LAST_BYTES += len(body)
+                # playlist text is not playback: only video data counts towards
+                # the player's "confirmed by traffic" check (a 268 KB playlist
+                # once 'confirmed' a stream that never played a frame)
             return
 
         # [PATCH 105] emulated Range: the upstream response is a full 200 body starting
@@ -1013,8 +1024,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "none")
         self.end_headers()
         if method == "GET":
-            self.wfile.write(body)
-            _PROXY_LAST_BYTES += len(body)
+            self.wfile.write(body)   # playlist: not counted as playback traffic
 
     def _safe_send_error(self, code, msg=""):
         try:

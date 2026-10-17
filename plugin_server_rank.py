@@ -228,3 +228,21 @@ def get_title_failed(title_key):
     with _lock:
         _ensure_loaded()
         return set(_title_failed.get(title_key) or [])
+
+
+def retract_title_working(title_key, url):
+    """[NEW 2026-10-17] Undo a 'working' record that turned out to be false (playback
+    ended within seconds, e.g. a slow CDN made the player give up) and count it as a
+    failure for this title instead."""
+    if not title_key:
+        return
+    host = _host_path_of(url)
+    if not host:
+        return
+    with _lock:
+        _ensure_loaded()
+        hosts = list(_title_working.get(title_key) or [])
+        if host in hosts:
+            _title_working[title_key] = [h for h in hosts if h != host]
+            _persist_working()
+    record_title_failed(title_key, url)

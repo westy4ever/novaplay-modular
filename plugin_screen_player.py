@@ -188,9 +188,9 @@ def _build_remote_play_candidates(url):
                     for _k in ("Referer", "Origin", "Cookie"):
                         if headers.get(_k):
                             _ph[_k] = headers[_k]
-                    # first quality only: the player starts on it, and on a slow CDN
-                    # (81 s per level playlist on the box) a second one only delays the start
-                    novaplay_proxy.prefetch_hls(plain_url, _ph, xor_key, max_variants=1)
+                    # all qualities, downloaded in parallel: the box's player switched
+                    # quality right after starting and gave up waiting for the second one
+                    novaplay_proxy.prefetch_hls(plain_url, _ph, xor_key, max_variants=3)
                 except Exception:
                     pass
             legacy_raw = url.replace("#", "|") if "#" in url else url
@@ -1742,6 +1742,7 @@ class NovaPlaySimplePlayer(Screen):
     def __onConfirmed(self):
         if self._play_confirmed: return
         self._play_confirmed = True
+        self._confirmed_ts = time.time()
         try:
             self._retry_timer.stop()
             self._force_confirmation_timer.stop()
@@ -1812,6 +1813,26 @@ class NovaPlaySimplePlayer(Screen):
         self.__playNext()
 
     def __onEOF(self):
+        if (self._play_confirmed and getattr(self, "_candidate_uses_proxy", False)
+                and time.time() - getattr(self, "_confirmed_ts", 0) < 180):
+            # [FIX 2026-10-17] Box: a stream 'ended' 72 s after starting (the player gave up
+            # waiting for a slow quality playlist). That was marked watched, the resume point
+            # cleared and the player closed. A movie can't end within 3 minutes of starting:
+            # treat it as a failure and try the next way of playing it.
+            my_log("Early EOF {:.0f}s after start: treating as a failure ({})".format(
+                time.time() - self._confirmed_ts, self._candidate_label))
+            try:
+                stop_pos_tracker()
+            except Exception:
+                pass
+            try:
+                from plugin_server_rank import retract_title_working
+                retract_title_working(self._item_url, self._server_url)
+            except Exception as e:
+                my_log("server-rank retract failed (non-fatal): {}".format(e))
+            self._play_confirmed = False
+            self.__playNext()
+            return
         if self._play_confirmed:
             try:
                 from plugin_watched import mark_watched
