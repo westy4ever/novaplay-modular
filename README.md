@@ -35,3 +35,7 @@ the old plugin are carried over automatically on first start.
 cd /usr/lib/enigma2/python/Plugins/Extensions/NovaPlay
 python3 run_site_test.py --all
 ```
+
+Full guide: [docs/SITE_TEST_GUIDE.md](docs/SITE_TEST_GUIDE.md) — commands, how to read the report, what to do for each result.
+
+To capture a site for a new resolver, use [Stream Recorder Pro](https://github.com/westy4ever/Stream-Recorder-Pro-12) — see its [guide](https://github.com/westy4ever/Stream-Recorder-Pro-12/blob/main/docs/GUIDE.md).
