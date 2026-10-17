@@ -1474,7 +1474,10 @@ class NovaPlayHome(Screen):
                     self._requestTmdbPosterAsync(item)
                     url = item["thumbnail"]
                     path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
-                if path and item.get("url"):
+                # [CHANGE 2026-10-17] watched posters keep their colours by default (the
+                # "✓ شاهدته" badge still marks them); the old black & white, darkened
+                # poster is opt-in via the config key "watched_poster_bw".
+                if path and item.get("url") and _get_config("watched_poster_bw", False):
                     try:
                         from plugin_watched import is_watched
                         if is_watched(item.get("url")):
