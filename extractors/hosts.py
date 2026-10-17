@@ -2913,6 +2913,42 @@ def _em_feed(cfg, page_url):
     return []
 
 
+def _em_resolve_get(url, page_url, ticket):
+    """resolve.php exactly as the player's XHR sends it (same-origin GET, no
+    X-Requested-With), through the shared cookie jar so the session cookie
+    from the Play-form POST goes along. Returns (status, body)."""
+    from urllib.request import Request
+    from urllib.error import HTTPError
+    from . import net as _net
+    req = Request(url, headers={
+        "User-Agent": UA,
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "identity",
+        "Referer": page_url,
+        "X-EM-Player": "1",
+        "X-EM-Ticket": ticket,
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    })
+    # merged jar (urllib + curl_cffi session), in case the Play POST went via curl_cffi
+    cookie = get_cookie_header_for_url(url)
+    if cookie:
+        req.add_header("Cookie", cookie)
+    try:
+        resp = _net._get_opener().open(req, timeout=15)
+        return resp.getcode(), resp.read().decode("utf-8", "replace")
+    except HTTPError as e:
+        try:
+            body = e.read().decode("utf-8", "replace")
+        except Exception:
+            body = ""
+        return e.code, body
+    except Exception as e:
+        return 0, str(e)
+
+
 def resolve_embedmaster(url, referer=None, max_servers=8):
     try:
         site_ref = referer or "https://ssflix.pro/"
@@ -2949,12 +2985,16 @@ def resolve_embedmaster(url, referer=None, max_servers=8):
                 break
             tried += 1
             name = srv.get("source_name") or srv.get("source_type")
-            body, _ = fetch(resolve_base + "?src=" + quote(srv["source_url"], safe=""),
-                            referer=page_url, timeout=15, max_retries=0,
-                            extra_headers={"X-EM-Player": "1", "X-EM-Ticket": ticket, "Accept": "*/*"})
+            status, body = _em_resolve_get(
+                resolve_base + "?src=" + quote(srv["source_url"], safe=""), page_url, ticket)
             body = (body or "").strip()
-            if not body:
-                log("resolve_embedmaster: {}: empty reply".format(name))
+            if status != 200 or not body:
+                log("resolve_embedmaster: {}: HTTP {} {}".format(name, status, body[:200]))
+                if tried == 1:
+                    log("resolve_embedmaster: cookies sent: {}".format(
+                        get_cookie_header_for_url(resolve_base) or "(none)"))
+                if status == 403 and tried >= 2:
+                    break  # same answer for every server: don't hammer it
                 continue
             try:
                 d = json.loads(body if body.startswith("{") else _em_decrypt(body, pk))

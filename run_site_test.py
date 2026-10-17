@@ -414,7 +414,7 @@ def test_site(name, ext, args, quick=False):
     # 5. servers -> extract_stream -> real stream
     tried = 0
     playable = 0
-    for srv in servers[:max(1, args.servers)]:
+    for srv in (servers if args.all_servers else servers[:max(1, args.servers)]):
         tried += 1
         label = "server {}/{}: {}".format(tried, len(servers), short(srv.get("name") or srv.get("url"), 45))
         if str(srv["url"]).startswith("magnet:"):
