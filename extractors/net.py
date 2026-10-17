@@ -120,6 +120,91 @@ def log(msg):
         pass
 
 
+# ─── Blocked-address avoidance (process-wide) ────────────────────────────────
+# [NEW 2026-10-17] Measured on the box: perfectbussines.website resolves to
+# two Cloudflare IPv4 addresses; 104.21.87.149 connects in 0.0 s while
+# 172.67.144.27 is blocked on that line and hangs until the timeout. Python
+# tries addresses in DNS order with the FULL timeout each, so every request
+# that drew the blocked one first waited 8-30 s (or failed). For hosts with
+# several addresses, each one now gets a short connect timeout, and an
+# address that times out or is unreachable is skipped for 10 minutes.
+# Patching socket.create_connection covers urllib (fetch, the local proxy,
+# run_site_test) in this process; curl_cffi/libcurl does its own fallback.
+import socket as _socket
+import errno as _errno
+
+_DEAD_ADDR_TTL = 600
+_PER_ADDR_CONNECT = 4.0
+_dead_addrs = {}
+_dead_lock = threading.Lock()
+_orig_create_connection = _socket.create_connection
+
+
+def _addr_dead(ip):
+    with _dead_lock:
+        until = _dead_addrs.get(ip)
+        if until and until < time.time():
+            _dead_addrs.pop(ip, None)
+            return False
+        return bool(until)
+
+
+def _mark_addr_dead(ip, why):
+    with _dead_lock:
+        fresh = ip not in _dead_addrs
+        _dead_addrs[ip] = time.time() + _DEAD_ADDR_TTL
+    if fresh:
+        try:
+            log("Address {} unreachable ({}); skipping it for {} min".format(ip, why, _DEAD_ADDR_TTL // 60))
+        except Exception:
+            pass
+
+
+def _np_create_connection(address, timeout=_socket._GLOBAL_DEFAULT_TIMEOUT,
+                          source_address=None, *args, **kwargs):
+    host, port = address[0], address[1]
+    try:
+        infos = _socket.getaddrinfo(host, port, 0, _socket.SOCK_STREAM)
+    except Exception:
+        return _orig_create_connection(address, timeout, source_address, *args, **kwargs)
+    if len(infos) <= 1:
+        return _orig_create_connection(address, timeout, source_address, *args, **kwargs)
+    live = [i for i in infos if not _addr_dead(i[4][0])]
+    order = live + [i for i in infos if i not in live]   # dead ones only as a last resort
+    has_timeout = timeout is not _socket._GLOBAL_DEFAULT_TIMEOUT and timeout is not None
+    err = None
+    for n, (fam, typ, proto, _, sa) in enumerate(order):
+        last = n == len(order) - 1
+        sock = None
+        try:
+            sock = _socket.socket(fam, typ, proto)
+            if last:
+                if has_timeout:
+                    sock.settimeout(timeout)
+            else:
+                sock.settimeout(min(_PER_ADDR_CONNECT, timeout) if has_timeout else _PER_ADDR_CONNECT)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sa)
+            if has_timeout:
+                sock.settimeout(timeout)
+            else:
+                sock.settimeout(_socket.getdefaulttimeout())
+            return sock
+        except OSError as e:
+            err = e
+            if sock is not None:
+                sock.close()
+            if isinstance(e, _socket.timeout) or getattr(e, "errno", None) in (
+                    _errno.ENETUNREACH, _errno.EHOSTUNREACH):
+                _mark_addr_dead(sa[0], "timed out" if isinstance(e, _socket.timeout) else e.strerror)
+    raise err if err else OSError("no address for {}".format(host))
+
+
+if getattr(_socket.create_connection, "__name__", "") != "_np_create_connection":
+    _socket.create_connection = _np_create_connection
+
+
 def _get_curl_session():
     if not _CURL_CFFI_OK:
         return None
