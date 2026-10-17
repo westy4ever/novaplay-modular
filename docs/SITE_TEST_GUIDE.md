@@ -1,6 +1,6 @@
 # NovaPlay Site Test Guide
 
-_Last updated 2026-10-16_
+_Last updated 2026-10-17_
 
 ## What it does
 
@@ -26,6 +26,24 @@ Categories ─> Items ─> Page ─> Servers ─> Resolve stream ─> Fetch vide
 A failure early in the chain stops the test there; a dead server only moves it on to the next one.
 
 Nothing is played, saved or changed. Enigma2 doesn't need to be stopped, and the plugin can stay open.
+
+## Install or update NovaPlay
+
+The test script comes with NovaPlay, so install the plugin first. Open a terminal on the box (see step 2 below), paste this one line and press Enter:
+
+```
+wget -qO /tmp/install_novaplay.sh https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/install_novaplay.sh && sh /tmp/install_novaplay.sh
+```
+
+It downloads the latest NovaPlay from GitHub, backs up the current install, keeps your `api_keys.conf`, removes the old AdvancedArabicPlayer plugin if it's there (your settings, favourites and history carry over), checks every file and restarts Enigma2. Run the same line again any time to update.
+
+**Box without internet access?** On your PC, open the GitHub page, click **Code > Download ZIP**, copy the ZIP and `install_novaplay.sh` to `/tmp` on the box with FileZilla or WinSCP, then run:
+
+```
+sh /tmp/install_novaplay.sh /tmp/novaplay-modular-main.zip
+```
+
+Add `--no-restart` to either command to skip the restart. Backups go to `/media/hdd/NovaPlay/backups` (or `/home/root/NovaPlay-backups` without a hard disk).
 
 ## Before you start
 
