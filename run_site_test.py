@@ -206,6 +206,25 @@ def check_stream(stream_url, referer=None):
     plain, headers = _split_pipe(stream_url, referer)
     headers.setdefault("User-Agent", UA)
 
+    # XOR-obfuscated playlists (extractors/hlsobf.py) only play through the
+    # local proxy, so test them through it, exactly as the player does.
+    xor_key = next((v for k, v in headers.items() if k.lower() == "x-np-xor"), "")
+    if xor_key:
+        try:
+            from urllib.parse import quote
+            import novaplay_proxy
+            if not novaplay_proxy.start_proxy():
+                return "FAIL", "XOR playlist needs the local proxy, which did not start"
+            q = "url=" + quote(plain, safe="")
+            for k, name in (("Referer", "referer"), ("User-Agent", "ua"), ("Origin", "origin")):
+                if headers.get(k):
+                    q += "&{}={}".format(name, quote(headers[k], safe=""))
+            q += "&xor=" + quote(xor_key, safe="")
+            plain = "http://127.0.0.1:{}/stream?{}".format(novaplay_proxy._PROXY_PORT, q)
+            headers = {"User-Agent": UA}
+        except Exception as e:
+            return "FAIL", "XOR playlist: local proxy unavailable ({})".format(short(e, 80))
+
     def get(u, nbytes):
         h = dict(headers)
         h["Range"] = "bytes=0-{}".format(nbytes - 1)

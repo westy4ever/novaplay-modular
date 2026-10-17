@@ -2841,8 +2841,8 @@ def resolve_nextgencloudfabric(url, referer=None):
 #      Decrypted: {"ok":true,"url":...,"type":"hls","subtitles":[...]}.
 #   "direct" kinds give an m3u8; "embed" kinds (MixDrop, StreamWish, Dood,
 #   Abyss, ...) give an embed page that the normal host resolvers handle.
-#   Hosts in obfHosts need the player's own playlist rewriter (em-hls-obf,
-#   not captured yet), so those are skipped.
+#   Hosts in obfHosts serve XOR-obfuscated playlists (see hlsobf.py); those
+#   streams carry X-NP-Xor so the local proxy decodes them.
 _EM_ORIGIN = "https://embdmstrplayer.com"
 
 
@@ -2949,6 +2949,27 @@ def _em_resolve_get(url, page_url, ticket):
         return 0, str(e)
 
 
+def _em_probe(stream, headers, xor_key=None):
+    """Quick check that the playlist really loads (some CDNs just time out)."""
+    from urllib.request import Request
+    from . import net as _net
+    from .hlsobf import playlist_fetch_url, xor_decode
+    url = playlist_fetch_url(stream) if xor_key else stream
+    h = {"User-Agent": UA, "Accept": "*/*", "Accept-Encoding": "identity"}
+    h.update(headers)
+    try:
+        data = _net._get_opener().open(Request(url, headers=h), timeout=8).read(4096)
+    except Exception as e:
+        log("resolve_embedmaster: probe failed for {}: {}".format(url[:90], e))
+        return False
+    if xor_key:
+        data = xor_decode(data, xor_key)
+    if not data.lstrip().startswith(b"#EXTM3U"):
+        log("resolve_embedmaster: probe got no playlist from {} ({!r})".format(url[:90], data[:40]))
+        return False
+    return True
+
+
 def resolve_embedmaster(url, referer=None, max_servers=8):
     try:
         site_ref = referer or "https://ssflix.pro/"
@@ -3015,11 +3036,21 @@ def resolve_embedmaster(url, referer=None, max_servers=8):
                     return result
                 continue
             host = urlparse(stream).netloc.lower()
+            hdrs = {"Referer": _EM_ORIGIN + "/", "Origin": _EM_ORIGIN}
+            xor_key = None
             if any(h and h in host for h in obf):
-                log("resolve_embedmaster: {}: {} needs the player's playlist rewriter, skipped".format(name, host))
+                from .hlsobf import EM_OBF_KEY, XOR_HEADER, is_playlist_url
+                if not is_playlist_url(stream):
+                    log("resolve_embedmaster: {}: obfuscated non-HLS link, skipped".format(name))
+                    continue
+                xor_key = EM_OBF_KEY
+            if not _em_probe(stream, hdrs, xor_key):
                 continue
-            log("resolve_embedmaster: SUCCESS {}: {}".format(name, stream[:100]))
-            return _vidnest_headers_suffix(stream, {"Referer": _EM_ORIGIN + "/", "Origin": _EM_ORIGIN})
+            if xor_key:
+                hdrs[XOR_HEADER] = xor_key
+            log("resolve_embedmaster: SUCCESS {}{}: {}".format(
+                name, " (XOR playlist, via proxy)" if xor_key else "", stream[:100]))
+            return _vidnest_headers_suffix(stream, hdrs)
         log("resolve_embedmaster: no playable server")
         return None
     except Exception as e:

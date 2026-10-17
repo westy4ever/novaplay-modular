@@ -138,7 +138,7 @@ _SNIFF_URL_RE = re.compile(r"\.(m3u8|txt)(\?|$)", re.I)
 _SNIFF_MAX = 4 * 1024 * 1024
 
 
-def _proxied(target, referer, ua, cookie):
+def _proxied(target, referer, ua, cookie, xor="", origin=""):
     """Build a /stream URL that carries the upstream context forward.
     quote(safe="") is essential: parse_qs decodes once, and encoding
     '=' / '+' / '/' means values survive the round-trip exactly."""
@@ -149,10 +149,14 @@ def _proxied(target, referer, ua, cookie):
         q += "&ua=" + quote(ua, safe="")
     if cookie:
         q += "&cookie=" + quote(cookie, safe="")
+    if origin:
+        q += "&origin=" + quote(origin, safe="")
+    if xor:
+        q += "&xor=" + quote(xor, safe="")
     return "http://127.0.0.1:%d/stream?%s" % (_PROXY_PORT, q)
 
 
-def _rewrite_manifest(text, base_url, referer, ua, cookie):
+def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
     """Route every media URI in an HLS manifest through this proxy."""
     out = []
     for line in text.splitlines():
@@ -163,12 +167,25 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie):
             m = _URI_ATTR_RE.search(s)
             if m:
                 s = (s[:m.start()] + 'URI="%s"' % _proxied(
-                    urljoin(base_url, m.group(1)), referer, ua, cookie)
+                    urljoin(base_url, m.group(1)), referer, ua, cookie, xor, origin)
                      + s[m.end():])          # [PATCH 65] keep IV=, BYTERANGE=, etc.
             out.append(s)
         else:
-            out.append(_proxied(urljoin(base_url, s), referer, ua, cookie))
+            out.append(_proxied(urljoin(base_url, s), referer, ua, cookie, xor, origin))
     return ("\n".join(out) + "\n").encode("utf-8", "replace")
+
+
+# ─── XOR-obfuscated playlists (EmbedMaster obfHosts; see extractors/hlsobf.py) ─
+# A stream whose pipe headers carry X-NP-Xor=<hex key> has its playlists
+# served as "<name>.txt" XORed with that key. The proxy fetches the .txt,
+# decodes it and serves a normal playlist whose URIs come back through here
+# (still carrying the key, so nested playlists are decoded too).
+_XOR_M3U8_RE = re.compile(r"\.m3u8(\?|#|$)", re.I)
+
+
+def _xor_bytes(data, key_hex):
+    key = bytes.fromhex(key_hex)
+    return bytes(b ^ key[i % len(key)] for i, b in enumerate(bytearray(data))) if key else bytes(data)
 
 
 # ─── Stream-result cache (StreamProxy cache_manager pattern) ─────────────────
@@ -381,6 +398,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         sending an error. Supports both the /stream form and the legacy
         /<url>|Headers form, including a pipe accidentally embedded in
         the url= query value."""
+        self._np_xor = self._np_origin = ""   # per request (keep-alive reuses the handler)
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query or "")
         if parsed.path == "/stream" and query.get("url"):
@@ -388,6 +406,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             referer = (query.get("referer", [""])[0] or "").strip()
             ua = (query.get("ua", [""])[0] or "").strip()
             cookie = (query.get("cookie", [""])[0] or "").strip()
+            self._np_xor = (query.get("xor", [""])[0] or "").strip()
+            self._np_origin = (query.get("origin", [""])[0] or "").strip()
             piped = ""
             if "|" in stream_url:
                 stream_url, piped = stream_url.split("|", 1)
@@ -410,6 +430,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             if req_info is None:
                 return
             stream_url, referer, ua, cookie, piped = req_info
+            xor_key = getattr(self, "_np_xor", "")
 
             # identity encoding: we must be able to sniff/rewrite bodies
             # without decompressing, and the player can't either.
@@ -425,6 +446,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                         continue
                     if k.lower() == "cookie":
                         cookie = v.strip()
+                    elif k.lower() == "x-np-xor":
+                        xor_key = v.strip()
                     else:
                         headers[k] = v.strip()
             if referer:
@@ -437,6 +460,11 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                     pass
             if cookie:
                 headers["Cookie"] = cookie
+            if getattr(self, "_np_origin", "") and "Origin" not in headers:
+                headers["Origin"] = self._np_origin
+            if xor_key and _XOR_M3U8_RE.search(stream_url):
+                self._serve_xor_manifest(method, stream_url, headers, xor_key)
+                return
 
             range_hdr = self.headers.get("Range") or self.headers.get("range")
             if range_hdr:
@@ -728,6 +756,40 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 _log("Proxy: relay aborted: {}".format(_e))
             except Exception:
                 pass
+
+    def _serve_xor_manifest(self, method, stream_url, headers, xor_key):
+        global _PROXY_LAST_BYTES
+        txt_url = _XOR_M3U8_RE.sub(r".txt\1", stream_url, count=1)
+        h = dict(headers)
+        h.pop("Range", None)
+        h.setdefault("Accept", "*/*")
+        _log("Proxy: XOR playlist {}".format(txt_url[:120]))
+        _bump("requests")
+        try:
+            raw = _urlreq.urlopen(_urlreq.Request(txt_url, headers=h), timeout=20).read(_SNIFF_MAX)
+            text = _xor_bytes(raw, xor_key).decode("utf-8", "ignore")
+        except Exception as e:
+            _bump("upstream_errors")
+            _log("Proxy: XOR playlist fetch failed: {}".format(e))
+            self._safe_send_error(502, str(e))
+            return
+        if not text.lstrip().startswith("#EXTM3U"):
+            _bump("upstream_errors")
+            _log("Proxy: XOR playlist did not decode (key changed?) for {}".format(txt_url[:90]))
+            self._safe_send_error(502, "XOR playlist did not decode")
+            return
+        body = _rewrite_manifest(text, stream_url, headers.get("Referer", ""),
+                                 headers.get("User-Agent", ""), headers.get("Cookie", ""),
+                                 xor_key, headers.get("Origin", ""))
+        _bump("manifests_rewritten")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.apple.mpegurl")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Accept-Ranges", "none")
+        self.end_headers()
+        if method == "GET":
+            self.wfile.write(body)
+            _PROXY_LAST_BYTES += len(body)
 
     def _safe_send_error(self, code, msg=""):
         try:

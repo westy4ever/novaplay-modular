@@ -155,6 +155,8 @@ def _build_remote_play_candidates(url):
                 headers[k] = v
     candidates = []
     seen = set()
+    # XOR-obfuscated playlists (extractors/hlsobf.py): only the local proxy can decode them
+    xor_key = next((v for k, v in headers.items() if k.lower() == "x-np-xor"), "")
 
     def add_candidate(p_type, svc_url, label, uses_proxy=False):
         key = (p_type, svc_url)
@@ -173,9 +175,21 @@ def _build_remote_play_candidates(url):
                 q += "&ua=" + quote(headers["User-Agent"], safe="")
             if headers.get("Cookie"):
                 q += "&cookie=" + quote(headers["Cookie"], safe="")
+            if xor_key:
+                q += "&xor=" + quote(xor_key, safe="")
+                if headers.get("Origin"):
+                    q += "&origin=" + quote(headers["Origin"], safe="")
             proxied = "http://127.0.0.1:{}/stream?{}".format(_PROXY_PORT, q)
             legacy_raw = url.replace("#", "|") if "#" in url else url
             legacy_proxied = "http://127.0.0.1:{}/{}".format(_PROXY_PORT, legacy_raw)
+
+    if xor_key:
+        if proxied:
+            add_candidate(4097, proxied, "4097 + proxy HLS (XOR)", True)
+            add_candidate(5001, proxied, "5001 + proxy (XOR)", True)
+            if os.path.exists("/usr/bin/exteplayer3"):
+                add_candidate(5002, proxied, "5002 exteplayer3 + proxy (XOR)", True)
+        return candidates
 
     is_hls = any(x in plain_url.lower() for x in (".m3u8", "master.txt", "/hls", "/playlist"))
     is_mkv = ".mkv" in plain_url.lower()
