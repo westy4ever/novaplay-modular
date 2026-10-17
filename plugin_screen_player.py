@@ -1861,8 +1861,8 @@ class NovaPlaySimplePlayer(Screen):
             self.__onConfirmed()
             return
         if (self._candidate_uses_proxy and novaplay_proxy.playlist_fetch_in_progress()
-                and time.time() - self._candidate_start_ts < 120):
-            my_log("Play: still downloading a slow playlist, waiting ({})".format(self._candidate_label))
+                and time.time() - self._candidate_start_ts < 150):
+            my_log("Play: slow playlist still downloading or just arrived, waiting ({})".format(self._candidate_label))
             self._retry_timer.start(15000, True)
             return
         my_log("Play timeout: {}".format(self._candidate_label))

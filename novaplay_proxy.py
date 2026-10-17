@@ -231,9 +231,16 @@ _DEAD_PL = {}          # playlist url -> time it answered 403/404/410
 _DEAD_PL_TTL = 300
 
 
-def playlist_fetch_in_progress():
+_LAST_PL_DONE = [0.0]   # when a playlist download last finished successfully
+
+
+def playlist_fetch_in_progress(recent=30):
+    """True while a playlist download runs, or if one finished in the last `recent`
+    seconds (box: the player was stopped 1 s after an 87 s download completed)."""
     with _INFLIGHT_LOCK:
-        return bool(_INFLIGHT)
+        if _INFLIGHT:
+            return True
+    return time.time() - _LAST_PL_DONE[0] < recent
 
 
 def wait_inflight(url, timeout=120):
@@ -277,6 +284,7 @@ def fetch_playlist_text(url, headers, xor_key="", timeout=90):
             _log("Proxy: not a playlist ({}): {}".format("XOR key changed?" if xor_key else "decoy", fetch_url[:90]))
             return None
         _log("Proxy: downloaded playlist in {:.1f}s ({} bytes): {}".format(time.time() - t0, len(raw), url[:90]))
+        _LAST_PL_DONE[0] = time.time()
         if "#EXT-X-ENDLIST" in text or "#EXT-X-STREAM-INF" in text:
             remember_playlist(url, text, base)
         else:
