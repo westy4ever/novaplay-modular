@@ -174,7 +174,7 @@ def _url_ext(url):
     return ("x." + m.group(1).lower()) if m else ""
 
 
-def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
+def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin="", headers=None):
     """Route every media URI in an HLS manifest through this proxy.
 
     [NEW] fMP4 media playlists (#EXT-X-MAP init segment + .m4s pieces, seen on
@@ -190,7 +190,16 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
                 if m:
                     remux_init = urljoin(base_url, m.group(1))
                 break
+    # [NEW] MoviesAPI (netrocdn): the playlist announces AES-128 with a real
+    # key, but the pieces are plain MP4 files ("ftyp isom" at byte 0). Players
+    # decrypt them into garbage. Drop the fake key and serve the pieces as TS.
+    plain = None
+    if (not xor and not remux_init and headers is not None
+            and re.search(r"#EXT-X-KEY:METHOD=AES-128", text)):
+        plain = _plain_segment_mode(text, base_url, headers)
     out = []
+    t_pos = 0.0
+    last_dur = 0.0
     for line in text.splitlines():
         s = line.strip()
         if not s:
@@ -198,6 +207,13 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
         elif s.startswith("#"):
             if remux_init and s.startswith("#EXT-X-MAP"):
                 continue
+            if plain and s.startswith("#EXT-X-KEY"):
+                continue
+            if s.startswith("#EXTINF:"):
+                try:
+                    last_dur = float(s[8:].split(",", 1)[0])
+                except ValueError:
+                    last_dur = 0.0
             m = _URI_ATTR_RE.search(s)
             if m:
                 s = (s[:m.start()] + 'URI="%s"' % _proxied(
@@ -207,9 +223,48 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
         elif remux_init:
             out.append(_proxied(urljoin(base_url, s), referer, ua, cookie, xor, origin,
                                 extra="&remux=ts&init=" + quote(remux_init, safe=""), ext="x.ts"))
+        elif plain == "mp4":
+            out.append(_proxied(urljoin(base_url, s), referer, ua, cookie, xor, origin,
+                                extra="&remux=mp4&t0=%.3f" % t_pos, ext="x.ts"))
+            t_pos += last_dur
         else:
             out.append(_proxied(urljoin(base_url, s), referer, ua, cookie, xor, origin))
+            t_pos += last_dur
     return ("\n".join(out) + "\n").encode("utf-8", "replace")
+
+
+_PLAIN_CACHE = {}
+
+
+def _plain_segment_mode(text, base_url, headers):
+    """Look at the first piece of an 'AES-128' playlist: 'mp4' / 'ts' when it is
+    in fact unencrypted, None when it really is encrypted (or can't be read)."""
+    first = next((l.strip() for l in text.splitlines() if l.strip() and not l.startswith("#")), None)
+    if not first:
+        return None
+    seg = urljoin(base_url, first)
+    key = urlparse(seg).netloc + urlparse(base_url).path
+    if key in _PLAIN_CACHE:
+        return _PLAIN_CACHE[key]
+    mode = None
+    try:
+        h = dict(headers)
+        h["Range"] = "bytes=0-1023"
+        h["Accept-Encoding"] = "identity"
+        head = _urlreq.urlopen(_urlreq.Request(seg, headers=h), timeout=20).read(1024)
+        if head[4:8] in (b"ftyp", b"styp", b"moof", b"moov"):
+            mode = "mp4" if remux_available() else None
+        elif head[:1] == b"\x47" and (len(head) < 189 or head[188:189] == b"\x47"):
+            mode = "ts"
+        _log("Proxy: AES-128 playlist, first piece starts {} -> {}".format(
+            head[:8].hex(), "unencrypted " + mode if mode else "really encrypted"))
+    except Exception as e:
+        _log("Proxy: could not check the first piece ({}); leaving the key in".format(e))
+        return None
+    if len(_PLAIN_CACHE) > 100:
+        _PLAIN_CACHE.clear()
+    _PLAIN_CACHE[key] = mode
+    return mode
 
 
 # ─── fMP4 -> MPEG-TS remux (ffmpeg on the box) ───────────────────────────────
@@ -260,15 +315,36 @@ def _init_segment(url, headers):
     return data
 
 
-def remux_segment(seg_url, init_url, headers):
-    """init + fMP4 piece -> MPEG-TS bytes (stream copy, original timestamps)."""
+def remux_segment(seg_url, init_url, headers, t0=None):
+    """Piece -> MPEG-TS bytes (stream copy).
+    With init_url: init + fMP4 fragment, original timestamps (-copyts).
+    Without: a self-contained MP4 file, shifted to start at t0 seconds so the
+    pieces line up (read from a temp file: its index may sit at the end)."""
     import subprocess
-    init = _init_segment(init_url, headers)
     seg = _fetch_bytes(seg_url, headers)
-    cmd = [_FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "mp4", "-i", "pipe:0",
-           "-map", "0", "-c", "copy", "-copyts", "-muxdelay", "0", "-muxpreload", "0",
-           "-f", "mpegts", "pipe:1"]
-    p = subprocess.run(cmd, input=init + seg, capture_output=True, timeout=40)
+    if init_url:
+        init = _init_segment(init_url, headers)
+        cmd = [_FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "mp4", "-i", "pipe:0",
+               "-map", "0", "-c", "copy", "-copyts", "-muxdelay", "0", "-muxpreload", "0",
+               "-f", "mpegts", "pipe:1"]
+        p = subprocess.run(cmd, input=init + seg, capture_output=True, timeout=40)
+    else:
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix="np_seg_", suffix=".mp4", dir="/tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(seg)
+            cmd = [_FFMPEG, "-hide_banner", "-loglevel", "error", "-i", tmp,
+                   "-map", "0", "-c", "copy", "-muxdelay", "0", "-muxpreload", "0"]
+            if t0:
+                cmd += ["-output_ts_offset", "%.3f" % float(t0)]
+            cmd += ["-f", "mpegts", "pipe:1"]
+            p = subprocess.run(cmd, capture_output=True, timeout=40)
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
     if p.returncode != 0 or not p.stdout:
         raise RuntimeError("ffmpeg remux failed ({}): {}".format(
             p.returncode, (p.stderr or b"")[-300:].decode("utf-8", "replace")))
@@ -737,6 +813,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         the url= query value."""
         self._np_xor = self._np_origin = ""   # per request (keep-alive reuses the handler)
         self._np_remux = self._np_init = ""
+        self._np_t0 = 0.0
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query or "")
         if parsed.path == "/stream" and query.get("url"):
@@ -748,6 +825,10 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             self._np_origin = (query.get("origin", [""])[0] or "").strip()
             self._np_remux = (query.get("remux", [""])[0] or "").strip()
             self._np_init = (query.get("init", [""])[0] or "").strip()
+            try:
+                self._np_t0 = float(query.get("t0", ["0"])[0] or 0)
+            except ValueError:
+                self._np_t0 = 0.0
             piped = ""
             if "|" in stream_url:
                 stream_url, piped = stream_url.split("|", 1)
@@ -807,6 +888,9 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 return
             if getattr(self, "_np_remux", "") == "ts" and getattr(self, "_np_init", ""):
                 self._serve_remuxed(method, stream_url, self._np_init, headers)
+                return
+            if getattr(self, "_np_remux", "") == "mp4":
+                self._serve_remuxed(method, stream_url, "", headers, getattr(self, "_np_t0", None))
                 return
             if method in ("GET", "HEAD"):
                 if wait_inflight(stream_url):
@@ -1005,7 +1089,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                     headers.get("Referer", ""),
                     headers.get("User-Agent", ""),
                     headers.get("Cookie", ""),
-                    "", headers.get("Origin", ""))
+                    "", headers.get("Origin", ""), headers=headers)
                 pending_head = b""
                 _bump("manifests_rewritten")
                 _log("Proxy: rewrote manifest {} ({} bytes out)".format(
@@ -1117,14 +1201,14 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def _serve_remuxed(self, method, seg_url, init_url, headers):
+    def _serve_remuxed(self, method, seg_url, init_url, headers, seg_t0=None):
         global _PROXY_LAST_HIT, _PROXY_LAST_BYTES, _PROXY_LAST_URL
         _PROXY_LAST_HIT = time.time()
         _PROXY_LAST_URL = seg_url
         _bump("requests")
         t0 = time.time()
         try:
-            data = remux_segment(seg_url, init_url, headers)
+            data = remux_segment(seg_url, init_url, headers, seg_t0)
         except Exception as e:
             _bump("upstream_errors")
             _log("Proxy: remux failed for {}: {}".format(seg_url[:90], e))
@@ -1165,7 +1249,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         text = _drop_dead_variants(text, base_url)
         body = _rewrite_manifest(text, base_url, headers.get("Referer", ""),
                                  headers.get("User-Agent", ""), headers.get("Cookie", ""),
-                                 xor_key, headers.get("Origin", ""))
+                                 xor_key, headers.get("Origin", ""), headers=headers)
         _bump("manifests_rewritten")
         self.send_response(200)
         self.send_header("Content-Type", "application/vnd.apple.mpegurl")
