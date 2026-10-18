@@ -201,8 +201,38 @@ def resolve_movy(url, referer=None):
         return None
 
 
+def _probe(url, hdrs, limit=262144, timeout=10):
+    """Bounded check of one source -> (kind, text): kind "hls" (text = playlist),
+    "file" (a direct video file) or None. Reads at most `limit` bytes, so a
+    source that turns out to be a whole film can't stall the box."""
+    from urllib.request import Request
+    from . import net as _net
+    h = {"Accept": "*/*", "Accept-Encoding": "identity", "Sec-Fetch-Site": "cross-site",
+         "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}
+    h.update(hdrs)
+    t0 = time.time()
+    try:
+        resp = _net._get_opener().open(Request(url, headers=h), timeout=timeout)
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+        raw = resp.read(limit)
+        try:
+            resp.close()
+        except Exception:
+            pass
+    except Exception as e:
+        log("movy: probe {} failed after {:.1f}s: {}".format(url[:90], time.time() - t0, e))
+        return None, ""
+    head = raw[:64]
+    if raw.lstrip()[:7] == b"#EXTM3U":
+        return "hls", raw.decode("utf-8", "replace")
+    if b"ftyp" in head[:12] or ctype.startswith("video/") or head[:4] == b"\x1a\x45\xdf\xa3":
+        return "file", ""
+    log("movy: probe {} -> not a playlist/video ({}, {!r})".format(url[:90], ctype, head[:40]))
+    return None, ""
+
+
 def _resolve(url):
-    from .vidvm import _probe, UA
+    from .vidvm import UA
     city = urlparse(url).path.strip("/").split("/")[0]
     data = _sources(url) or {}
     srcs = [s for s in (data.get("sources") or []) if isinstance(s, dict) and s.get("url")]
@@ -214,37 +244,48 @@ def _resolve(url):
         log("movy: {} has no playable source (reply keys: {}, {!r})".format(
             city, list(data.keys()), json.dumps(data)[:200]))
         return None
-    hdrs = {"Referer": SITE + "/", "Origin": SITE, "User-Agent": UA}
-    suffix = "|" + "&".join("{}={}".format(k, v) for k, v in hdrs.items())
+    base = {"Referer": SITE + "/", "Origin": SITE, "User-Agent": UA}
+
+    def hdrs_for(src):
+        h = dict(base)
+        extra = src.get("headers")
+        if isinstance(extra, dict):
+            h.update({str(k): str(v) for k, v in extra.items()})
+        return h
+
     # highest first; the box plays up to 1080p by default, bigger ones are offered
     srcs.sort(key=lambda s: -_height(s.get("quality")))
     fits = [s for s in srcs if 0 < _height(s.get("quality")) <= 1080] or srcs
-    chosen, text = None, ""
-    for s_ in fits + [s for s in srcs if s not in fits]:
-        ok, text = _probe(s_["url"], hdrs)
-        if ok:
-            chosen = s_["url"]
+    chosen = None
+    for src in fits + [s for s in srcs if s not in fits]:
+        log("movy: {} trying {} {} (keys {})".format(city, src.get("quality"), src["url"][:100], sorted(src)))
+        kind, text = _probe(src["url"], hdrs_for(src))
+        if kind:
+            chosen = src
             break
     if not chosen:
         log("movy: {} - no playlist loaded".format(city))
         return None
-    try:
-        import novaplay_proxy
-        novaplay_proxy.remember_playlist(chosen, text, chosen, keep=3 * 3600)
-    except Exception as e:
-        log("movy: could not hand the playlist to the proxy: {}".format(e))
-    others = [s["url"] for s in srcs if s["url"] != chosen and s["url"].endswith(".m3u8")]
+    hdrs = hdrs_for(chosen)
+    suffix = "|" + "&".join("{}={}".format(k, v) for k, v in hdrs.items())
+    curl = chosen["url"]
+    if kind == "hls":
+        try:
+            import novaplay_proxy
+            novaplay_proxy.remember_playlist(curl, text, curl, keep=3 * 3600)
+        except Exception as e:
+            log("movy: could not hand the playlist to the proxy: {}".format(e))
+    others = [s["url"] for s in srcs if s is not chosen]
     if others:
-        _offer(chosen + suffix, others, suffix, hdrs)
-    log("movy: stream {} [{}]".format(chosen[-60:], city))
-    return chosen + suffix
+        _offer(curl + suffix, others, suffix, hdrs)
+    log("movy: stream {} [{} {}]".format(curl[-60:], city, kind))
+    return curl + suffix
 
 
 def _offer(full, others, suffix, hdrs):
     """Fill NovaPlay's quality menu and pre-load those playlists into the proxy
     (the CDN refuses the proxy's own playlist requests on the box)."""
     import threading
-    from .vidvm import _probe
     try:
         from .htmlmedia import _quality_tls
         _quality_tls.variants = [full] + [u + suffix for u in others]
@@ -257,8 +298,8 @@ def _offer(full, others, suffix, hdrs):
         return
 
     def _one(u):
-        ok, t = _probe(u, hdrs)
-        if ok:
+        kind, t = _probe(u, hdrs)
+        if kind == "hls":
             novaplay_proxy.remember_playlist(u, t, u, keep=3 * 3600)
     ts = [threading.Thread(target=_one, args=(u,)) for u in others]
     for t in ts:
