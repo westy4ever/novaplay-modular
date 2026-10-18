@@ -21,13 +21,13 @@ What the snapshots show:
     loader can't show webp).
   * The /browse pages are rendered in the browser, so their lists come from
     TMDB here (same endpoints SFlix uses).
-  * Movy's own player (city-named servers Miami, Boise, Vegas ... and
-    2160p/1080p/720p/480p) gets its streams from api.wecollege.net. No
-    request to that API is in the snapshots, so those servers can't be
-    added yet. Until a Stream Recorder Pro capture of a title playing is
-    available, playback uses the TMDB-id embed servers that already work
-    on the box (the SFlix list: VidSrc-Embed, EmbedMaster, YapGrid,
-    MoviesAPI, VidFast, VidCore).
+  * Movy's own player (city-named servers Miami, Boise, Vegas ... with
+    2160p/1080p/720p/480p) gets its streams from api.wecollege.net; the
+    seed + cipher protocol is in movy_api.py (from a Stream Recorder Pro
+    capture). Those servers come first, followed by the TMDB-id embed
+    servers that already work on the box (the SFlix list: VidSrc-Embed,
+    EmbedMaster, YapGrid, MoviesAPI, VidFast, VidCore), then Movy's dubbed
+    servers.
 
 Item URLs use the SFlix scheme with a "movy_" prefix, so all the TMDB
 paging/season/episode logic is shared with SflixProExtractor.
@@ -206,4 +206,34 @@ class MovyExtractor(SflixProExtractor):
 
     def get_page(self, url, m_type=None):
         res = super().get_page(self._to_sflix(url), m_type)
+        if res and res.get("servers"):
+            try:
+                own = self._own_servers(url, res)
+            except Exception as e:
+                log("[Movy] own servers: {}".format(e))
+                own = []
+            if own:
+                # Movy's English/original-audio servers first, then the shared
+                # embed servers, then the dubbed (German/French/Hindi/Spanish) ones.
+                dub = [s for s in own if "audio" in s["name"]]
+                main = [s for s in own if "audio" not in s["name"]]
+                res["servers"] = main + res["servers"] + dub
         return self._from_sflix(res) if res else res
+
+    def _own_servers(self, url, res):
+        """Movy's city servers (api.wecollege.net, see movy_api.py)."""
+        from .movy_api import server_urls
+        if url.startswith("movy_movie_"):
+            tmdb_id = url[len("movy_movie_"):]
+            d = self._tmdb_request("/movie/{}".format(tmdb_id))
+            return server_urls(tmdb_id, d.get("title") or res.get("title"),
+                               (d.get("release_date") or "")[:4], d.get("imdb_id") or "")
+        if url.startswith("movy_episode_"):
+            _p = url.split("_")
+            tmdb_id, season, episode = _p[2], _p[3], _p[4]
+            d = self._tmdb_request("/tv/{}".format(tmdb_id), {"append_to_response": "external_ids"})
+            return server_urls(tmdb_id, d.get("name") or "", (d.get("first_air_date") or "")[:4],
+                               (d.get("external_ids") or {}).get("imdb_id") or "",
+                               season=season, episode=episode,
+                               total_seasons=d.get("number_of_seasons"))
+        return []

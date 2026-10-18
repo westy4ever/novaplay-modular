@@ -217,6 +217,15 @@ Show the lines with `grep "vidvm" /tmp/novaplay.log | tail -20`.
 
 To make NovaPlay read a player again from scratch, delete the folder's files for that site (for example `rm /media/hdd/NovaPlay/cache/vm/vidcore.io_*`).
 
+## Movy servers
+
+Movy's own servers have city names (Miami, Boise, Vegas, ... Cancun). NovaPlay asks Movy's API for a one-time code, then unlocks the reply on the box. The streams use the same CDN as VidCore and VidFast, so they play through the local proxy in the same way.
+
+- The order is Movy's English servers first, then the six shared servers (VidSrc-Embed ... VidCore), then the dubbed ones (Munich and Berlin German, Paris French, Delhi Hindi, Cancun Spanish).
+- Miami and Boise can have 2160p. NovaPlay starts at 1080p and lists the other qualities in the quality menu.
+- To test one title: `python3 run_site_test.py movy --page movy_movie_1148365 --all-servers`
+- In the log, look for lines starting with `movy:`. `movy: miami -> 4 source(s)` means the API answered. `decrypt failed` means Movy changed its code, so send a new Stream Recorder Pro capture.
+
 ## Workflows
 
 **Weekly health check (about 5 minutes)**

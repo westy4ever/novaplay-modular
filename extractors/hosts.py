@@ -3600,6 +3600,13 @@ def _ofx_expand_master(stream_url, referer_for_fetch):
 _vsf_in_progress = threading.local()  # [PATCH H1]
 
 
+def resolve_movy_api(url, referer=None):
+    """Movy's own city servers (api.wecollege.net/<city>/sources): seed +
+    custom stream cipher, see extractors/movy_api.py."""
+    from .movy_api import resolve_movy
+    return resolve_movy(url, referer)
+
+
 def resolve_vidvm_family(url, referer=None):
     """vidcore.io / vidcore.net / vidfast.vc: the player builds its API
     calls inside a hidden bytecode VM; extractors/vidvm.py runs that VM
@@ -4172,6 +4179,7 @@ HOST_RESOLVERS = {
     # app, domain rotation) -- same resolver, unconfirmed independently
     # for .net specifically but same family by evidence.
     "vidcore.net": resolve_vidvm_family,
+    "api.wecollege.net": resolve_movy_api,
     "vidcloud.icu": resolve_vidcore,
     "embed.su": resolve_vidcore,
 }
