@@ -231,6 +231,29 @@ def _probe(url, hdrs, limit=262144, timeout=10):
     return None, ""
 
 
+def _first_segment_ok(url, text, hdrs):
+    """A media playlist whose first segment the host refuses (Portland/Tampa
+    answered HTTP 500) can't play; master playlists are left to the player."""
+    from urllib.parse import urljoin
+    from urllib.request import Request
+    from . import net as _net
+    if "#EXT-X-STREAM-INF" in text:
+        return True
+    seg = next((l.strip() for l in text.splitlines() if l.strip() and not l.startswith("#")), None)
+    if not seg:
+        return True
+    h = {"Accept": "*/*", "Accept-Encoding": "identity", "Range": "bytes=0-2047"}
+    h.update(hdrs)
+    try:
+        r = _net._get_opener().open(Request(urljoin(url, seg), headers=h), timeout=10)
+        r.read(2048)
+        r.close()
+        return True
+    except Exception as e:
+        log("movy: first segment of {} failed: {}".format(url[:80], e))
+        return False
+
+
 def _resolve(url):
     from .vidvm import UA
     city = urlparse(url).path.strip("/").split("/")[0]
@@ -260,6 +283,8 @@ def _resolve(url):
     for src in fits + [s for s in srcs if s not in fits]:
         log("movy: {} trying {} {} (keys {})".format(city, src.get("quality"), src["url"][:100], sorted(src)))
         kind, text = _probe(src["url"], hdrs_for(src))
+        if kind == "hls" and not _first_segment_ok(src["url"], text, hdrs_for(src)):
+            kind = None
         if kind:
             chosen = src
             break
