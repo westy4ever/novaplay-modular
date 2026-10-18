@@ -1419,21 +1419,42 @@ class NovaPlaySimplePlayer(Screen):
             if not cands:
                 return cands
             key = _candidate_pref_key(getattr(self, "_item_url", ""))
-            if not key:
-                return cands
-            pref = str(_get_config(key, "") or "").strip()
-            if not pref:
-                return cands
-            for i, c in enumerate(cands):
+            pref = str(_get_config(key, "") or "").strip() if key else ""
+            for i, c in enumerate(cands if pref else []):
                 if c and len(c) > 2 and str(c[2]) == pref:
                     if i > 0:
                         win = cands.pop(i)
                         cands.insert(0, win)
                         my_log("candidates: '{}' remembered as working — moved to front".format(pref))
                     break
-            return cands
         except Exception:
+            pass
+        return self._orderByPlayMemory(cands)
+
+    def _orderByPlayMemory(self, cands):
+        """[NEW] methods that played on this video server before go first; ones that
+        keep failing there go last (plugin_play_memory)."""
+        try:
+            import plugin_play_memory as _pm
+            before = [c[2] for c in cands]
+            out = _pm.order(list(cands))
+            if [c[2] for c in out] != before:
+                my_log("candidates: by play history ({}) -> {}".format(
+                    _pm.describe(cands[0][1]), ", ".join(c[2] for c in out[:4])))
+            return out
+        except Exception as e:
+            my_log("play memory order failed (non-fatal): {}".format(e))
             return cands
+
+    def _recordPlayMemory(self, ok):
+        try:
+            idx = self._candidate_idx
+            if 0 <= idx < len(self.candidates):
+                import plugin_play_memory as _pm
+                c = self.candidates[idx]
+                _pm.record(c[1], c[2], ok)
+        except Exception:
+            pass
 
     def __qualityMenu(self):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
@@ -1674,6 +1695,8 @@ class NovaPlaySimplePlayer(Screen):
     def __playNext(self):
         if getattr(self, "_is_advancing", False): return
         self._is_advancing = True
+        if not self._play_confirmed:
+            self._recordPlayMemory(False)   # the attempt we are leaving didn't play
         self._candidate_idx += 1
         if self._candidate_idx >= len(self.candidates):
             if not getattr(self, "_exhausted", False):
@@ -1763,6 +1786,7 @@ class NovaPlaySimplePlayer(Screen):
         except: pass
         self._disarmSkipHint()
         my_log("Play confirmed: {}".format(self._candidate_label))
+        self._recordPlayMemory(True)
         try:
             from plugin_server_rank import record_host_result, record_title_working
             record_host_result(self._server_url, True)
