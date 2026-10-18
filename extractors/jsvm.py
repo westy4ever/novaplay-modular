@@ -474,10 +474,19 @@ def _string_const(js, name):
     if m:
         k = int(m.group(2))
         return "".join(chr(k ^ int(x)) for x in m.group(1).split(","))
+    m = re.search(r"[,;\s]" + re.escape(name) +
+                  r"=\"((?:[^\"\\]|\\.)*)\"\.split\(\"\"\)\.map\(function\(e\)\{(?:let \w+=\w+;)?return String\.fromCharCode\(e\.charCodeAt\(0\)([-+])(\d+)\)\}\)\.join\(\"\"\)", js)
+    if m:
+        d = int(m.group(3)) * (-1 if m.group(2) == "-" else 1)
+        raw = re.sub(r"\\(.)", r"\1", m.group(1))
+        return "".join(chr(ord(c) + d) for c in raw)
     m = re.search(r"[,;\s]" + re.escape(name) + r"=\"([^\"]*)\"", js)
     if m:
         return m.group(1)
     raise VMExtractError("string const %s not found" % name)
+
+
+_KNOWN_ENC = ("hex", "base64", "base64url", "utf8", "utf-8", "latin1", "binary", "ascii")
 
 
 def _resolve_encoding(js, expr, data):
@@ -486,10 +495,12 @@ def _resolve_encoding(js, expr, data):
         return expr.strip('"')
     if re.match(r"^\w+$", expr):
         try:
-            return _string_const(js, expr)
+            enc = _string_const(js, expr)
+            if enc.lower() in _KNOWN_ENC:
+                return enc
         except VMExtractError:
             pass
-    # unknown (e.g. obj._0x2faa18): guess from the data itself
+    # unknown (e.g. obj._0x2faa18) or an encoding we could not decode: guess from the data
     if re.match(r"^[0-9a-fA-F]*$", data) and len(data) % 2 == 0:
         return "hex"
     return "base64"
