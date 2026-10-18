@@ -208,6 +208,20 @@ def _build_remote_play_candidates(url):
     is_mkv = ".mkv" in plain_url.lower()
     has_exteplayer = os.path.exists("/usr/bin/exteplayer3")
 
+    # fMP4 HLS (#EXT-X-MAP) only plays on the box through the proxy, which repackages
+    # it as MPEG-TS (novaplay_proxy remux): try that first instead of after ~20 s of
+    # direct attempts that always fail. The resolver hands the playlist to the proxy
+    # (VidCore/VidFast), so it's already in the proxy's cache here.
+    if is_hls and proxied:
+        try:
+            _hit = novaplay_proxy._cached_playlist(plain_url)
+            if _hit and "#EXT-X-MAP" in _hit[0] and novaplay_proxy.remux_available():
+                add_candidate(4097, proxied, "4097 + proxy HLS (fMP4->TS)", True)
+                if has_exteplayer:
+                    add_candidate(5002, proxied, "5002 exteplayer3 + proxy (fMP4->TS)", True)
+        except Exception:
+            pass
+
     if is_hls:
         add_candidate(4097, plain_url, "4097 مباشر HLS")
         add_candidate(4097, url, "4097 + headers HLS")
