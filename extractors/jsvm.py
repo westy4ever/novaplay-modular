@@ -630,9 +630,11 @@ def _classify(body, R):
             re.search(r"=" + re.escape(S) + r".*" + re.escape(R["lookup"]) + r"\(", b):
         return OP_LOOKUP
     has_s = S in b
-    if re.search(r"\w\[\w+\]=\w", b):
+    # property / index assignment:  o[k]=v  or  pop()[k]=v
+    if re.search(r"\]=(?!=)", b):
         return OP_SETPROP if has_s else OP_INDEX_SET
-    if re.search(r"\(\w+(?:\(\))?\[\w+\]\)", b) or re.search(r"\(" + re.escape(POP) + r"\[\w+\]\)", b):
+    # property / index read:  push(o[k]) / push(pop()[k]) / push(pop()[str()])
+    if "[" in b and R["push"] + "(" in b:
         return OP_GETPROP if has_s else OP_INDEX_GET
     raise VMExtractError("unrecognised opcode body: " + b[:160])
 
