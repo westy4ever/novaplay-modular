@@ -550,6 +550,9 @@ def _resolve(url, referer, max_servers):
         if not info.get("noReferrer"):
             hdrs["Referer"] = origin + "/"
             hdrs["Origin"] = origin
+        # the same browser identity the page/VM requests used: the CDN refused the
+        # proxy's default Chrome label (403) but let this one through
+        hdrs["User-Agent"] = UA
         sh = info.get("headers")
         if isinstance(sh, dict):
             hdrs.update({k: str(v) for k, v in sh.items()})

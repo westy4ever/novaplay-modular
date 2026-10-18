@@ -814,6 +814,10 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                     return
 
             range_hdr = self.headers.get("Range") or self.headers.get("range")
+            # [NEW] playlists are small and some CDNs 403 any ranged playlist request
+            # (moon.zenoak.top: "bytes=0-" / "bytes=552-" from the box's players)
+            if range_hdr and _XOR_M3U8_RE.search(stream_url):
+                range_hdr = None
             if range_hdr:
                 headers["Range"] = range_hdr
 
