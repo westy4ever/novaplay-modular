@@ -295,14 +295,18 @@ _PL_LOCK = threading.Lock()
 _PL_TTL = 120
 
 
-def remember_playlist(url, text, base_url=None):
+def remember_playlist(url, text, base_url=None, keep=None):
     # only playlists that never change: a VOD list (ENDLIST) or a master list of
     # qualities. A live playlist is re-fetched every few seconds and must not be cached.
-    if not text or ("#EXT-X-ENDLIST" not in text and "#EXT-X-STREAM-INF" not in text):
+    if not text or ("#EXT-X-ENDLIST" not in text and "#EXT-X-STREAM-INF" not in text
+                    and "#EXT-X-PLAYLIST-TYPE:VOD" not in text):
         return
     try:
         with _PL_LOCK:
-            _PL_CACHE[url] = (time.time(), text, base_url or url)
+            ts = time.time()
+            if keep and keep > _PL_TTL:
+                ts += keep - _PL_TTL      # keep this one longer than the default 2 min
+            _PL_CACHE[url] = (ts, text, base_url or url)
             if len(_PL_CACHE) > 200:
                 for k in sorted(_PL_CACHE, key=lambda k: _PL_CACHE[k][0])[:50]:
                     _PL_CACHE.pop(k, None)

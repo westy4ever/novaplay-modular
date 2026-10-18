@@ -574,7 +574,16 @@ def _resolve(url, referer, max_servers):
             if ok2:
                 log("vidvm: using the <=1080p variant {}".format(pick[-60:]))
                 stream = pick
+                text = _t
                 full = stream + ("|" + full.split("|", 1)[1] if "|" in full else "")
+        # Box: the CDN answered 403 to the proxy's playlist requests during playback
+        # while the same request a few seconds earlier (this check) got 200. Hand the
+        # playlist we already have to the local proxy so it never asks again.
+        try:
+            import novaplay_proxy
+            novaplay_proxy.remember_playlist(stream, text, stream, keep=3 * 3600)
+        except Exception as e:
+            log("vidvm: could not hand the playlist to the proxy: {}".format(e))
         log("vidvm: stream {} [{}]".format(full[:160], label))
         return full, label
     if fallback:
