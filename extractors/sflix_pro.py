@@ -291,8 +291,10 @@ class SflixProExtractor(BaseExtractor):
             # ~15 s; MoviesAPI's CDN needs ~90 s per playlist and its encrypted stream didn't
             # play in any player mode (kept as a backup).
             {"name": "Server 2 (EmbedMaster)", "url": "https://embedmaster.link/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 3 (MoviesAPI)", "url": "https://moviesapi.to/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 4 (YapGrid)", "url": "https://yapgrid.com/embed/movie/{}".format(tmdb_id), "quality": "HD"},
+            # [CHANGE 2026-10-18] YapGrid = the same vaplayer source as VidSrc-Embed (seen in a
+            # browser recording), resolved via its API from the 2nd alternative link.
+            {"name": "Server 3 (YapGrid)", "url": "https://yapgrid.com/embed/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "Server 4 (MoviesAPI)", "url": "https://moviesapi.to/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 5 (VidFast)", "url": "https://vidfast.vc/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
             # [CHANGE] VidCore moved last: a 2026-10-15 capture showed it replaced its old
             # /api/play endpoint with obfuscated, runtime-built POST URLs (/likzi/coc/v/<build>/...)

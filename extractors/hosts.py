@@ -2788,7 +2788,7 @@ def _parse_tmdb_media(url):
     return media_type, tmdb_id, season, episode
 
 
-def resolve_vaplayer_api(url, referer=None):
+def resolve_vaplayer_api(url, referer=None, start_index=0):
     try:
         parsed = _parse_tmdb_media(url)
         if not parsed:
@@ -2816,12 +2816,17 @@ def resolve_vaplayer_api(url, referer=None):
         if not isinstance(streams, list) or not streams:
             log("resolve_vaplayer_api: no stream_urls (status_code={})".format(data.get("status_code")))
             return None
-        for stream_url in streams:
+        # start_index lets a second server (YapGrid) use a different one of the
+        # alternative links, so it is a real backup rather than a duplicate
+        order = list(range(len(streams)))
+        if 0 < start_index < len(streams):
+            order = order[start_index:] + order[:start_index]
+        for i in order:
+            stream_url = streams[i]
             if isinstance(stream_url, str) and stream_url.startswith("http"):
                 stream_url = _correct_stream_url(stream_url.replace("\\/", "/"))
                 log("resolve_vaplayer_api: SUCCESS ({} of {}): {}".format(
-                    streams.index(stream_url) + 1 if stream_url in streams else 1,
-                    len(streams), stream_url[:100]))
+                    i + 1, len(streams), stream_url[:100]))
                 # the browser played this from the nextgencloudfabric.com player page
                 return _vidnest_headers_suffix(stream_url, {
                     "Referer": _VAPLAYER_PLAYER_ORIGIN + "/",
@@ -2831,6 +2836,13 @@ def resolve_vaplayer_api(url, referer=None):
     except Exception as e:
         log("resolve_vaplayer_api error for {}: {}".format(url[:100], e))
         return None
+
+
+def resolve_yapgrid(url, referer=None):
+    """[NEW 2026-10-18] A browser recording of SFlix's YapGrid server showed its
+    player loading vsembed.ru (VidSrc-Embed's player) and playing from the same
+    vaplayer source. Use that source's API directly, starting from its 2nd link."""
+    return resolve_vaplayer_api(url, start_index=1)
 
 
 def resolve_nextgencloudfabric(url, referer=None):
@@ -4128,6 +4140,7 @@ HOST_RESOLVERS = {
     "embdmstrplayer.com":   resolve_embedmaster,
     # [NEW] SFlix "VidSrc-Embed": skip the (box-blocked) host, go straight to the API
     "vidsrc-embed.ru":    resolve_vaplayer_api,
+    "yapgrid.com":        resolve_yapgrid,
     "cloudorchestranova.com": resolve_cloudorchestra,
     "panoplypalaver.site":  resolve_cloudorchestra,
     "viduki.net":           resolve_viduki,
