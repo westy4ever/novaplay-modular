@@ -1738,7 +1738,7 @@ class NovaPlaySimplePlayer(Screen):
             if t > 0 and self.__stallKick(t):
                 my_log("Stall watchdog: playback restored at {}s".format(t))
                 try:
-                    self["status"].setText("▶ تمت الاستعادة")
+                    self["status"].setText("تمت الاستعادة")
                     self.__showOSD(True)
                 except Exception:
                     pass
@@ -1915,7 +1915,7 @@ class NovaPlaySimplePlayer(Screen):
             self._seek_retry_count = 0
             self._seek_timer.start(6000, True)
         self["osd_title"].setText(self.title)
-        self["status"].setText(u"▶ Playing")
+        self["status"].setText(u"Playing")
         self._total_secs = 0
         self._watched_at_90_fired = False
         self.__showOSD(True)
@@ -2293,7 +2293,7 @@ class NovaPlaySimplePlayer(Screen):
                     novaplay_tracker._GLOBAL_IS_PAUSED = False
                     novaplay_tracker._GLOBAL_PLAY_START_POS = self._paused_elapsed
                     novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
-                self["status"].setText(u"▶ Playing")
+                self["status"].setText(u"Playing")
             else:
                 with novaplay_tracker._GLOBAL_POS_LOCK:
                     wall = novaplay_tracker._GLOBAL_PLAY_START_WALL
@@ -2308,7 +2308,7 @@ class NovaPlaySimplePlayer(Screen):
                 with novaplay_tracker._GLOBAL_POS_LOCK:
                     novaplay_tracker._GLOBAL_PLAY_START_POS = self._paused_elapsed
                     novaplay_tracker._GLOBAL_IS_PAUSED = True
-                self["status"].setText(u"⏸ Paused")
+                self["status"].setText(u"Paused")
             self.__showOSD(True)
         except Exception as e:
             my_log("togglePause error: {}".format(e))
