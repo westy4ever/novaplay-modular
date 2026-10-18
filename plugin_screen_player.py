@@ -315,13 +315,13 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osdPosterBox" position="160,606" size="168,248" backgroundColor="#161B22" cornerRadius="12" zPosition="12" transparent="0" />
         <widget name="osdPoster" position="164,610" size="160,240" zPosition="12" alphatest="blend" scale="1" />
         <widget name="osd_title"    position="180,868" size="620,38" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_videinfo" position="820,868" size="400,38" font="Regular;26" foregroundColor="#39D1D4D9" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_subinfo" position="1230,870" size="36,34" font="Regular;28" foregroundColor="#39FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
-        <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#8B49E4B9" transparent="1" zPosition="12" halign="right" />
+        <widget name="osd_videinfo" position="820,868" size="400,38" font="Regular;26" foregroundColor="#D1D4D9" transparent="1" zPosition="12" halign="left" />
+        <widget name="osd_subinfo" position="1230,870" size="36,34" font="Regular;28" foregroundColor="#FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
+        <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#49E4B9" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_durtext"  position="1290,866" size="370,42" font="Regular;30" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" valign="center" />
         <!-- [POLISH v1] seek-bar ring, percent chip, playhead marker (enigma2 alpha: 00 = solid, FF = clear) -->
         <widget name="seekFrame" position="178,916" size="1484,10" zPosition="11" backgroundColor="#3A4450" cornerRadius="5" />
-        <widget name="progBack"  position="1656,904" size="108,30" zPosition="11" backgroundColor="#40101826" cornerRadius="8" />
+        <widget name="progBack"  position="1656,904" size="108,30" zPosition="11" backgroundColor="#0E1521" cornerRadius="8" />
         <widget name="seekbar" position="180,918" size="1480,6" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="3" />
         <widget name="seekMarker" position="180,912" size="18,18" zPosition="13" backgroundColor="#00FFFFFF" cornerRadius="9" />
         <widget name="prog_bar"  position="1660,906" size="100,26" font="Regular;20" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="right" />
@@ -332,10 +332,10 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osd_divider"  position="160,982" size="1600,2" backgroundColor="#1C2333" zPosition="11" />
         <widget name="osd_keybar"   position="160,984" size="1600,46" backgroundColor="#0D1520" zPosition="11" />
         <!-- [POLISH v1] colour-coded key chips (semi-transparent, like the subtitle boxes) -->
-        <widget name="keyRed"    position="180,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#609F1313" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="keyGreen"  position="395,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#601F771F" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="keyYellow" position="610,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#60A08500" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="keyBlue"   position="825,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#6018188B" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyRed"    position="180,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#681418" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyGreen"  position="395,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#18521F" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyYellow" position="610,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#695B0C" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyBlue"   position="825,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#141763" transparent="0" cornerRadius="8" zPosition="12" />
         <widget name="osd_keys"     position="1050,992" size="710,34" font="Regular;24" foregroundColor="#C9D1D9" transparent="1" zPosition="12" halign="left" />
         <widget name="osd_botline"  position="160,1027" size="1600,3" backgroundColor="#0A2040" zPosition="11" />
         <!-- [POLISH v1] second info row (below the safe-area line at 990: check it is fully visible on the TV) -->
@@ -378,12 +378,12 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="studioTitle" position="45,52" size="1145,32" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="87" />
         <widget name="studioStatus" position="1270,52" size="600,30" font="Regular;24" halign="right" foregroundColor="#8B949E" transparent="1" zPosition="87" />
         <widget name="studioHelp" position="45,178" size="1830,31" font="Regular;24" halign="center" foregroundColor="#8B949E" transparent="1" zPosition="87" />
-        <widget name="studioCard0" position="60,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#18181818" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioCard1" position="420,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#18181818" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioCard2" position="790,90" size="340,76" font="Regular;24" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#402A82FF" transparent="0" cornerRadius="18" zPosition="88" />
-        <widget name="studioCard3" position="1170,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#18181818" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioCard4" position="1530,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#18181818" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioPreviewBg" position="460,212" size="1000,74" zPosition="87" backgroundColor="#18181818" transparent="0" cornerRadius="12" />
+        <widget name="studioCard0" position="60,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
+        <widget name="studioCard1" position="420,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
+        <widget name="studioCard2" position="790,90" size="340,76" font="Regular;24" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#2265C4" transparent="0" cornerRadius="18" zPosition="88" />
+        <widget name="studioCard3" position="1170,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
+        <widget name="studioCard4" position="1530,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
+        <widget name="studioPreviewBg" position="460,212" size="1000,74" zPosition="87" backgroundColor="#171718" transparent="0" cornerRadius="12" />
         <widget name="studioPreview" position="470,216" size="980,66" font="Regular;30" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="transparent" zPosition="88" transparent="1" />
         <widget name="safeTop" position="0,90" size="1920,2" backgroundColor="#00E5FF" zPosition="86" transparent="0" />
         <widget name="safeBottom" position="0,990" size="1920,2" backgroundColor="#00E5FF" zPosition="86" transparent="0" />
@@ -1206,9 +1206,9 @@ class NovaPlaySimplePlayer(Screen):
     def _stateGlyph(self):
         """▶ playing · ⏸ paused · ⏳ buffering · ⚠ stalled/recovering"""
         if getattr(self, "_stall_recovering", False):
-            return u"⚠", "#39FF6B6B"
+            return u"⚠", "#FF6B6B"
         if getattr(self, "_paused", False):
-            return u"⏸", "#39FFD740"
+            return u"⏸", "#FFD740"
         svc = None
         try:
             svc = self.session.nav.getCurrentService()
@@ -1243,7 +1243,7 @@ class NovaPlaySimplePlayer(Screen):
                 elapsed = current_play_secs()
             he = elapsed // 3600; me = (elapsed % 3600) // 60; se = elapsed % 60
 
-            color = "#39FFD740" if self._paused else "#39E5D1A6"
+            color = "#FFD740" if self._paused else "#E5D1A6"
             try:
                 if parseColor is not None:
                     self["osd_elapsed"].instance.setForegroundColor(parseColor(color))
@@ -1306,7 +1306,7 @@ class NovaPlaySimplePlayer(Screen):
                 if parseColor is not None:
                     try:
                         self["osd_subinfo"].instance.setForegroundColor(
-                            parseColor("#39FFD740" if _cc_on else "#396E7681"))
+                            parseColor("#FFD740" if _cc_on else "#6E7681"))
                     except Exception:
                         pass
             except Exception:
@@ -2234,7 +2234,7 @@ class NovaPlaySimplePlayer(Screen):
             self["autoNextText"].setText("التشغيل تلقائياً بعد %d ثوانٍ" % self._autonext_secs)
             self["autoNextProgress"].setValue(self._autonext_secs)
             if self._autonext_secs <= 3:
-                _c = "#39FF6B6B" if (self._autonext_secs % 2) else "#39E8E8E8"
+                _c = "#FF6B6B" if (self._autonext_secs % 2) else "#E8E8E8"
                 try:
                     if parseColor is not None:
                         self["autoNextText"].instance.setForegroundColor(parseColor(_c))
@@ -2243,7 +2243,7 @@ class NovaPlaySimplePlayer(Screen):
             else:
                 try:
                     if parseColor is not None:
-                        self["autoNextText"].instance.setForegroundColor(parseColor("#39E8E8E8"))
+                        self["autoNextText"].instance.setForegroundColor(parseColor("#E8E8E8"))
                 except Exception:
                     pass
         except Exception:
