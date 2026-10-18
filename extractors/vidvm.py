@@ -317,7 +317,7 @@ def _find_site(html, page_url):
         js = _load_chunk(cu, page_url)
         if not js:
             continue                      # download failed: try again next time
-        if "function*" not in js:
+        if not _VM_HDR.search(js):
             _MEM[cu] = None
             try:
                 os.remove(_cache_path(cu, ""))
@@ -335,6 +335,10 @@ def _find_site(html, page_url):
         # a VM-looking chunk we could not use: keep the file so it can be sent for a fix
         log("vidvm: kept {} for inspection".format(_cache_path(cu, "")))
     return None
+
+
+_VM_HDR = re.compile(r'function\*[\w$]+\([\w$]+,[\w$]+,[\w$]+\)\{(?:let [\w$]+=[\w$]+;)?var [\w$]+=[\w$]+,'
+                     r'[\w$]+=\[\],[\w$]+=\[\];function [\w$]+\(\)\{if\([\w$]+>=[\w$]+\)throw Error\(""\)')
 
 
 def _prune_cache(max_age_days=60):
