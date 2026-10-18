@@ -1640,7 +1640,10 @@ class NovaPlayDetail(Screen):
         # [B3] if a stored quality preference matches an available variant,
         # auto-play it directly instead of showing the menu
         try:
-            _pk = _quality_pref_key(self._raw_title or self._item.get("title", ""))
+            # [CHANGE 2026-10-18] user wants to be asked every time: the remembered
+            # quality is only auto-picked when the "quality_auto_pick" setting is on
+            _pk = _quality_pref_key(self._raw_title or self._item.get("title", "")) \
+                if _get_config("quality_auto_pick", False) else ""
             if _pk:
                 _pl = str(_get_config(_pk, "") or "").strip()
                 if _pl:
