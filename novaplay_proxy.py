@@ -138,7 +138,7 @@ _SNIFF_URL_RE = re.compile(r"\.(m3u8|txt)(\?|$)", re.I)
 _SNIFF_MAX = 4 * 1024 * 1024
 
 
-def _proxied(target, referer, ua, cookie, xor="", origin=""):
+def _proxied(target, referer, ua, cookie, xor="", origin="", extra="", ext=None):
     """Build a /stream URL that carries the upstream context forward.
     quote(safe="") is essential: parse_qs decodes once, and encoding
     '=' / '+' / '/' means values survive the round-trip exactly."""
@@ -157,7 +157,9 @@ def _proxied(target, referer, ua, cookie, xor="", origin=""):
     # refuses HLS segments whose URL doesn't end in a known media extension
     # ("is not in allowed_segment_extensions"): seen on the box with fMP4 .m4s
     # segments, where every proxied segment URL ended in "...origin=https://vidcore.io".
-    ext = _url_ext(target)
+    if extra:
+        q += extra
+    ext = _url_ext(target) if ext is None else ext
     if ext:
         q += "&ext=" + ext
     return "http://127.0.0.1:%d/stream?%s" % (_PROXY_PORT, q)
@@ -173,22 +175,104 @@ def _url_ext(url):
 
 
 def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
-    """Route every media URI in an HLS manifest through this proxy."""
+    """Route every media URI in an HLS manifest through this proxy.
+
+    [NEW] fMP4 media playlists (#EXT-X-MAP init segment + .m4s pieces, seen on
+    VidCore/VidFast's CDN) don't play on the box: GStreamer 1.28's HLS element
+    and exteplayer3 both gave up on them. When the box has ffmpeg, each piece
+    is served as MPEG-TS instead (init + piece remuxed, no re-encoding) and the
+    #EXT-X-MAP line is dropped, which every player on the box handles."""
+    remux_init = None
+    if not xor and "#EXT-X-MAP" in text and "BYTERANGE" not in text and remux_available():
+        for line in text.splitlines():
+            if line.strip().startswith("#EXT-X-MAP"):
+                m = _URI_ATTR_RE.search(line)
+                if m:
+                    remux_init = urljoin(base_url, m.group(1))
+                break
     out = []
     for line in text.splitlines():
         s = line.strip()
         if not s:
             out.append(line)
         elif s.startswith("#"):
+            if remux_init and s.startswith("#EXT-X-MAP"):
+                continue
             m = _URI_ATTR_RE.search(s)
             if m:
                 s = (s[:m.start()] + 'URI="%s"' % _proxied(
                     urljoin(base_url, m.group(1)), referer, ua, cookie, xor, origin)
                      + s[m.end():])          # [PATCH 65] keep IV=, BYTERANGE=, etc.
             out.append(s)
+        elif remux_init:
+            out.append(_proxied(urljoin(base_url, s), referer, ua, cookie, xor, origin,
+                                extra="&remux=ts&init=" + quote(remux_init, safe=""), ext="x.ts"))
         else:
             out.append(_proxied(urljoin(base_url, s), referer, ua, cookie, xor, origin))
     return ("\n".join(out) + "\n").encode("utf-8", "replace")
+
+
+# ─── fMP4 -> MPEG-TS remux (ffmpeg on the box) ───────────────────────────────
+_FFMPEG = "/usr/bin/ffmpeg"
+_REMUX_OK = None
+_INIT_CACHE = {}
+_INIT_LOCK = threading.Lock()
+
+
+def remux_available():
+    """ffmpeg present with the mp4 demuxer and the mpegts muxer (the box's
+    ffmpeg is a cut-down build: it has no 'null' muxer, for one)."""
+    global _REMUX_OK
+    if _REMUX_OK is None:
+        ok = False
+        try:
+            import subprocess
+            if os.path.exists(_FFMPEG):
+                mux = subprocess.run([_FFMPEG, "-hide_banner", "-muxers"], capture_output=True, timeout=10).stdout
+                dmx = subprocess.run([_FFMPEG, "-hide_banner", "-demuxers"], capture_output=True, timeout=10).stdout
+                ok = (re.search(rb"\bmpegts\b", mux) is not None and
+                      re.search(rb"\bmov,mp4", dmx) is not None)
+        except Exception as e:
+            _log("Proxy: ffmpeg check failed: {}".format(e))
+        _REMUX_OK = ok
+        _log("Proxy: fMP4->TS remux {}".format("available" if ok else "NOT available"))
+    return _REMUX_OK
+
+
+def _fetch_bytes(url, headers, timeout=30):
+    h = dict(headers)
+    h.pop("Range", None)
+    h["Accept-Encoding"] = "identity"
+    resp = _urlreq.urlopen(_urlreq.Request(url, headers=h), timeout=timeout)
+    return resp.read()
+
+
+def _init_segment(url, headers):
+    with _INIT_LOCK:
+        hit = _INIT_CACHE.get(url)
+    if hit is not None:
+        return hit
+    data = _fetch_bytes(url, headers)
+    with _INIT_LOCK:
+        if len(_INIT_CACHE) > 20:
+            _INIT_CACHE.clear()
+        _INIT_CACHE[url] = data
+    return data
+
+
+def remux_segment(seg_url, init_url, headers):
+    """init + fMP4 piece -> MPEG-TS bytes (stream copy, original timestamps)."""
+    import subprocess
+    init = _init_segment(init_url, headers)
+    seg = _fetch_bytes(seg_url, headers)
+    cmd = [_FFMPEG, "-hide_banner", "-loglevel", "error", "-f", "mp4", "-i", "pipe:0",
+           "-map", "0", "-c", "copy", "-copyts", "-muxdelay", "0", "-muxpreload", "0",
+           "-f", "mpegts", "pipe:1"]
+    p = subprocess.run(cmd, input=init + seg, capture_output=True, timeout=40)
+    if p.returncode != 0 or not p.stdout:
+        raise RuntimeError("ffmpeg remux failed ({}): {}".format(
+            p.returncode, (p.stderr or b"")[-300:].decode("utf-8", "replace")))
+    return p.stdout
 
 
 # ─── XOR-obfuscated playlists (EmbedMaster obfHosts; see extractors/hlsobf.py) ─
@@ -648,6 +732,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         /<url>|Headers form, including a pipe accidentally embedded in
         the url= query value."""
         self._np_xor = self._np_origin = ""   # per request (keep-alive reuses the handler)
+        self._np_remux = self._np_init = ""
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query or "")
         if parsed.path == "/stream" and query.get("url"):
@@ -657,6 +742,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             cookie = (query.get("cookie", [""])[0] or "").strip()
             self._np_xor = (query.get("xor", [""])[0] or "").strip()
             self._np_origin = (query.get("origin", [""])[0] or "").strip()
+            self._np_remux = (query.get("remux", [""])[0] or "").strip()
+            self._np_init = (query.get("init", [""])[0] or "").strip()
             piped = ""
             if "|" in stream_url:
                 stream_url, piped = stream_url.split("|", 1)
@@ -713,6 +800,9 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 headers["Origin"] = self._np_origin
             if xor_key and _XOR_M3U8_RE.search(stream_url):
                 self._serve_xor_manifest(method, stream_url, headers, xor_key)
+                return
+            if getattr(self, "_np_remux", "") == "ts" and getattr(self, "_np_init", ""):
+                self._serve_remuxed(method, stream_url, self._np_init, headers)
                 return
             if method in ("GET", "HEAD"):
                 if wait_inflight(stream_url):
@@ -1018,6 +1108,33 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 _log("Proxy: relay aborted: {}".format(_e))
             except Exception:
                 pass
+
+    def _serve_remuxed(self, method, seg_url, init_url, headers):
+        global _PROXY_LAST_HIT, _PROXY_LAST_BYTES, _PROXY_LAST_URL
+        _PROXY_LAST_HIT = time.time()
+        _PROXY_LAST_URL = seg_url
+        _bump("requests")
+        t0 = time.time()
+        try:
+            data = remux_segment(seg_url, init_url, headers)
+        except Exception as e:
+            _bump("upstream_errors")
+            _log("Proxy: remux failed for {}: {}".format(seg_url[:90], e))
+            self._safe_send_error(502, "remux failed")
+            return
+        _log("Proxy: remuxed {} -> {} bytes TS in {:.1f}s".format(seg_url[-40:], len(data), time.time() - t0))
+        self.send_response(200)
+        self.send_header("Content-Type", "video/mp2t")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Accept-Ranges", "none")
+        self.end_headers()
+        if method == "HEAD":
+            return
+        try:
+            self.wfile.write(data)
+            _PROXY_LAST_BYTES += len(data)
+        except Exception as e:
+            _log("Proxy: relay aborted: {}".format(e))
 
     def _serve_xor_manifest(self, method, stream_url, headers, xor_key):
         global _PROXY_LAST_BYTES
