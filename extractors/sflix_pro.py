@@ -287,10 +287,11 @@ class SflixProExtractor(BaseExtractor):
             # stream-data API (hosts.resolve_vaplayer_api), one of only two SFlix servers
             # that played in a desktop browser in a real capture.
             {"name": "Server 1 (VidSrc-Embed)", "url": "https://vidsrc-embed.ru/embed/movie/{}".format(tmdb_id), "quality": "HD"},
-            {"name": "Server 2 (MoviesAPI)", "url": "https://moviesapi.to/movie/{}".format(tmdb_id), "quality": "HD"},
-            # [CHANGE 2026-10-17] real resolver now: hosts.resolve_embedmaster (welcome POST ->
-            # decoded __EM_PLAYER__ config -> source feed -> decrypted resolve.php replies).
-            {"name": "Server 3 (EmbedMaster)", "url": "https://embedmaster.link/movie/{}".format(tmdb_id), "quality": "HD"},
+            # [CHANGE 2026-10-18] EmbedMaster before MoviesAPI: on the box EmbedMaster plays in
+            # ~15 s; MoviesAPI's CDN needs ~90 s per playlist and its encrypted stream didn't
+            # play in any player mode (kept as a backup).
+            {"name": "Server 2 (EmbedMaster)", "url": "https://embedmaster.link/movie/{}".format(tmdb_id), "quality": "HD"},
+            {"name": "Server 3 (MoviesAPI)", "url": "https://moviesapi.to/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 4 (YapGrid)", "url": "https://yapgrid.com/embed/movie/{}".format(tmdb_id), "quality": "HD"},
             {"name": "Server 5 (VidFast)", "url": "https://vidfast.vc/movie/{}?autoPlay=true".format(tmdb_id), "quality": "HD"},
             # [CHANGE] VidCore moved last: a 2026-10-15 capture showed it replaced its old
