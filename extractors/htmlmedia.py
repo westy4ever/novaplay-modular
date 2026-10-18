@@ -186,6 +186,10 @@ def _label_quality_variant(url):
     # '_' and a digit (e.g. "movie_the_hunt_1080.mp4" was silently
     # skipped). Explicit non-alnum lookaround catches both '_' and '-'
     # separators as well as string start/end.
+    # "index-s2160p-v1-a1.m3u8" (VidCore/VidFast CDN)
+    m = re.search(r'[-_/]s(2160|1440|1080|720|480|360)p(?=[-_./])', lower)
+    if m:
+        return m.group(1) + "p"
     m = re.search(r'(?<![a-z0-9])(2160|1080|720|480|360|240)p?(?![a-z0-9])', lower)
     if m:
         return m.group(1) + "p"
@@ -196,7 +200,7 @@ def _label_quality_variant(url):
 
 
 def _label_quality_variants(urls):
-    _ORDER = {"Original": 0, "1080p": 1, "720p": 2, "480p": 3, "360p": 4, "240p": 5}
+    _ORDER = {"Original": 0, "2160p": 0.5, "1440p": 0.7, "1080p": 1, "720p": 2, "480p": 3, "360p": 4, "240p": 5}
     labeled = []
     unlabeled = []
     for u in urls:

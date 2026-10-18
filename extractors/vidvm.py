@@ -568,6 +568,7 @@ def _resolve(url, referer, max_servers):
         # The box can't decode the 3840x1600 / 2592x1080 H.264 variants these hosts
         # list first (every player gave up within 2 s on the box), so hand the player
         # the best variant that fits 1920x1080 instead of the master playlist.
+        master_url, master_text = stream, text
         pick = _pick_variant(stream, text)
         if pick and pick != stream:
             ok2, _t = _probe(pick, hdrs)
@@ -584,6 +585,7 @@ def _resolve(url, referer, max_servers):
             novaplay_proxy.remember_playlist(stream, text, stream, keep=3 * 3600)
         except Exception as e:
             log("vidvm: could not hand the playlist to the proxy: {}".format(e))
+        _offer_other_qualities(master_url, master_text, stream, full, hdrs)
         log("vidvm: stream {} [{}]".format(full[:160], label))
         return full, label
     if fallback:
@@ -600,6 +602,54 @@ def _probe(stream, hdrs):
     if not ok:
         log("vidvm: playlist check failed for {} (HTTP {}, {!r})".format(stream[:90], st, (text or "")[:40]))
     return ok, text or ""
+
+
+def _all_variants(master_url, text):
+    """[(width, height, bandwidth, url)] from a master playlist."""
+    out = []
+    lines = (text or "").splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith("#EXT-X-STREAM-INF"):
+            continue
+        uri = next((l.strip() for l in lines[i + 1:] if l.strip() and not l.startswith("#")), None)
+        if not uri:
+            continue
+        bw = re.search(r"[:,]BANDWIDTH=(\d+)", line)
+        res = re.search(r"RESOLUTION=(\d+)x(\d+)", line)
+        out.append((int(res.group(1)) if res else 0, int(res.group(2)) if res else 0,
+                    int(bw.group(1)) if bw else 0, urljoin(master_url, uri)))
+    return out
+
+
+def _offer_other_qualities(master_url, master_text, chosen, full, hdrs):
+    """List every quality in NovaPlay's quality menu (the bigger ones too), and
+    hand their playlists to the local proxy in the background: on the box the
+    CDN refuses the proxy's own playlist requests, so a quality switch only
+    works for playlists fetched here."""
+    vs = _all_variants(master_url, master_text)
+    if len(vs) < 2:
+        return
+    suffix = ("|" + full.split("|", 1)[1]) if "|" in full else ""
+    urls = [full] + [u + suffix for _w, _h, _b, u in sorted(vs, key=lambda v: -v[2]) if u != chosen]
+    try:
+        from .htmlmedia import _quality_tls
+        _quality_tls.variants = urls
+    except Exception as e:
+        log("vidvm: could not list qualities: {}".format(e))
+        return
+
+    def _fetch_rest():
+        import novaplay_proxy
+        for _w, _h, _b, u in vs:
+            if u == chosen:
+                continue
+            ok, t = _probe(u, hdrs)
+            if ok:
+                novaplay_proxy.remember_playlist(u, t, u, keep=3 * 3600)
+        log("vidvm: other qualities ready for the quality menu ({})".format(
+            ", ".join("{}x{}".format(w, h) for w, h, _b, u in vs if u != chosen)))
+    import threading
+    threading.Thread(target=_fetch_rest, name="vidvm-qualities").start()
 
 
 def _pick_variant(master_url, text, max_w=1920, max_h=1088):
