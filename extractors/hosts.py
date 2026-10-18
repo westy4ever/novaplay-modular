@@ -4410,6 +4410,11 @@ def resolve_generic_embed(url, referer=None):
 
 # ─── Main host dispatcher ─────────────────────────────────────────────────────
 
+# JSON APIs with their own resolver: a page scrape of them finds nothing and
+# only wastes time (Movy's dubbed servers hit the 90 s test limit that way).
+_NO_GENERIC_FALLBACK = ("api.wecollege.net",)
+
+
 def resolve_host(url, referer=None):
     domain = urlparse(url).netloc.lower()
     log("resolve_host: domain={} url={}".format(domain, url[:80]))
@@ -4423,6 +4428,9 @@ def resolve_host(url, referer=None):
                 result = resolver(url)
             if result:
                 return result
+            if key in _NO_GENERIC_FALLBACK:
+                log("Resolver {} returned nothing (no generic fallback for this API)".format(key))
+                return None
             log("Resolver {} returned nothing, trying generic".format(key))
             break
     log("Generic fallback for: {}{}".format(domain, "" if not referer else " (with caller referer)"))

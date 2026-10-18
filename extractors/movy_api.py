@@ -157,7 +157,7 @@ def _seed(media_id, fresh=False):
     c = _SEEDS.get(media_id)
     if c and not fresh and c[1] - 5 > now:
         return c[0]
-    st, text, _ = _http("{}/seed?mediaId={}".format(API, media_id), headers=_hdrs(), timeout=15)
+    st, text, _ = _http("{}/seed?mediaId={}".format(API, media_id), headers=_hdrs(), timeout=10)
     if st != 200:
         log("movy: seed HTTP {} {!r}".format(st, (text or "")[:80]))
         return None
@@ -174,7 +174,7 @@ def _sources(url):
         seed = _seed(media_id, fresh=bool(attempt))
         if not seed:
             return None
-        st, text, _ = _http(url + "&enc=2&seed=" + quote(seed, safe=""), headers=_hdrs(), timeout=25)
+        st, text, _ = _http(url + "&enc=2&seed=" + quote(seed, safe=""), headers=_hdrs(), timeout=20)
         if st == 401 and not attempt:
             continue
         if st != 200 or not text:
@@ -211,15 +211,22 @@ def _resolve(url):
         srcs = [s for s in srcs if s.get("quality") == want] or srcs
     log("movy: {} -> {} source(s): {}".format(city, len(srcs), ", ".join(str(s.get("quality")) for s in srcs)))
     if not srcs:
+        log("movy: {} has no playable source (reply keys: {}, {!r})".format(
+            city, list(data.keys()), json.dumps(data)[:200]))
         return None
     hdrs = {"Referer": SITE + "/", "Origin": SITE, "User-Agent": UA}
     suffix = "|" + "&".join("{}={}".format(k, v) for k, v in hdrs.items())
     # highest first; the box plays up to 1080p by default, bigger ones are offered
     srcs.sort(key=lambda s: -_height(s.get("quality")))
     fits = [s for s in srcs if 0 < _height(s.get("quality")) <= 1080] or srcs
-    chosen = fits[0]["url"]
-    ok, text = _probe(chosen, hdrs)
-    if not ok:
+    chosen, text = None, ""
+    for s_ in fits + [s for s in srcs if s not in fits]:
+        ok, text = _probe(s_["url"], hdrs)
+        if ok:
+            chosen = s_["url"]
+            break
+    if not chosen:
+        log("movy: {} - no playlist loaded".format(city))
         return None
     try:
         import novaplay_proxy
