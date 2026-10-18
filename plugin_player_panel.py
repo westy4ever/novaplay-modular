@@ -28,8 +28,11 @@ _COLS = (
 )
 _Y0 = 200        # first row
 _RH = 50         # row height
-_FOCUS = "#3000E5FF"     # focused column highlight (enigma2 alpha: 00 solid, FF clear)
-_IDLE = "#B0FFFFFF"      # remembered row in the other columns
+# enigma2 doesn't blend widgets with each other: a widget's pixels REPLACE the
+# panel under it, so a see-through colour punches a hole to the video/TV
+# picture. Every colour here uses the panel's own alpha (1A).
+_FOCUS = "#1A00707F"     # focused column highlight (dark cyan)
+_IDLE = "#1A2D333B"      # remembered row in the other columns (dark grey)
 
 
 def _skin():
@@ -47,7 +50,7 @@ def _skin():
                      'valign="center" foregroundColor="#F0F6FC" transparent="1" zPosition="3" />'.format(
                          k=key, i=i, x=x + 18, y=_Y0 + i * _RH, w=wd - 30, h=_RH - 4))
     for x in (640, 1300):
-        w.append('<widget name="sep{x}" position="{x},130" size="2,{h}" backgroundColor="#30FFFFFF" '
+        w.append('<widget name="sep{x}" position="{x},130" size="2,{h}" backgroundColor="#1A30363D" '
                  'zPosition="2" />'.format(x=x, h=60 + ROWS * _RH))
     w.append('<widget name="help" position="300,{y}" size="1320,36" font="Regular;24" halign="center" '
              'foregroundColor="#8B949E" transparent="1" zPosition="3" />'.format(y=_Y0 + ROWS * _RH + 12))
