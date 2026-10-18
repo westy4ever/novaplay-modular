@@ -153,7 +153,23 @@ def _proxied(target, referer, ua, cookie, xor="", origin=""):
         q += "&origin=" + quote(origin, safe="")
     if xor:
         q += "&xor=" + quote(xor, safe="")
+    # [NEW] end the URL with the target's own file extension. ffmpeg (5001/5002)
+    # refuses HLS segments whose URL doesn't end in a known media extension
+    # ("is not in allowed_segment_extensions"): seen on the box with fMP4 .m4s
+    # segments, where every proxied segment URL ended in "...origin=https://vidcore.io".
+    ext = _url_ext(target)
+    if ext:
+        q += "&ext=" + ext
     return "http://127.0.0.1:%d/stream?%s" % (_PROXY_PORT, q)
+
+
+def _url_ext(url):
+    try:
+        path = urlparse(url).path
+    except Exception:
+        return ""
+    m = re.search(r"\.([A-Za-z0-9]{1,6})$", path)
+    return ("x." + m.group(1).lower()) if m else ""
 
 
 def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin=""):
