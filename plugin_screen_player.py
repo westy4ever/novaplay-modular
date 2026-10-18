@@ -320,7 +320,7 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#8B49E4B9" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_durtext"  position="1290,866" size="370,42" font="Regular;30" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" valign="center" />
         <!-- [POLISH v1] seek-bar ring, percent chip, playhead marker (enigma2 alpha: 00 = solid, FF = clear) -->
-        <widget name="seekFrame" position="178,916" size="1484,10" zPosition="11" backgroundColor="#C0FFFFFF" cornerRadius="5" />
+        <widget name="seekFrame" position="178,916" size="1484,10" zPosition="11" backgroundColor="#3A4450" cornerRadius="5" />
         <widget name="progBack"  position="1656,904" size="108,30" zPosition="11" backgroundColor="#40101826" cornerRadius="8" />
         <widget name="seekbar" position="180,918" size="1480,6" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="3" />
         <widget name="seekMarker" position="180,912" size="18,18" zPosition="13" backgroundColor="#00FFFFFF" cornerRadius="9" />
