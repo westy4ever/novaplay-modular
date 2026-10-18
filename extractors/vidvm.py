@@ -604,7 +604,7 @@ def _probe(stream, hdrs):
 
 def _pick_variant(master_url, text, max_w=1920, max_h=1088):
     """Highest-bandwidth variant that fits max_w x max_h; None if not a master
-    playlist or nothing is too big for the box."""
+    playlist or nothing fits."""
     if "#EXT-X-STREAM-INF" not in text:
         return None
     lines = text.splitlines()
@@ -624,6 +624,7 @@ def _pick_variant(master_url, text, max_w=1920, max_h=1088):
             continue
         if best is None or bw > best[0]:
             best = (bw, urljoin(master_url, uri))
-    if not too_big or not best:
-        return None
-    return best[1]
+    # Always settle on one quality: the proxy can only hand the player playlists
+    # it already holds (the CDN 403s the proxy's own playlist requests on the box),
+    # and a master playlist would make the player fetch a variant from the CDN.
+    return best[1] if best else None
