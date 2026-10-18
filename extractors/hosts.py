@@ -3600,6 +3600,15 @@ def _ofx_expand_master(stream_url, referer_for_fetch):
 _vsf_in_progress = threading.local()  # [PATCH H1]
 
 
+def resolve_vidvm_family(url, referer=None):
+    """vidcore.io / vidcore.net / vidfast.vc: the player builds its API
+    calls inside a hidden bytecode VM; extractors/vidvm.py runs that VM
+    here (no browser, no PC helper)."""
+    from .vidvm import resolve_vid_vm
+    res = resolve_vid_vm(url, referer)
+    return res[0] if res else None
+
+
 def resolve_vidsrc_family(url, referer=None):
     """
     [OnlyFlix playback] vidfast.vc / vidapi.xyz / share.cdnm.ink /
@@ -3955,7 +3964,7 @@ def resolve_megamax(url, referer=None):
 
 HOST_RESOLVERS = {
     # ─── OnlyFlix server tabs — vidsrc-family players (2026-09-24) ──────
-    "vidfast.vc":   resolve_vidsrc_family,
+    "vidfast.vc":   resolve_vidvm_family,
     "vidapi.xyz":   resolve_vidsrc_family,
     "cdnm.ink":     resolve_vidsrc_family,   # share.cdnm.ink
     "nontongo":     resolve_vidsrc_family,   # sv2.nontongo.stream / .day
@@ -4157,12 +4166,12 @@ HOST_RESOLVERS = {
     "superflixapi.sbs": resolve_superflixapi,
     "zxcstream.xyz": resolve_zxcstream,
     "braflix.win": resolve_braflix,
-    "vidcore.io": resolve_vidcore,
+    "vidcore.io": resolve_vidvm_family,
     # [SFlix] Server 2's static href is vidcore.NET, which the real
     # browser capture showed redirecting straight to vidcore.IO (same
     # app, domain rotation) -- same resolver, unconfirmed independently
     # for .net specifically but same family by evidence.
-    "vidcore.net": resolve_vidcore,
+    "vidcore.net": resolve_vidvm_family,
     "vidcloud.icu": resolve_vidcore,
     "embed.su": resolve_vidcore,
 }
