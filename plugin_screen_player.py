@@ -319,7 +319,11 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osd_subinfo" position="1290,870" size="36,34" font="Regular;28" foregroundColor="#39FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
         <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#8B49E4B9" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_durtext"  position="1330,868" size="290,38" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
+        <!-- [POLISH v1] seek-bar ring, percent chip, playhead marker (enigma2 alpha: 00 = solid, FF = clear) -->
+        <widget name="seekFrame" position="176,908" size="1488,20" zPosition="11" backgroundColor="#202E86C1" cornerRadius="10" />
+        <widget name="progBack"  position="1656,904" size="108,30" zPosition="11" backgroundColor="#40101826" cornerRadius="8" />
         <widget name="seekbar" position="180,912" size="1480,12" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="6" />
+        <widget name="seekMarker" position="180,906" size="4,24" zPosition="13" backgroundColor="#1AFFD740" cornerRadius="2" />
         <widget name="prog_bar"  position="1660,906" size="100,26" font="Regular;20" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_elapsed"  position="180,938" size="320,44" font="Regular;36" foregroundColor="#FFD740" transparent="1" zPosition="12" />
         <widget name="osd_state"    position="510,938" size="80,44" font="Regular;36" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" valign="center" />
@@ -327,8 +331,17 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osd_hints"    position="1220,938" size="520,44" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_divider"  position="160,982" size="1600,2" backgroundColor="#1C2333" zPosition="11" />
         <widget name="osd_keybar"   position="160,984" size="1600,46" backgroundColor="#0D1520" zPosition="11" />
-        <widget name="osd_keys"     position="180,992" size="1560,34" font="Regular;26" foregroundColor="#C9D1D9" transparent="1" zPosition="12" halign="center" />
+        <!-- [POLISH v1] colour-coded key chips (semi-transparent, like the subtitle boxes) -->
+        <widget name="keyRed"    position="180,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#609F1313" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyGreen"  position="395,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#601F771F" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyYellow" position="610,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#60A08500" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="keyBlue"   position="825,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#6018188B" transparent="0" cornerRadius="8" zPosition="12" />
+        <widget name="osd_keys"     position="1050,992" size="710,34" font="Regular;24" foregroundColor="#C9D1D9" transparent="1" zPosition="12" halign="left" />
         <widget name="osd_botline"  position="160,1027" size="1600,3" backgroundColor="#0A2040" zPosition="11" />
+        <!-- [POLISH v1] second info row (below the safe-area line at 990: check it is fully visible on the TV) -->
+        <widget name="osd_subdetail" position="180,1034" size="640,32" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="left" />
+        <widget name="osd_episode"   position="840,1034" size="280,32" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="12" halign="center" />
+        <widget name="osd_jump"      position="1140,1034" size="280,32" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="left" />
         <widget name="autoNextPanel" position="1110,92" size="750,255" zPosition="20" backgroundColor="#20000000" transparent="0" cornerRadius="24" />
         <widget name="autoNextAccent" position="1110,92" size="750,7" zPosition="21" backgroundColor="#00E5FF" transparent="0" />
         <widget name="autoNextPoster" position="1140,105" size="100,150" zPosition="22" alphatest="blend" scale="1" />
@@ -383,9 +396,12 @@ class NovaPlaySimplePlayer(Screen):
         "osd_shadow","overlay_bg","osd_topline","osd_botline",
         "osd_titlebar","osd_title","osd_durtext",
         "osdPosterBox","osdPoster",
-        "prog_bar","seekbar","osd_elapsed","osd_state",
+        "prog_bar","seekbar","seekFrame","seekMarker","progBack",
+        "osd_elapsed","osd_state",
         "status","osd_hints","osd_divider",
         "osd_keybar","osd_keys",
+        "keyRed","keyGreen","keyYellow","keyBlue",
+        "osd_subdetail","osd_episode","osd_jump",
         "osd_videinfo","osd_subinfo","osd_clock",
     ]
 
@@ -394,9 +410,12 @@ class NovaPlaySimplePlayer(Screen):
         "osd_botline": 1027, "osd_titlebar": 860,
         "osdPosterBox": 606, "osdPoster": 610,
         "osd_title": 868, "osd_durtext": 868, "prog_bar": 906,
-        "seekbar": 912, "osd_elapsed": 938, "osd_state": 938,
+        "seekbar": 912, "seekFrame": 908, "seekMarker": 906, "progBack": 904,
+        "osd_elapsed": 938, "osd_state": 938,
         "status": 938, "osd_hints": 938, "osd_divider": 982,
         "osd_keybar": 984, "osd_keys": 992,
+        "keyRed": 990, "keyGreen": 990, "keyYellow": 990, "keyBlue": 990,
+        "osd_subdetail": 1034, "osd_episode": 1034, "osd_jump": 1034,
         "osd_videinfo": 868, "osd_subinfo": 870, "osd_clock": 868,
     }
     _OSD_SLIDE_OFFSET = 500
@@ -473,6 +492,17 @@ class NovaPlaySimplePlayer(Screen):
         self["osd_subinfo"] = Label("")
         self["osd_clock"] = Label("")
         self["recBlink"]     = Label("● REC")
+        # [POLISH v1] seek-bar polish + colour key chips + second info row
+        self["seekFrame"]    = Label("")
+        self["seekMarker"]   = Label("")
+        self["progBack"]     = Label("")
+        self["keyRed"]       = Label("تأخير الترجمة −")
+        self["keyGreen"]     = Label("إعادة")
+        self["keyYellow"]    = Label("جودة")
+        self["keyBlue"]      = Label("ترجمة")
+        self["osd_subdetail"] = Label("")
+        self["osd_episode"]  = Label("")
+        self["osd_jump"]     = Label("")
         self["seekFlash"]    = Label("")
         self["seekFlash"].hide()
         self["qualityWipe"]  = Label("")
@@ -646,6 +676,7 @@ class NovaPlaySimplePlayer(Screen):
 
         # [player-ux] hold-to-accelerate seek
         self._hold_dir = 0
+        self._last_seek_step = 10   # [POLISH v1] last seek step, shown in osd_jump
         self._hold_count = 0
         self._hold_last_t = 0.0
 
@@ -1248,8 +1279,20 @@ class NovaPlaySimplePlayer(Screen):
 
             try:
                 from novaplay_subtitles import get_subtitle_state
-                _cc_on = bool(get_subtitle_state().get("path"))
+                _sub_state = get_subtitle_state() or {}
+                _cc_on = bool(_sub_state.get("path"))
                 self["osd_subinfo"].setText("CC" if _cc_on else "cc")
+                # [POLISH v1] subtitle file + offset in the second row (empty when off)
+                try:
+                    _detail = ""
+                    if _cc_on:
+                        _fn = os.path.basename(_sub_state.get("path") or "")
+                        _off = int(_sub_state.get("offset_ms") or 0)
+                        _detail = ("CC · {} · {:+d}ms".format(_fn[:38], _off) if _off
+                                   else "CC · {}".format(_fn[:44]))
+                    self["osd_subdetail"].setText(_detail)
+                except Exception:
+                    pass
                 if parseColor is not None:
                     try:
                         self["osd_subinfo"].instance.setForegroundColor(
@@ -1261,6 +1304,25 @@ class NovaPlaySimplePlayer(Screen):
 
             now = time.strftime("%H:%M")
             self["osd_clock"].setText(now)
+
+            # [POLISH v1] episode id (+ next episode) and the last seek step
+            try:
+                _ep_text = ""
+                _m = re.search(r"\bS(\d{1,2})\s*E(\d{1,3})\b", self._raw_title or "", re.I)
+                if _m:
+                    _ep_text = "S{}E{}".format(_m.group(1).zfill(2), _m.group(2).zfill(2))
+                    _nt = ""
+                    try:
+                        _nt = (self._next_episode or {}).get("title") or ""
+                    except Exception:
+                        pass
+                    _m2 = re.search(r"\bS\d{1,2}\s*E(\d{1,3})\b", _nt, re.I)
+                    if _m2:
+                        _ep_text += " → E" + _m2.group(1).zfill(2)
+                self["osd_episode"].setText(_ep_text)
+                self["osd_jump"].setText(u"‹› ±{}s".format(int(getattr(self, "_last_seek_step", 10) or 10)))
+            except Exception:
+                pass
 
             total = self._total_secs
             if not total:
@@ -1289,6 +1351,17 @@ class NovaPlaySimplePlayer(Screen):
                 except Exception:
                     pass
                 self["prog_bar"].setText("{:.0f}%".format(pct * 100))
+                # [POLISH v1] playhead marker follows the fill edge
+                try:
+                    _sb = self["seekbar"].instance
+                    _mk = self["seekMarker"].instance
+                    if _sb and _mk:
+                        _sbp = _sb.position(); _sbs = _sb.size(); _mks = _mk.size()
+                        _wx = _sbp.x() + int(_sbs.width() * pct) - (_mks.width() // 2)
+                        _wy = _sbp.y() - ((_mks.height() - _sbs.height()) // 2)
+                        _mk.move(ePoint(int(_wx), int(_wy)))
+                except Exception:
+                    pass
 
                 # [player-ux] watched-at-90%
                 if (not getattr(self, "_watched_at_90_fired", False)
@@ -1308,7 +1381,8 @@ class NovaPlaySimplePlayer(Screen):
                     self["seekbar"].setValue(0)
                 except Exception:
                     pass
-            self["osd_keys"].setText("OK=إيقاف  0-9=قفز  ‹›±10ث  أحمر:ترجمة-  أصفر:جودة  أخضر:إعادة  أزرق:ترجمة  Stop=خروج")
+            # [POLISH v1] the colour keys are shown as chips now
+            self["osd_keys"].setText("OK=إيقاف   0-9=قفز   ‹›±10ث   Stop=خروج")
         except Exception as e:
             my_log("updateOSD error: {}".format(e))
 
@@ -2241,6 +2315,10 @@ class NovaPlaySimplePlayer(Screen):
             self.__showOSD(True)
 
     def __seek(self, delta_secs):
+        try:
+            self._last_seek_step = abs(int(delta_secs)) or self._last_seek_step  # [POLISH v1]
+        except Exception:
+            pass
         try:
             svc = self.session.nav.getCurrentService()
             if not svc: return
