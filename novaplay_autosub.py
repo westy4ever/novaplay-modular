@@ -257,6 +257,9 @@ def _worker(screen, gen):
         item_url = getattr(screen, "_item_url", "")
         if not title:
             return
+        # Movy's subtitle index first: no key, no daily limit, matched by TMDB id
+        if _try_vidy(screen, gen, title, item_url):
+            return
         api_key = _cfg("subsource_api_key", "").strip()
         if not api_key:
             return
@@ -286,6 +289,24 @@ def _worker(screen, gen):
         _dbg("autosub: nothing downloadable")
     except Exception as e:
         _dbg("autosub worker error: {}".format(e))
+
+
+def _try_vidy(screen, gen, title, item_url):
+    """Arabic, else English, from subtitles.vidy.st. True when one was applied."""
+    try:
+        from novaplay_subtitles import vidy_search, vidy_download
+        ok, err, results = vidy_search(title, item_url)
+        if not ok or not results:
+            _dbg("autosub: movy subs - {}".format((err or "none")[:60]))
+            return False
+        for r in [x for x in results if x.get("rank", 2) < 2][:4]:
+            ok2, _e, path = vidy_download(r.get("id"), title)
+            if ok2 and path:
+                _apply(screen, gen, path, item_url, str(r.get("language") or ""))
+                return True
+    except Exception as e:
+        _dbg("autosub: movy subs error: {}".format(e))
+    return False
 
 
 def _apply(screen, gen, path, item_url, lang):

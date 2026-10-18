@@ -314,16 +314,16 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osd_titlebar" position="160,860" size="1600,52" backgroundColor="#0D1520" zPosition="11" />
         <widget name="osdPosterBox" position="160,606" size="168,248" backgroundColor="#161B22" cornerRadius="12" zPosition="12" transparent="0" />
         <widget name="osdPoster" position="164,610" size="160,240" zPosition="12" alphatest="blend" scale="1" />
-        <widget name="osd_title"    position="180,868" size="1180,38" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_videinfo" position="860,868" size="420,38" font="Regular;26" foregroundColor="#39D1D4D9" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_subinfo" position="1290,870" size="36,34" font="Regular;28" foregroundColor="#39FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
+        <widget name="osd_title"    position="180,868" size="620,38" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="left" />
+        <widget name="osd_videinfo" position="820,868" size="400,38" font="Regular;26" foregroundColor="#39D1D4D9" transparent="1" zPosition="12" halign="left" />
+        <widget name="osd_subinfo" position="1230,870" size="36,34" font="Regular;28" foregroundColor="#39FFD740" transparent="1" zPosition="12" halign="center" valign="center" />
         <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#8B49E4B9" transparent="1" zPosition="12" halign="right" />
-        <widget name="osd_durtext"  position="1330,868" size="290,38" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
+        <widget name="osd_durtext"  position="1290,866" size="370,42" font="Regular;30" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" valign="center" />
         <!-- [POLISH v1] seek-bar ring, percent chip, playhead marker (enigma2 alpha: 00 = solid, FF = clear) -->
-        <widget name="seekFrame" position="176,908" size="1488,20" zPosition="11" backgroundColor="#202E86C1" cornerRadius="10" />
+        <widget name="seekFrame" position="178,916" size="1484,10" zPosition="11" backgroundColor="#C0FFFFFF" cornerRadius="5" />
         <widget name="progBack"  position="1656,904" size="108,30" zPosition="11" backgroundColor="#40101826" cornerRadius="8" />
-        <widget name="seekbar" position="180,912" size="1480,12" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="6" />
-        <widget name="seekMarker" position="180,906" size="4,24" zPosition="13" backgroundColor="#1AFFD740" cornerRadius="2" />
+        <widget name="seekbar" position="180,918" size="1480,6" zPosition="12" backgroundColor="#1C2333" foregroundColor="#00E5FF" cornerRadius="3" />
+        <widget name="seekMarker" position="180,912" size="18,18" zPosition="13" backgroundColor="#00FFFFFF" cornerRadius="9" />
         <widget name="prog_bar"  position="1660,906" size="100,26" font="Regular;20" foregroundColor="#00E5FF" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_elapsed"  position="180,938" size="320,44" font="Regular;36" foregroundColor="#FFD740" transparent="1" zPosition="12" />
         <widget name="osd_state"    position="510,938" size="80,44" font="Regular;36" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" valign="center" />
@@ -410,7 +410,7 @@ class NovaPlaySimplePlayer(Screen):
         "osd_botline": 1027, "osd_titlebar": 860,
         "osdPosterBox": 606, "osdPoster": 610,
         "osd_title": 868, "osd_durtext": 868, "prog_bar": 906,
-        "seekbar": 912, "seekFrame": 908, "seekMarker": 906, "progBack": 904,
+        "seekbar": 918, "seekFrame": 916, "seekMarker": 912, "progBack": 904,
         "osd_elapsed": 938, "osd_state": 938,
         "status": 938, "osd_hints": 938, "osd_divider": 982,
         "osd_keybar": 984, "osd_keys": 992,
@@ -466,7 +466,7 @@ class NovaPlaySimplePlayer(Screen):
 
     def __init__(self, session, title, candidates, previous_service=None, resume_pos=0, item_url="",
                  next_episode=None, on_next=None, poster_url="", quality_variants=None, server_url="",
-                 is_preview=False):
+                 is_preview=False, servers=None, site="", server_name=""):
         Screen.__init__(self, session)
         self["overlay_bg"]   = Label("")
         self["status"]       = Label("جاري التشغيل...")
@@ -498,7 +498,7 @@ class NovaPlaySimplePlayer(Screen):
         self["progBack"]     = Label("")
         self["keyRed"]       = Label("تأخير الترجمة −")
         self["keyGreen"]     = Label("إعادة")
-        self["keyYellow"]    = Label("جودة")
+        self["keyYellow"]    = Label(u"جودة · سيرفر")
         self["keyBlue"]      = Label("ترجمة")
         self["osd_subdetail"] = Label("")
         self["osd_episode"]  = Label("")
@@ -562,6 +562,16 @@ class NovaPlaySimplePlayer(Screen):
         # came from -- credited/blamed once playback is actually confirmed
         # or exhausted, not merely extracted.
         self._server_url = server_url or ""
+        # [panel] the title's server list, for switching servers inside the player
+        self._servers = [sv for sv in (servers or []) if isinstance(sv, dict) and sv.get("url")
+                         and not str(sv.get("url")).startswith("magnet:")]
+        self._site = site or ""
+        self._server_name = server_name or next(
+            (sv.get("name", "") for sv in self._servers if sv.get("url") == self._server_url), "")
+        self._speed = 1
+        self._closed_flag = False
+        self._switch_kind = "quality"
+        self._server_prev = None
         # [detail-trailer] a trailer has nothing to mark watched, save a
         # position for, or queue a next episode after -- so the near-end
         # exit prompt in __onCancelKey (meant for "you're about to finish
@@ -762,7 +772,7 @@ class NovaPlaySimplePlayer(Screen):
             "green":            self.__onRestart,
             "red":              self.__subtitleDelayBack,
             "blue":             self._onSubtitles,
-            "yellow":           self.__qualityMenu,
+            "yellow":           self.__panelMenu,
             "subtitles":        self._onSubtitles,
             "subtitleSelection": self._onSubtitles,
             "audioSelection":   self.__audioSelect,
@@ -1344,7 +1354,8 @@ class NovaPlaySimplePlayer(Screen):
                 ht = total // 3600
                 mt = (total % 3600) // 60
                 st = total % 60
-                self["osd_durtext"].setText("-{:02d}:{:02d}:{:02d}  {:02d}:{:02d}:{:02d}".format(hr, mr, sr, ht, mt, st))
+                self["osd_durtext"].setText("{:02d}:{:02d}:{:02d} / {:02d}:{:02d}:{:02d}".format(he, me, se, ht, mt, st))
+                self["osd_elapsed"].setText(u"−{:02d}:{:02d}:{:02d}".format(hr, mr, sr))
                 try:
                     self["seekbar"].setRange((0, 100))
                     self["seekbar"].setValue(int(pct * 100))
@@ -1530,6 +1541,133 @@ class NovaPlaySimplePlayer(Screen):
         except Exception:
             pass
 
+    # ── [panel] one-panel menu: Quality | Server | Speed (Yellow) ─────────
+    _SPEEDS = ((u"0.5x", 0.5), (u"1x", 1), (u"2x", 2), (u"4x", 4))
+
+    def __panelMenu(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        cur_lbl = str(getattr(self, "_quality_current_label", "") or "")
+        dead = getattr(self, "_quality_dead_urls", set())
+        vs = [(l, u) for (l, u) in (getattr(self, "_quality_variants", []) or []) if u not in dead]
+        if not vs:
+            vs = list(self._qualityUsable())
+        try:
+            from extractors.htmlmedia import sort_by_quality
+            vs = sort_by_quality(vs)
+        except Exception:
+            pass
+        cur_url = getattr(self, "_quality_current_url", "")
+        q_items, self._panel_q = [], []
+        marked = False
+        for l, u in vs:
+            is_cur = (u == cur_url) or (not marked and cur_lbl and str(l).strip() == cur_lbl.strip())
+            marked = marked or is_cur
+            q_items.append((str(l), is_cur))
+            self._panel_q.append((l, u))
+        if not marked:
+            q_items.insert(0, (cur_lbl or u"الحالية", True))
+            self._panel_q.insert(0, None)
+        s_items = [(str(sv.get("name") or u"سيرفر"), (sv.get("url") == self._server_url))
+                   for sv in self._servers]
+        sp_items = [(lbl, v == self._speed) for lbl, v in self._SPEEDS]
+        from plugin_player_panel import NovaPlayerPanel
+        self.__hideOSD()
+        self.session.openWithCallback(self.__onPanelPicked, NovaPlayerPanel,
+                                      q_items, s_items, sp_items)
+
+    def __onPanelPicked(self, res):
+        if not res:
+            return
+        kind, idx = res
+        try:
+            if kind == "quality":
+                pick = self._panel_q[idx] if 0 <= idx < len(self._panel_q) else None
+                if pick:
+                    self._switch_kind = "quality"
+                    self.__qualitySwitch(pick[0], pick[1])
+            elif kind == "server":
+                if 0 <= idx < len(self._servers):
+                    self.__serverSwitch(self._servers[idx])
+            elif kind == "speed":
+                self.__setSpeed(self._SPEEDS[idx][1])
+        except Exception as e:
+            my_log("panel pick error: {}".format(e))
+
+    def __setSpeed(self, v):
+        try:
+            svc = self.session.nav.getCurrentService()
+            p = svc and svc.pause()
+            if not p:
+                raise Exception("no pause interface")
+            if v == 1:
+                p.unpause()
+            elif v > 1:
+                p.setFastForward(int(v))
+            else:
+                p.setSlowMotion(int(round(1.0 / v)))
+            self._speed = v
+            self._paused = False
+            self["status"].setText(u"⏩ السرعة {}x".format(v) if v != 1 else u"Playing")
+            my_log("speed: {}x".format(v))
+        except Exception as e:
+            my_log("speed {}x not supported: {}".format(v, e))
+            self["status"].setText(u"السرعة {}x غير مدعومة في هذا المشغل".format(v))
+        self.__showOSD(True)
+
+    def __serverSwitch(self, server):
+        if not server or server.get("url") == self._server_url:
+            return
+        try:
+            pos = self._paused_elapsed if self._paused else current_play_secs()
+        except Exception:
+            pos = 0
+        name = server.get("name") or u"سيرفر"
+        my_log("server switch: {} → {} (resume at {}s)".format(self._server_name or "?", name, int(pos)))
+        self["status"].setText(u"🔄 جاري تجهيز {}…".format(name))
+        self.__showOSD(False)
+        site = self._site
+
+        def _bg():
+            res = None
+            try:
+                res = _resolve_server_for_player(site, server)
+            except Exception as e:
+                my_log("server switch extract error: {}".format(e))
+            callInMainThread(self.__onServerResolved, server, int(pos), res)
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def __onServerResolved(self, server, pos, res):
+        if getattr(self, "_closed_flag", False):
+            return
+        name = server.get("name") or u"سيرفر"
+        if not res or not res[0]:
+            my_log("server switch: {} found no stream".format(name))
+            self["status"].setText(u"✗ {} لا يعمل — جرب سيرفر آخر".format(name))
+            self.__showOSD(True)
+            try:
+                from plugin_server_rank import record_host_result
+                record_host_result(server.get("url", ""), False)
+            except Exception:
+                pass
+            return
+        stream, qual, ref, variants = res
+        url = _stream_play_url(stream, ref)
+        self._server_prev = (self._server_url, self._server_name, list(getattr(self, "_quality_variants", []) or []))
+        self._server_url = server.get("url", "")
+        self._server_name = name
+        self._quality_variants = self._normalizeQualityVariants(variants)
+        self._quality_dead_urls = set()
+        lbl = ""
+        try:
+            from extractors.base import _label_quality_variant
+            lbl = _label_quality_variant(stream) or ""
+        except Exception:
+            pass
+        self._switch_kind = "server"
+        self.__qualitySwitch(lbl or str(qual or "AUTO"), url, keep_headers=False, resume=pos,
+                             status=u"🔄 السيرفر: {}".format(name))
+
     def __qualityMenu(self):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
             return
@@ -1564,17 +1702,20 @@ class NovaPlaySimplePlayer(Screen):
         label, url = picked
         self.__qualitySwitch(label, url)
 
-    def __qualitySwitch(self, label, url):
+    def __qualitySwitch(self, label, url, keep_headers=True, resume=None, status=None):
         if not url or url == getattr(self, "_quality_current_url", ""):
             return
-        try:
-            pos = self._paused_elapsed if self._paused else current_play_secs()
-        except Exception:
-            pos = 0
+        if resume is not None:
+            pos = resume
+        else:
+            try:
+                pos = self._paused_elapsed if self._paused else current_play_secs()
+            except Exception:
+                pos = 0
         my_log("quality switch: {} → {} (resume at {}s)".format(
             self._quality_current_label or "?", label, int(pos)))
         hdr = ""
-        for _pt, _u, _l, _p in (self.candidates or []):
+        for _pt, _u, _l, _p in (self.candidates or []) if keep_headers else []:
             if "#" in _u:
                 hdr = "#" + _u.split("#", 1)[1]
                 break
@@ -1596,7 +1737,8 @@ class NovaPlaySimplePlayer(Screen):
             self._quality_prev_label = getattr(self, "_quality_current_label", "")
             self._quality_prev_candidates = list(self.candidates or [])
             self._quality_switch_in_flight = True
-            self._quality_pending_pref = str(label or "").strip()
+            self._speed = 1
+            self._quality_pending_pref = str(label or "").strip() if self._switch_kind == "quality" else ""
             self._quality_current_url = url
             self._quality_current_label = label
             self._quality_switch_target_url = url
@@ -1612,7 +1754,7 @@ class NovaPlaySimplePlayer(Screen):
             self.__playNext()
 
         try:
-            self["status"].setText(u"🎛 تبديل الجودة: {}".format(label))
+            self["status"].setText(status or u"🎛 تبديل الجودة: {}".format(label))
         except Exception:
             pass
         self._startQualityWipe(_midpoint)
@@ -1627,6 +1769,9 @@ class NovaPlaySimplePlayer(Screen):
             self.candidates = prev_cands
             self._quality_current_url = getattr(self, "_quality_prev_url", "")
             self._quality_current_label = getattr(self, "_quality_prev_label", "")
+            if getattr(self, "_switch_kind", "") == "server" and getattr(self, "_server_prev", None):
+                self._server_url, self._server_name, self._quality_variants = self._server_prev
+                self._server_prev = None
             self._play_confirmed = False
             self._candidate_idx = -1
             self._exhausted = False
@@ -1809,9 +1954,11 @@ class NovaPlaySimplePlayer(Screen):
                     if _tgt and _tgt not in self._quality_dead_urls:
                         self._quality_dead_urls.add(_tgt)
                         my_log("quality: variant marked dead: {}…".format(_tgt[:70]))
+                    _msg = (u"السيرفر الجديد لم يعمل\nالرجوع للسيرفر السابق؟"
+                            if getattr(self, "_switch_kind", "") == "server" else
+                            u"الجودة الجديدة غير متاحة (انتهت صلاحية الرابط)\nالرجوع للجودة السابقة؟")
                     self.session.openWithCallback(
-                        self._onQualityRetry, MessageBox,
-                        u"الجودة الجديدة غير متاحة (انتهت صلاحية الرابط)\nالرجوع للجودة السابقة؟",
+                        self._onQualityRetry, MessageBox, _msg,
                         MessageBox.TYPE_YESNO, timeout=10, default=True)
                 else:
                     self.session.openWithCallback(
@@ -1889,6 +2036,8 @@ class NovaPlaySimplePlayer(Screen):
                 my_log("quality pref save failed: {}".format(e))
             self._quality_pending_pref = ""
         self._quality_switch_in_flight = False
+        self._switch_kind = "quality"
+        self._server_prev = None
         start_pos_tracker(self.session, self._item_url, start_pos=self._resume_pos)
         try:
             maybe_resume_subtitle(self.session, self.title, self._item_url)
@@ -2487,6 +2636,7 @@ class NovaPlaySimplePlayer(Screen):
         self.close()
 
     def __stop(self):
+        self._closed_flag = True
         self.__hideOSD()
         try:
             self._restoreSystemAspect()
@@ -2973,7 +3123,7 @@ class NovaPlaySimplePlayer(Screen):
             u"AUDIO            اختيار المسار الصوتي — Audio track selection",
             u"",
             u"الجودة والمعلومات — Quality & Info",
-            u"YELLOW        قائمة الجودة/السيرفر — Quality / server menu",
+            u"YELLOW        الجودة / السيرفر / السرعة — Quality, server, speed panel",
             u"INFO          معلومات البث — Stream info",
             u"",
             u"MENU          القائمة — الترجمة، الصوت، المعلومات، الحلقة",
@@ -3170,6 +3320,7 @@ class NovaPlaySimplePlayer(Screen):
         if studio_on:
             items.append(("Studio settings — إعدادات التنسيق", "studio_open"))
         items.append(("Browse local subtitles", "browse"))
+        items.append(("Search online (Movy — عربي/English, no key)", "vidy"))
         items.append(("Search online (SubSource)", "subsource"))
         items.append(("Search online (OpenSubtitles)", "opensubtitles"))
         state = get_subtitle_state()
@@ -3195,7 +3346,7 @@ class NovaPlaySimplePlayer(Screen):
             self.__skipIntro()
             return
         if choice == "quality":
-            self.__qualityMenu()
+            self.__panelMenu()
             return
         if choice == "studio_toggle":
             from novaplay_substudio import STUDIO
@@ -3223,7 +3374,7 @@ class NovaPlaySimplePlayer(Screen):
         if choice == "browse":
             self.session.openWithCallback(self._onSubtitlePicked,
                                           NovaSubtitleBrowser, "", self.title)
-        elif choice in ("subsource", "opensubtitles"):
+        elif choice in ("vidy", "subsource", "opensubtitles"):
             self.session.openWithCallback(self._onSubtitlePicked,
                                           NovaOnlineSubsScreen, self.title,
                                           self._item_url, choice,
@@ -3663,6 +3814,53 @@ class NovaPlaySimplePlayer(Screen):
 
 
 # ─── [PATCH 32a] per-site candidate memory key ──────────────────────────────
+def _resolve_server_for_player(site, server):
+    """Extract a server's stream from inside the player (background thread).
+    -> (stream_url, quality, referer, variants) or None."""
+    url = server.get("url", "")
+    if not url or url.startswith("magnet:"):
+        return None
+    ex = None
+    try:
+        from plugin_screen_detail import _get_extractor
+        ex = _get_extractor(site) if site else None
+    except Exception:
+        ex = None
+    if ex is None or getattr(ex, "extract_stream", None) is None:
+        from extractors import base as ex
+    try:
+        from novaplay_proxy import cached_extract, attach_cookies
+        result = attach_cookies(cached_extract(ex, url))
+    except Exception:
+        result = ex.extract_stream(url)
+    if not result or not result[0]:
+        return None
+    variants = result[3] if len(result) >= 4 else []
+    if not variants:
+        try:
+            from extractors.base import get_last_quality_variants
+            variants = get_last_quality_variants() or []
+        except Exception:
+            variants = []
+    return result[0], result[1], result[2], variants
+
+
+def _stream_play_url(stream_url, final_ref=""):
+    """Same header handling as the detail screen: 'url|K=V&..' -> 'url#K=V&..'."""
+    raw = str(stream_url or "").strip()
+    main_url, old_params = (raw.split("|", 1) + [""])[:2] if "|" in raw else (raw, "")
+    headers = {"User-Agent": SAFE_UA}
+    if final_ref:
+        headers["Referer"] = final_ref
+    for p in (old_params.split("&") if old_params else []):
+        if "=" in p:
+            k, v = p.split("=", 1)
+            headers[k] = v
+    hs = "&".join("{}={}".format(k, v) for k, v in headers.items())
+    pure = main_url.split("|")[0].strip()
+    return pure + ("#" + hs if hs else "")
+
+
 def _candidate_pref_key(item_url):
     try:
         host = urlparse(str(item_url or "")).netloc or ""
@@ -3678,7 +3876,7 @@ def _candidate_pref_key(item_url):
 
 def _play(session, url, title, resume_pos=0, item_url="",
           next_episode=None, on_next=None, poster_url="",
-          quality_variants=None, server_url=""):
+          quality_variants=None, server_url="", servers=None, site="", server_name=""):
     try:
         svc_url = str(url).strip()
         is_remote = svc_url.startswith("http://") or svc_url.startswith("https://")
@@ -3690,7 +3888,8 @@ def _play(session, url, title, resume_pos=0, item_url="",
                          next_episode=next_episode, on_next=on_next,
                          poster_url=poster_url,
                          quality_variants=quality_variants,
-                         server_url=server_url)
+                         server_url=server_url, servers=servers, site=site,
+                         server_name=server_name)
             return
         sref = eServiceReference(4097, 0, svc_url)
         if sys.version_info[0] == 3:

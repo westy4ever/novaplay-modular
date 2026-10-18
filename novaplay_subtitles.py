@@ -1176,11 +1176,176 @@ def opensubtitles_download(file_id, title, api_key=''):
     return False, 'Write failed.', ''
 
 
+# =============================================================================
+#  Movy's subtitle index (subtitles.vidy.st) -- no API key, no daily limit.
+#  Seen in a Movy browser capture: GET /search?id=<tmdb id>[&season=N&episode=N]
+#  -> [{url, display, language, format, release, fileName, downloadCount,
+#       isHearingImpaired, ...}] (62 files / ~40 languages for one film).
+#  The TMDB id comes from the item URL (<site>_movie_<id>,
+#  <site>_episode_<id>_<s>_<e>, as SFlix/Movy/Cineby/Vidsrc use) or, for
+#  other sites, from a TMDB title lookup.
+# =============================================================================
+
+_VIDY_SEARCH = "https://subtitles.vidy.st/search"
+_VIDY_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) "
+            "Gecko/20100101 Firefox/140.0")
+_VIDY_HDRS = {"User-Agent": _VIDY_UA, "Accept": "*/*",
+              "Referer": "https://www.movy.sx/", "Origin": "https://www.movy.sx"}
+_AR_LANGS = ("arabic", "ar", "ara")
+_EN_LANGS = ("english", "en", "eng")
+
+
+def tmdb_ref_for(item_url="", title=""):
+    """-> (tmdb_id, kind 'movie'|'tv', season, episode) or (None, ...)."""
+    u = str(item_url or "")
+    m = re.search(r"_episode_(\d+)_(\d+)_(\d+)$", u)
+    if m:
+        return m.group(1), "tv", int(m.group(2)), int(m.group(3))
+    m = re.search(r"_(movie|series|tv)_(\d+)$", u)
+    if m:
+        return m.group(2), ("movie" if m.group(1) == "movie" else "tv"), None, None
+    # any other site: look the title up on TMDB
+    t = str(title or "")
+    se = re.search(r"\bS(\d{1,2})\s*E(\d{1,3})\b", t, re.I)
+    try:
+        q = clean_subtitle_query(t, u) or t
+        from plugin_tmdb import _tmdb_search_metadata
+        meta = _tmdb_search_metadata(q, "", "tv" if se else "movie")
+        if isinstance(meta, dict) and meta.get("tmdb_id"):
+            kind = "tv" if str(meta.get("tmdb_kind")) == "tv" else "movie"
+            if kind == "tv" and se:
+                return str(meta["tmdb_id"]), "tv", int(se.group(1)), int(se.group(2))
+            if kind == "movie":
+                return str(meta["tmdb_id"]), "movie", None, None
+    except Exception:
+        pass
+    return None, None, None, None
+
+
+def _imdb_for(tmdb_id, kind):
+    try:
+        from plugin_tmdb import _tmdb_request
+        d = _tmdb_request("/%s/%s/external_ids" % ("tv" if kind == "tv" else "movie", tmdb_id)) or {}
+        return str(d.get("imdb_id") or "")
+    except Exception:
+        return ""
+
+
+def _vidy_lang_rank(lang):
+    lang = str(lang or "").lower()
+    if lang in _AR_LANGS:
+        return 0
+    if lang in _EN_LANGS:
+        return 1
+    return 2
+
+
+def vidy_search(title, video_url='', api_key=''):
+    tmdb_id, kind, season, episode = tmdb_ref_for(video_url, title)
+    if not tmdb_id:
+        return False, 'Could not find this title on TMDB.', []
+    if kind == "tv" and not (season and episode):
+        return False, 'Pick an episode first.', []
+    tail = ("&season=%d&episode=%d" % (season, episode)) if kind == "tv" else ""
+    # Movy's player asked with the IMDb id, its download dialog with the TMDB id:
+    # try the TMDB id, then the IMDb id.
+    rows, err = None, ""
+    for ident in (tmdb_id, "imdb"):
+        if ident == "imdb":
+            ident = _imdb_for(tmdb_id, kind)
+            if not ident:
+                break
+        url = "%s?id=%s%s" % (_VIDY_SEARCH, ident, tail)
+        try:
+            raw = _urlreq.urlopen(_urlreq.Request(url, headers=_VIDY_HDRS), timeout=20).read()
+            rows = json.loads(raw.decode("utf-8", "replace"))
+        except Exception as e:
+            rows, err = None, str(e)[:60]
+        if isinstance(rows, list) and rows:
+            break
+    if not isinstance(rows, list) or not rows:
+        if err:
+            return False, 'Movy subtitle search failed (%s).' % err, []
+        return False, 'No subtitles found for this title.', []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or not r.get("url"):
+            continue
+        lang = str(r.get("display") or r.get("language") or "?")
+        code = str(r.get("language") or "").lower()
+        name = (_ss_clean_label(r.get("release")) or _ss_clean_label(r.get("fileName"))
+                or _ss_clean_label(r.get("media")) or "Subtitle")
+        hi = " (HI)" if r.get("isHearingImpaired") else ""
+        out.append({
+            "id": r["url"], "title": name, "language": lang,
+            "format": str(r.get("format") or "srt").lower(),
+            "rank": _vidy_lang_rank(code) if code else _vidy_lang_rank(lang),
+            "downloads": int(r.get("downloadCount") or 0),
+            "label": "[%s] %s%s" % (lang, name, hi),
+        })
+    out.sort(key=lambda x: (x["rank"], x["language"].lower(), -x["downloads"]))
+    return True, '', out
+
+
+def _vtt_to_srt(text):
+    lines = text.replace("\r\n", "\n").split("\n")
+    out, n, i = [], 0, 0
+    while i < len(lines):
+        ln = lines[i]
+        if "-->" in ln:
+            n += 1
+            times = re.sub(r"(\d{2}:\d{2})\.(\d{3})", r"\1,\2", ln.split(" align")[0].split(" position")[0])
+            times = re.sub(r"(^|\s)(\d{2}:\d{2},\d{3})", r"\g<1>00:\2", times)
+            out.append(str(n))
+            out.append(times.strip())
+            i += 1
+            while i < len(lines) and lines[i].strip():
+                out.append(re.sub(r"</?c[^>]*>", "", lines[i]))
+                i += 1
+            out.append("")
+        i += 1
+    return "\n".join(out) + "\n"
+
+
+def vidy_download(file_url, title, api_key=''):
+    file_url = str(file_url or "").strip()
+    if not file_url:
+        return False, 'Missing subtitle link.', ''
+    try:
+        data = _urlreq.urlopen(_urlreq.Request(file_url, headers=_VIDY_HDRS), timeout=30).read()
+    except Exception as e:
+        return False, 'Subtitle download failed (%s).' % str(e)[:60], ''
+    if not data:
+        return False, 'Empty subtitle file.', ''
+    if data[:2] == b"\x1f\x8b":
+        try:
+            import gzip, io
+            data = gzip.GzipFile(fileobj=io.BytesIO(data)).read()
+        except Exception:
+            pass
+    base = re.sub(r'[^A-Za-z0-9_\-\.]+', '_', _clean_name(title) or "movy_sub").strip('._') or "movy_sub"
+    base = base[:80] + "_" + hashlib.md5(file_url.encode("utf-8")).hexdigest()[:6]
+    if data[:2] == b'PK':
+        picked, picked_name = _ss_pick_srt_from_zip(data, base)
+        if not picked:
+            return False, 'Downloaded zip has no supported subtitle file.', ''
+        data = picked
+    data = _normalize_text_subtitle_bytes(data)
+    if data.lstrip()[:6] == b"WEBVTT":
+        data = _vtt_to_srt(data.decode("utf-8", "replace")).encode("utf-8")
+    path = _write_subtitle_file(data, base + ".srt")
+    if path:
+        return True, '', path
+    return False, 'Write failed.', ''
+
+
 _PROVIDERS = {
     "subsource": {"name": "SubSource", "key": _ss_api_key,
                   "search": subsource_search, "download": subsource_download},
     "opensubtitles": {"name": "OpenSubtitles", "key": _os_api_key,
                       "search": opensubtitles_search, "download": opensubtitles_download},
+    "vidy": {"name": "Movy subtitles", "key": lambda: "",
+             "search": vidy_search, "download": vidy_download},
 }
 
 

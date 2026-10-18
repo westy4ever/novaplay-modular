@@ -1914,12 +1914,15 @@ class NovaPlayDetail(Screen):
 
                 def _on_resume(_ans, _u=url, _t=title, _iu=_item_url, _sp=_saved_pos,
                                _ne=self._next_episode, _cb=self._playNextEpisode,
-                               _po=self._osd_poster, _qv=_qv, _su=server.get("url", "")):
+                               _po=self._osd_poster, _qv=_qv, _su=server.get("url", ""),
+                               _svs=list(self._servers or []), _site=self._site,
+                               _sn=server.get("name", "")):
                     if not _ans:
                         _save_position(_iu, 0)
                     _play(self.session, _u, _t, resume_pos=_sp if _ans else 0, item_url=_iu,
                           next_episode=_ne, on_next=_cb, poster_url=_po,
-                          quality_variants=_qv, server_url=_su)
+                          quality_variants=_qv, server_url=_su,
+                          servers=_svs, site=_site, server_name=_sn)
                 self["status"].setText("جاري فتح المشغل...")
                 self.session.openWithCallback(_on_resume, MessageBox, resume_text, MessageBox.TYPE_YESNO, timeout=8, default=True)
             else:
@@ -1927,7 +1930,9 @@ class NovaPlayDetail(Screen):
                 _play(self.session, url, title, resume_pos=0, item_url=_item_url,
                       next_episode=self._next_episode, on_next=self._playNextEpisode,
                       poster_url=self._osd_poster,
-                      quality_variants=_qv, server_url=server.get("url", ""))
+                      quality_variants=_qv, server_url=server.get("url", ""),
+                      servers=list(self._servers or []), site=self._site,
+                      server_name=server.get("name", ""))
             from extractors.base import get_proxy_used
             if get_proxy_used():
                 self["status"].setText("✓ Proxy  " + self["status"].getText())
