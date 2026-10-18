@@ -1684,12 +1684,24 @@ class NovaPlayDetail(Screen):
                 "final_ref": final_ref,
                 "server": server,
             })
+        # highest quality first (2160p, 1080p, 720p, ...), on every site; the
+        # default entry gets a real resolution label when its URL shows one
+        try:
+            from extractors.htmlmedia import sort_by_quality, _label_quality_variant
+            _dl = _label_quality_variant(url)
+            if _dl and choices and not re.search(r"\d{3,4}p", str(choices[0]["label"])):
+                choices[0]["label"] = _dl
+            choices = sort_by_quality(choices, lambda c: c["label"], lambda c: c["url"])
+        except Exception as e:
+            my_log("quality sort failed (non-fatal): {}".format(e))
         self._quality_choices = choices
 
         quality_labels = []
         for i, c in enumerate(choices):
             label = c["label"]
-            if "1080" in label or "Original" in label:
+            if "2160" in label or "1440" in label or "4K" in label.upper():
+                badge = "🔴"
+            elif "1080" in label or "Original" in label:
                 badge = "🔵"
             elif "720" in label:
                 badge = "🟢"

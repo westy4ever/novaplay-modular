@@ -215,6 +215,29 @@ def _label_quality_variants(urls):
     return labeled
 
 
+def quality_rank(label, url=""):
+    """Bigger = better picture, for sorting quality lists highest first
+    (2160p, 1440p, 1080p, 720p, ...). Labels without a resolution ("HD",
+    "Quality 2") are read from the URL; still unknown -> -1 (listed last)."""
+    def _num(text):
+        t = str(text or "").lower()
+        if "original" in t or "source" in t:
+            return 100000
+        if re.search(r"(?<![a-z0-9])(4k|uhd)(?![a-z0-9])", t):
+            return 2160
+        m = re.search(r"(2160|1440|1080|720|576|540|480|360|240|144)p?", t)
+        return int(m.group(1)) if m else -1
+    r = _num(label)
+    if r < 0 and url:
+        r = _num(_label_quality_variant(url) or "")
+    return r
+
+
+def sort_by_quality(items, label_of=lambda x: x[0], url_of=lambda x: x[1]):
+    """Stable sort, highest quality first; unknown ones keep their order at the end."""
+    return sorted(items, key=lambda x: -quality_rank(label_of(x), url_of(x)))
+
+
 def get_last_quality_variants():
     urls = getattr(_quality_tls, "variants", [])
     if len(urls) <= 1:

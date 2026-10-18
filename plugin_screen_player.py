@@ -1465,6 +1465,11 @@ class NovaPlaySimplePlayer(Screen):
             self.__showOSD(True)
             self._hide_timer.start(2500, True)
             return
+        try:
+            from extractors.htmlmedia import sort_by_quality
+            variants = sort_by_quality(variants)
+        except Exception:
+            pass
         items = []
         for label, url in variants:
             mark = u"●" if url == self._quality_current_url else u"○"
