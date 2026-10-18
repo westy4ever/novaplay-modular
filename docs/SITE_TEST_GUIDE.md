@@ -180,7 +180,42 @@ Next-page tiles ("Next", "التالي", "Page 2") are never counted as titles.
 | `HTTP Error 404` or `Connection refused` in a server | That mirror is gone | Ignore if another server plays |
 | `unknown site key` | Typo in the key | Use `--list` to see the exact keys |
 
+| `vidvm: failed ... unrecognised opcode body` or `Unknown encoding` | VidCore or VidFast put out a new version of their player | Send the newest `.js` file from the VM cache folder (see "VidCore and VidFast" below) |
+
 If many sites fail the same way, check the box first: in NovaPlay open **Settings**, press **Menu**, and run **System Diagnostics**. It shows whether the internet, the browser proxy, TorrServer and each optional package (curl_cffi for Cloudflare sites, Pillow, yt-dlp and others) are working. Anything missing can be added with **Install Missing Dependencies** from the same menu.
+
+## VidCore and VidFast
+
+These two players (SFlix servers 5 and 6, also used by other sites) hide their requests inside a small program in one of their script files. NovaPlay runs that program itself on the box, so no PC or browser is needed.
+
+**How long it takes**
+
+- The first film after the site changes takes 20 to 30 seconds: NovaPlay reads the new player file once.
+- After that, a film takes about 8 seconds.
+- What it learned is kept in `/media/hdd/NovaPlay/cache/vm/` (or `/tmp/novaplay_vmcache/` on a box without a hard disk), so it survives a reboot. Files not used for 60 days are deleted on their own.
+
+**Reading the log**
+
+Show the lines with `grep "vidvm" /tmp/novaplay.log | tail -20`.
+
+| Line | Meaning |
+|---|---|
+| `analysed .../281-....js in 19.8s -> ok` | A new player version was read and saved |
+| `request VM 775930 ops in 6.0s` | The hidden program ran; the time is the box's speed |
+| `6 servers: ['vRapid', ...]` | The player's own server list |
+| `server vRapid -> HTTP 200` | That server answered |
+| `playlist check failed` | That server's stream didn't load; the next one is tried |
+| `stream https://...master.m3u8` | The stream handed to the player |
+| `failed ... unrecognised opcode body` / `Unknown encoding` / `not found` | The site changed its player in a way NovaPlay doesn't know yet |
+
+**When it breaks**
+
+1. List the cache folder: `ls -la /media/hdd/NovaPlay/cache/vm/`
+2. A `.js` file there (about 1 to 2 MB) is the player file NovaPlay couldn't read. It is kept on purpose.
+3. Copy it to your PC with WinSCP or FileZilla and send it, together with the `vidvm` log lines.
+4. No `.js` there? Record one film on that server on your PC with Stream Recorder Pro and send the newest files from `Downloads/StreamRecorder-VM/`.
+
+To make NovaPlay read a player again from scratch, delete the folder's files for that site (for example `rm /media/hdd/NovaPlay/cache/vm/vidcore.io_*`).
 
 ## Workflows
 

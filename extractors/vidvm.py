@@ -28,7 +28,26 @@ from . import jsvm as V
 from . import jsglobals as G
 
 UA = G.FIREFOX_UA
-_CACHE_DIR = "/tmp/novaplay_vmcache"
+def _pick_cache_dir():
+    """On the hard disk when there is one, so the parsed player code survives a
+    reboot (the first VidCore/VidFast film after a restart would otherwise spend
+    ~20 s re-reading it); /tmp otherwise."""
+    for base in ("/media/hdd", "/media/usb"):
+        if os.path.isdir(base):
+            d = os.path.join(base, "NovaPlay", "cache", "vm")
+            try:
+                os.makedirs(d, exist_ok=True)
+                test = os.path.join(d, ".w")
+                open(test, "w").close()
+                os.remove(test)
+                return d
+            except Exception:
+                pass
+    return "/tmp/novaplay_vmcache"
+
+
+_CACHE_DIR = _pick_cache_dir()
+_PRUNED = False
 _SPEC_VERSION = 4
 _MEM = {}
 
@@ -279,6 +298,7 @@ def _get_site_spec(chunk_url, js):
 
 
 def _find_site(html, page_url):
+    _prune_cache()
     for cu in _chunk_urls(html, page_url):
         if cu in _MEM:
             if _MEM[cu]:
@@ -295,23 +315,45 @@ def _find_site(html, page_url):
                 return site
             continue
         js = _load_chunk(cu, page_url)
-        site = None
-        if js and "function*" in js:
-            site = _get_site_spec(cu, js)
-        else:
+        if not js:
+            continue                      # download failed: try again next time
+        if "function*" not in js:
             _MEM[cu] = None
-        try:
-            os.remove(_cache_path(cu, ""))   # the spec is what we keep
-        except Exception:
-            pass
+            try:
+                os.remove(_cache_path(cu, ""))
+                open(neg, "w").close()     # plain chunk, never look at it again
+            except Exception:
+                pass
+            continue
+        site = _get_site_spec(cu, js)     # raises if the VM can't be read
         if site:
+            try:
+                os.remove(_cache_path(cu, ""))   # the spec is what we keep
+            except Exception:
+                pass
             return site
-        try:
-            os.makedirs(_CACHE_DIR, exist_ok=True)
-            open(neg, "w").close()
-        except Exception:
-            pass
+        # a VM-looking chunk we could not use: keep the file so it can be sent for a fix
+        log("vidvm: kept {} for inspection".format(_cache_path(cu, "")))
     return None
+
+
+def _prune_cache(max_age_days=60):
+    """Old site builds pile up on the hard disk; drop files untouched for 60 days."""
+    global _PRUNED
+    if _PRUNED:
+        return
+    _PRUNED = True
+    try:
+        cutoff = time.time() - max_age_days * 86400
+        for name in os.listdir(_CACHE_DIR):
+            p = os.path.join(_CACHE_DIR, name)
+            try:
+                if os.path.getmtime(p) < cutoff:
+                    os.remove(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 # ─── running the programs ────────────────────────────────────────────────
