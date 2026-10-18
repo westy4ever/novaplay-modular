@@ -153,7 +153,7 @@ The test follows the same rules as the plugin's screens, so all 31 registered si
 | Site type | Examples | How the test treats it |
 |---|---|---|
 | Arabic scraper sites | EgyDead, WeCima, Akwam, Arabseed, Shahid4u, CimaWebas | Normal chain. The site's cookies are attached to the stream, as the plugin does |
-| TMDB-based sites | SFlix, Cineby, Vidsrc, IMDB.su | Normal chain. Categories come from TMDB, servers are embed players |
+| TMDB-based sites | SFlix, Movy, Cineby, Vidsrc, IMDB.su | Normal chain. Categories come from TMDB, servers are embed players |
 | Torrent sites | YTS, Torrentio | `magnet:` servers count as working and go to TorrServer, as in the plugin. Nothing is downloaded |
 | Series | any site | Follows series, then season, then episode (up to 4 levels), opening only the types the detail screen lists: `series`, `season`, `episode` |
 | Categories with sub-folders | genre or collection menus | Opens the first sub-folder (up to 3 levels) when a category holds no titles |
