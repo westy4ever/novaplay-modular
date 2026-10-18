@@ -559,8 +559,19 @@ def _resolve(url, referer, max_servers):
         label = "{} {}".format(pu.netloc.split(".")[0].capitalize(), srv.get("name") or "").strip()
         if fallback is None:
             fallback = (full, label)
-        if not _probe(stream, hdrs):
+        ok, text = _probe(stream, hdrs)
+        if not ok:
             continue
+        # The box can't decode the 3840x1600 / 2592x1080 H.264 variants these hosts
+        # list first (every player gave up within 2 s on the box), so hand the player
+        # the best variant that fits 1920x1080 instead of the master playlist.
+        pick = _pick_variant(stream, text)
+        if pick and pick != stream:
+            ok2, _t = _probe(pick, hdrs)
+            if ok2:
+                log("vidvm: using the <=1080p variant {}".format(pick[-60:]))
+                stream = pick
+                full = stream + ("|" + full.split("|", 1)[1] if "|" in full else "")
         log("vidvm: stream {} [{}]".format(full[:160], label))
         return full, label
     if fallback:
@@ -576,4 +587,31 @@ def _probe(stream, hdrs):
     ok = st == 200 and (text or "").lstrip().startswith("#EXTM3U")
     if not ok:
         log("vidvm: playlist check failed for {} (HTTP {}, {!r})".format(stream[:90], st, (text or "")[:40]))
-    return ok
+    return ok, text or ""
+
+
+def _pick_variant(master_url, text, max_w=1920, max_h=1088):
+    """Highest-bandwidth variant that fits max_w x max_h; None if not a master
+    playlist or nothing is too big for the box."""
+    if "#EXT-X-STREAM-INF" not in text:
+        return None
+    lines = text.splitlines()
+    best = None
+    too_big = False
+    for i, line in enumerate(lines):
+        if not line.startswith("#EXT-X-STREAM-INF"):
+            continue
+        uri = next((l.strip() for l in lines[i + 1:] if l.strip() and not l.startswith("#")), None)
+        if not uri:
+            continue
+        bw = re.search(r"[:,]BANDWIDTH=(\d+)", line)
+        bw = int(bw.group(1)) if bw else 0
+        res = re.search(r"RESOLUTION=(\d+)x(\d+)", line)
+        if res and (int(res.group(1)) > max_w or int(res.group(2)) > max_h):
+            too_big = True
+            continue
+        if best is None or bw > best[0]:
+            best = (bw, urljoin(master_url, uri))
+    if not too_big or not best:
+        return None
+    return best[1]
