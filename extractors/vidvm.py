@@ -638,18 +638,22 @@ def _offer_other_qualities(master_url, master_text, chosen, full, hdrs):
         log("vidvm: could not list qualities: {}".format(e))
         return
 
-    def _fetch_rest():
-        import novaplay_proxy
-        for _w, _h, _b, u in vs:
-            if u == chosen:
-                continue
-            ok, t = _probe(u, hdrs)
-            if ok:
-                novaplay_proxy.remember_playlist(u, t, u, keep=3 * 3600)
-        log("vidvm: other qualities ready for the quality menu ({})".format(
-            ", ".join("{}x{}".format(w, h) for w, h, _b, u in vs if u != chosen)))
     import threading
-    threading.Thread(target=_fetch_rest, name="vidvm-qualities").start()
+    import novaplay_proxy
+
+    def _one(u):
+        ok, t = _probe(u, hdrs)
+        if ok:
+            novaplay_proxy.remember_playlist(u, t, u, keep=3 * 3600)
+    # in parallel, and waited for: NovaPlay shows the quality list right after
+    # this returns, and a quality picked before its playlist is here would fail
+    ts = [threading.Thread(target=_one, args=(u,)) for _w, _h, _b, u in vs if u != chosen]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(12)
+    log("vidvm: other qualities ready ({})".format(
+        ", ".join("{}x{}".format(w, h) for w, h, _b, u in vs if u != chosen)))
 
 
 def _pick_variant(master_url, text, max_w=1920, max_h=1088):
