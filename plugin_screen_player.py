@@ -497,7 +497,7 @@ class NovaPlaySimplePlayer(Screen):
         self["seekMarker"]   = Label("")
         self["progBack"]     = Label("")
         self["keyRed"]       = Label(u"سيرفر تالي ⏭")
-        self["keyGreen"]     = Label("إعادة")
+        self["keyGreen"]     = Label(u"تخطي المقدمة")
         self["keyYellow"]    = Label(u"جودة · سيرفر")
         self["keyBlue"]      = Label(u"صوت · ترجمة")
         self["osd_subdetail"] = Label("")
@@ -769,7 +769,7 @@ class NovaPlaySimplePlayer(Screen):
             "seekdef:6": lambda: self.__seekPct(60),
             "seekdef:7": lambda: self.__seekPct(70),
             "seekdef:9": lambda: self.__seekPct(90),
-            "green":            self.__onRestart,
+            "green":            self.__greenKey,
             "red":              self.__nextServer,
             "blue":             self._subsPanel,
             "yellow":           self.__panelMenu,
@@ -1405,6 +1405,10 @@ class NovaPlaySimplePlayer(Screen):
                     self["seekbar"].setValue(0)
                 except Exception:
                     pass
+            try:
+                self["keyGreen"].setText(self._greenLabel())
+            except Exception:
+                pass
             # [POLISH v1] the colour keys are shown as chips now
             self["osd_keys"].setText("OK=إيقاف   0-9=قفز   ‹›±10ث   Stop=خروج")
         except Exception as e:
@@ -1430,6 +1434,45 @@ class NovaPlaySimplePlayer(Screen):
                 STUDIO.update(self._studioNowMs())
         except Exception:
             pass
+
+    # ── [green] Skip intro early on, Next episode near the end ───────────
+    def _greenPhase(self):
+        try:
+            pos = self._paused_elapsed if self._paused else current_play_secs()
+        except Exception:
+            pos = 0
+        total = int(self._total_secs or 0)
+        if (self._next_episode and self._on_next and total > 0
+                and total - pos <= max(300, int(total * 0.10))):
+            return "next"
+        return "intro" if pos < 600 else "skip"
+
+    def _greenLabel(self):
+        try:
+            secs = max(10, min(600, int(_get_config("skip_intro_secs", "90") or 90)))
+        except Exception:
+            secs = 90
+        ph = self._greenPhase()
+        if ph == "next":
+            return u"الحلقة التالية ⏭"
+        if ph == "intro":
+            return u"تخطي المقدمة"
+        return u"تقديم +{}ث".format(secs)
+
+    def __greenKey(self):
+        if getattr(self, "_studioOverlayActive", False):
+            return
+        if getattr(self, "_autonext_active", False):
+            nxt = getattr(self, "_autonext_nxt", None) or self._next_episode
+            if nxt:
+                self._hideAutoNextCard()
+                self.__nextAnswer(True, nxt)
+            return
+        if self._greenPhase() == "next":
+            my_log("green: next episode")
+            self.__nextAnswer(True, self._next_episode)
+            return
+        self.__skipIntro()
 
     def __skipIntro(self):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
@@ -3163,7 +3206,6 @@ class NovaPlaySimplePlayer(Screen):
             u"",
             u"التشغيل — Playback",
             u"OK            تشغيل/إيقاف مؤقت — Play / Pause",
-            u"GREEN         إعادة التشغيل + استئناف — Restart + resume",
             u"STOP          خروج مباشر للتلفاز — Exit straight to TV",
             u"EXIT/CANCEL   خروج — قرب النهاية: التالي/علّم/احفظ/إلغاء",
             u"",
@@ -3171,7 +3213,7 @@ class NovaPlaySimplePlayer(Screen):
             u"LEFT / RIGHT     تقديم/تأخير (استمر للتسريع 10s→30s→60s)",
             u"UP / DOWN        تقديم/تأخير 60 ثانية",
             u"FF / REW         تقديم/تأخير (نفس تسريع الاستمرار)",
-            u"0-9              قفز إلى 0%/10%/20%/…/90% من المدة",
+            u"0-9              قفز إلى 0%/10%/20%/…/90% من المدة (0 = من البداية)",
             u"",
             u"المسارات والترجمة — Tracks & Subtitles",
             u"BLUE / SUBTITLE  الصوت / الترجمة / المزيد — Audio, subtitles panel",
@@ -3179,6 +3221,7 @@ class NovaPlaySimplePlayer(Screen):
             u"",
             u"الجودة والمعلومات — Quality & Info",
             u"RED           السيرفر التالي — Next server",
+            u"GREEN         تخطي المقدمة / الحلقة التالية — Skip intro / next episode",
             u"YELLOW        الجودة / السيرفر / السرعة — Quality, server, speed panel",
             u"INFO          معلومات البث — Stream info",
             u"",

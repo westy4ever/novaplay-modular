@@ -233,13 +233,13 @@ While a film plays, the coloured keys open Movy-style panels. In every panel: �
 | Key | What it does |
 |---|---|
 | **Red** | Next server: jumps to the next server of this title and carries on from the same minute. After the last server it goes back to the first. |
-| **Green** | Restart from the beginning |
+| **Green** | Skip intro in the first 10 minutes (jumps the `skip_intro_secs` setting, 90 s by default); **Next episode** near the end of an episode (last 10 %, at least the last 5 min) or while the next-episode card is showing; in between, forward by the same amount. The green chip shows which one it will do |
 | **Yellow** | Panel: **Quality** (2160p first) · **Server** (switch without leaving the player, same minute; if the new one fails you're asked to go back) · **Speed** (0.5x, 1x, 2x, 4x) |
 | **Blue** | Panel: **Audio** tracks · **Subtitles** (Off, then Movy's Arabic and English files, then other languages; OK downloads and turns one on) · **More** (sync +/−250 ms and reset, auto subtitles on/off, skip intro, Subtitle Studio, SubSource, OpenSubtitles, local files) |
 | **OK** | Pause / play. At 0.5x/2x/4x the first OK goes back to 1x |
 | **◀ ▶** | Back / forward 10 s (hold to speed up to 30 s, 60 s) |
 | **▲ ▼** | Forward / back 60 s |
-| **0–9** | Jump to 0 %, 10 % … 90 % of the film |
+| **0–9** | Jump to 0 %, 10 % … 90 % of the film (0 = restart from the beginning) |
 | **Info** | Stream info |
 | **Menu** | Player menu (next-episode prompt, sleep timer, record, chapters, self-test, help) |
 | **Stop / Exit** | Leave the player (the position is saved) |
