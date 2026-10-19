@@ -1619,6 +1619,7 @@ class NovaPlaySimplePlayer(Screen):
                 p.setFastForward(int(v))
             else:
                 p.setSlowMotion(int(round(1.0 / v)))
+            novaplay_tracker.set_play_speed(v)
             self._speed = v
             self._paused = False
             self["status"].setText(u"⏩ السرعة {}x".format(v) if v != 1 else u"Playing")
@@ -1627,6 +1628,21 @@ class NovaPlaySimplePlayer(Screen):
             my_log("speed {}x not supported: {}".format(v, e))
             self["status"].setText(u"السرعة {}x غير مدعومة في هذا المشغل".format(v))
         self.__showOSD(True)
+
+    def _cancelSpeed(self):
+        """Back to 1x before a pause/seek/stream change: the position clock and
+        the pause/seek maths all assume normal speed."""
+        if getattr(self, "_speed", 1) == 1:
+            return
+        try:
+            svc = self.session.nav.getCurrentService()
+            p = svc and svc.pause()
+            if p:
+                p.unpause()
+        except Exception:
+            pass
+        novaplay_tracker.set_play_speed(1)
+        self._speed = 1
 
     def __serverSwitch(self, server):
         if not server or server.get("url") == self._server_url:
@@ -2441,6 +2457,12 @@ class NovaPlaySimplePlayer(Screen):
             self.__seek(-self._stepForHold(-1))
 
     def __togglePause(self):
+        if getattr(self, "_speed", 1) != 1:
+            # first press while fast/slow: back to normal speed
+            self._cancelSpeed()
+            self["status"].setText(u"Playing")
+            self.__showOSD(True)
+            return
         try:
             svc = self.session.nav.getCurrentService()
             if not svc:
@@ -2477,6 +2499,7 @@ class NovaPlaySimplePlayer(Screen):
             self.__showOSD(True)
 
     def __seek(self, delta_secs):
+        self._cancelSpeed()
         try:
             self._last_seek_step = abs(int(delta_secs)) or self._last_seek_step  # [POLISH v1]
         except Exception:
@@ -2516,6 +2539,7 @@ class NovaPlaySimplePlayer(Screen):
             my_log("seek error: {}".format(e))
 
     def __seekPct(self, pct):
+        self._cancelSpeed()
         try:
             now = time.time()
             if pct == getattr(self, "_seekPctLastPct", None) and \

@@ -23,6 +23,7 @@ _GLOBAL_POS_SESSION = None
 _GLOBAL_POS_ITEM = ""
 _GLOBAL_PLAY_START_WALL = 0.0
 _GLOBAL_PLAY_START_POS = 0
+_GLOBAL_SPEED = 1.0   # [speed] playback rate set from the player's Speed column
 _GLOBAL_LAST_SEEK_TARGET = -1
 _GLOBAL_IS_PAUSED = False
 
@@ -37,7 +38,7 @@ def current_play_secs():
     if paused:
         return int(max(0, base))
     if wall:
-        return int(max(0, (time.time() - wall) + base))
+        return int(max(0, (time.time() - wall) * _GLOBAL_SPEED + base))
     return 0
 
 def current_play_ms():
@@ -49,7 +50,7 @@ def current_play_ms():
     if paused:
         return int(max(0, base * 1000))
     if wall:
-        return int(max(0, ((time.time() - wall) + base) * 1000))
+        return int(max(0, ((time.time() - wall) * _GLOBAL_SPEED + base) * 1000))
     return 0
 
 
@@ -62,7 +63,7 @@ def _global_pos_tick():
             if _GLOBAL_IS_PAUSED:
                 secs = int(_GLOBAL_PLAY_START_POS)
             else:
-                elapsed = time.time() - _GLOBAL_PLAY_START_WALL
+                elapsed = (time.time() - _GLOBAL_PLAY_START_WALL) * _GLOBAL_SPEED
                 secs    = int(_GLOBAL_PLAY_START_POS + elapsed)
             if secs < 5:
                 my_log("Pos tracker: skipping suspicious pos {}s".format(secs))
@@ -73,11 +74,24 @@ def _global_pos_tick():
             my_log("Pos tracker error: {}".format(e))
 
 
+def set_play_speed(speed):
+    """[speed] re-anchor the position clock at the current position and run it
+    at `speed` from now on (1.0 = normal)."""
+    global _GLOBAL_PLAY_START_WALL, _GLOBAL_PLAY_START_POS, _GLOBAL_SPEED
+    with _GLOBAL_POS_LOCK:
+        now = time.time()
+        if _GLOBAL_PLAY_START_WALL and not _GLOBAL_IS_PAUSED:
+            _GLOBAL_PLAY_START_POS = (now - _GLOBAL_PLAY_START_WALL) * _GLOBAL_SPEED + _GLOBAL_PLAY_START_POS
+            _GLOBAL_PLAY_START_WALL = now
+        _GLOBAL_SPEED = float(speed or 1.0)
+
+
 def start_pos_tracker(session, item_url, start_pos=0):
     global _GLOBAL_POS_TIMER, _GLOBAL_POS_SESSION, _GLOBAL_POS_ITEM
     global _GLOBAL_PLAY_START_WALL, _GLOBAL_PLAY_START_POS
-    global _GLOBAL_LAST_SEEK_TARGET, _GLOBAL_IS_PAUSED
+    global _GLOBAL_LAST_SEEK_TARGET, _GLOBAL_IS_PAUSED, _GLOBAL_SPEED
     with _GLOBAL_POS_LOCK:
+        _GLOBAL_SPEED = 1.0
         _GLOBAL_LAST_SEEK_TARGET = -1
         _GLOBAL_IS_PAUSED       = False
         _GLOBAL_POS_SESSION     = session
