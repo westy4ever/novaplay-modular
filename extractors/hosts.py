@@ -2948,7 +2948,10 @@ def resolve_vidbolt(url, referer=None):
                 h = dict(hdr)
                 h.update({k: v for k, v in extra.items() if isinstance(v, str)})
                 if not _vidbolt_box_playable(stream_url, h):
-                    continue
+                    # one backend serves all its copies the same way (callisto
+                    # listed 15 h265 copies, every one with separate audio):
+                    # move on to the next backend instead of checking them all
+                    break
                 log("resolve_vidbolt: SUCCESS ({} / {}): {}".format(
                     pref or "default", server or "?", stream_url[:100]))
                 return _vidnest_headers_suffix(stream_url, h)
