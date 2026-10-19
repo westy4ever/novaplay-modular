@@ -1763,6 +1763,39 @@ class NovaPlayDetail(Screen):
         # [detail-stagger] quality menu pops in one row at a time
         self._setMenuStaggered(quality_labels)
         self["status"].setText(self._status_hint("اختار جودة — OK"))
+        # [panel] the same choice as a Movy-style panel: Quality | Server.
+        # EXIT closes it and leaves the list above on screen.
+        try:
+            from plugin_player_panel import NovaQualityPanel
+            q_items = [(lbl.split(". ", 1)[-1], False) for (lbl, _a, _b) in quality_labels]
+            s_items = [((sv.get("name") or "Server").split("\n")[0][:46], sv is server)
+                       for sv in self._servers]
+            self.session.openWithCallback(
+                lambda res, _srv=server: self._onQualityPanel(res, _srv),
+                NovaQualityPanel, q_items, s_items)
+        except Exception as e:
+            my_log("quality panel failed, using the list: {}".format(e))
+
+    def _onQualityPanel(self, res, server):
+        if not res or getattr(self, "_closed", False):
+            return
+        col, idx = res
+        if col == "quality":
+            if 0 <= idx < len(self._quality_choices):
+                choice = self._quality_choices[idx]
+                self._last_quality_selection = choice
+                self._onStreamFound(choice["url"], choice["label"], choice["final_ref"], choice["server"])
+        elif col == "server" and 0 <= idx < len(self._servers):
+            other = self._servers[idx]
+            if other is server:
+                return
+            self._onCancel()          # back to the server list...
+            try:
+                self["menu"].instance.moveSelectionTo(idx)
+                self._updateMenuAccent()
+            except Exception:
+                pass
+            self._onOk()              # ...and start the picked server
 
     def _playNextEpisode(self, next_ep):
         if getattr(self, "_closed", False) or not next_ep:

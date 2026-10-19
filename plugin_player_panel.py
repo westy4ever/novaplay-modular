@@ -48,11 +48,19 @@ _SUBS_COLS = (
 )
 
 
+def _seps(cols):
+    """x of the divider between each pair of neighbouring columns"""
+    return [(cols[i][1] + cols[i][2] + cols[i + 1][1]) // 2 for i in range(len(cols) - 1)]
+
+
 def _skin(name, cols):
+    x0 = cols[0][1] - 30
+    x1 = cols[-1][1] + cols[-1][2] + 30
     w = []
-    w.append('<widget name="panelBg" position="270,100" size="1380,{h}" backgroundColor="#1A0D1117" '
-             'cornerRadius="22" zPosition="1" />'.format(h=150 + ROWS * _RH))
-    w.append('<widget name="panelTop" position="270,100" size="1380,6" backgroundColor="#00E5FF" zPosition="2" />')
+    w.append('<widget name="panelBg" position="{x},100" size="{w},{h}" backgroundColor="#1A0D1117" '
+             'cornerRadius="22" zPosition="1" />'.format(x=x0, w=x1 - x0, h=150 + ROWS * _RH))
+    w.append('<widget name="panelTop" position="{x},100" size="{w},6" backgroundColor="#00E5FF" '
+             'zPosition="2" />'.format(x=x0, w=x1 - x0))
     for key, x, wd, _t in cols:
         w.append('<widget name="h_{k}" position="{x},126" size="{w},40" font="Regular;24" '
                  'foregroundColor="#8B949E" transparent="1" zPosition="3" />'.format(k=key, x=x + 14, w=wd - 14))
@@ -62,11 +70,12 @@ def _skin(name, cols):
             w.append('<widget name="r_{k}{i}" position="{x},{y}" size="{w},{h}" font="Regular;30" '
                      'valign="center" foregroundColor="#F0F6FC" transparent="1" zPosition="3" />'.format(
                          k=key, i=i, x=x + 18, y=_Y0 + i * _RH, w=wd - 30, h=_RH - 4))
-    for i, x in enumerate((640, 1300)):
+    for i, x in enumerate(_seps(cols)):
         w.append('<widget name="sep{i}" position="{x},130" size="2,{h}" backgroundColor="#1A30363D" '
                  'zPosition="2" />'.format(i=i, x=x, h=60 + ROWS * _RH))
-    w.append('<widget name="help" position="300,{y}" size="1320,36" font="Regular;24" halign="center" '
-             'foregroundColor="#8B949E" transparent="1" zPosition="3" />'.format(y=_Y0 + ROWS * _RH + 12))
+    w.append('<widget name="help" position="{x},{y}" size="{w},36" font="Regular;24" halign="center" '
+             'foregroundColor="#8B949E" transparent="1" zPosition="3" />'.format(
+                 x=x0 + 30, w=x1 - x0 - 60, y=_Y0 + ROWS * _RH + 12))
     return ('<screen name="{n}" position="0,0" size="1920,1080" flags="wfNoBorder" '
             'backgroundColor="transparent">'.format(n=name) + "".join(w) + "</screen>")
 
@@ -89,8 +98,8 @@ class _ColumnPanel(Screen):
                 self["r_%s%d" % (key, i)] = Label("")
         self["panelBg"] = Label("")
         self["panelTop"] = Label("")
-        self["sep0"] = Label("")
-        self["sep1"] = Label("")
+        for i in range(len(self.COLS) - 1):
+            self["sep%d" % i] = Label("")
         self["help"] = Label(_HELP)
         keys = [k for k, _x, _w, _t in self.COLS]
         self._col = start_col if start_col in keys else next(
@@ -228,3 +237,20 @@ class NovaSubsPanel(_ColumnPanel):
         _ColumnPanel.__init__(self, session,
                               {"audio": audio, "subs": subs, "more": more},
                               start_col=start_col, live_cb=live_cb)
+
+
+_QUALITY_COLS = (
+    ("quality", 360, 420, u"QUALITY — الجودة"),
+    ("server", 820, 740, u"SERVER — السيرفر"),
+)
+
+
+class NovaQualityPanel(_ColumnPanel):
+    """Detail screen, after a server resolves: Quality | Server."""
+    COLS = _QUALITY_COLS
+    CLOSE_KEY = "yellow"
+    skin = scale_skin_xml(_skin("NovaQualityPanel", _QUALITY_COLS))
+
+    def __init__(self, session, quality, server, start_col="quality"):
+        _ColumnPanel.__init__(self, session, {"quality": quality, "server": server},
+                              start_col=start_col)

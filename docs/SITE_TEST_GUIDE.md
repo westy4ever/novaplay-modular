@@ -1,6 +1,6 @@
 # NovaPlay Site Test Guide
 
-_Last updated 2026-10-17_
+_Last updated 2026-10-19_
 
 ## What it does
 
@@ -225,6 +225,33 @@ Movy's own servers have city names (Miami, Boise, Vegas, ... Cancun). NovaPlay a
 - Miami and Boise can have 2160p. NovaPlay starts at 1080p and lists the other qualities in the quality menu.
 - To test one title: `python3 run_site_test.py movy --page movy_movie_1148365 --all-servers`
 - In the log, look for lines starting with `movy:`. `movy: miami -> 4 source(s)` means the API answered. `decrypt failed` means Movy changed its code, so send a new Stream Recorder Pro capture.
+
+## Player keys
+
+While a film plays, the coloured keys open Movy-style panels. In every panel: ◀ ▶ moves between columns, ▲ ▼ moves in a column, OK picks, EXIT (or the same colour key) closes. ● marks what is playing now.
+
+| Key | What it does |
+|---|---|
+| **Red** | Next server: jumps to the next server of this title and carries on from the same minute. After the last server it goes back to the first. |
+| **Green** | Restart from the beginning |
+| **Yellow** | Panel: **Quality** (2160p first) · **Server** (switch without leaving the player, same minute; if the new one fails you're asked to go back) · **Speed** (0.5x, 1x, 2x, 4x) |
+| **Blue** | Panel: **Audio** tracks · **Subtitles** (Off, then Movy's Arabic and English files, then other languages; OK downloads and turns one on) · **More** (sync +/−250 ms and reset, auto subtitles on/off, skip intro, Subtitle Studio, SubSource, OpenSubtitles, local files) |
+| **OK** | Pause / play. At 0.5x/2x/4x the first OK goes back to 1x |
+| **◀ ▶** | Back / forward 10 s (hold to speed up to 30 s, 60 s) |
+| **▲ ▼** | Forward / back 60 s |
+| **0–9** | Jump to 0 %, 10 % … 90 % of the film |
+| **Info** | Stream info |
+| **Menu** | Player menu (next-episode prompt, sleep timer, record, chapters, self-test, help) |
+| **Stop / Exit** | Leave the player (the position is saved) |
+
+Notes:
+
+- **Speed**: the box's players only do slow motion and fast forward, so 1.25x/1.5x aren't offered and 2x/4x are usually silent. Pausing, seeking, 0–9 or changing quality/server return to 1x.
+- **Sync**: the sync rows in Blue → More stay open, so you can press OK several times; the panel's bottom line shows the new offset.
+- **Movy subtitles** need no key and have no daily limit. The list is fetched in the background when the film starts, so it is usually ready when you press Blue. They work for SFlix, Movy, Cineby and Vidsrc titles directly, and for other sites through a TMDB title lookup.
+- **Auto subtitles** (if on) try Movy's Arabic, then English, then SubSource.
+- **After you pick a server on the detail screen**, a **Quality | Server** panel opens: pick a quality to play, or pick another server to try that one instead. EXIT leaves the quality list on the screen.
+- **The bottom bar**: title, picture size and fps, and `played / total` time above a thin seek bar; time remaining on the left below it.
 
 ## Workflows
 
