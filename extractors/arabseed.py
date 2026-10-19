@@ -91,6 +91,13 @@ class ArabseedExtractor(BaseExtractor):
                 if "just a moment" in lower_html or "cf-chl" in lower_html:
                     log("ArabSeed: Domain {} blocked by Cloudflare".format(domain))
                     continue
+                # [FIX] a hosting "account suspended" page answers 200 (seen on
+                # arabseed.wine, 2026-10-19: every URL -> /cgi-sys/suspendedpage.cgi)
+                # and used to be taken as the working domain
+                if "suspendedpage" in (final_url or "") or "account suspended" in lower_html \
+                        or "this account has been suspended" in lower_html:
+                    log("ArabSeed: Domain {} is suspended by its host".format(domain))
+                    continue
 
                 final_url = final_url or domain
                 final_host_match = re.search(r'https?://([^/]+)', final_url)
