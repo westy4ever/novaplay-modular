@@ -241,7 +241,7 @@ While a film plays, the coloured keys open Movy-style panels. In every panel: �
 | **▲ ▼** | Forward / back 60 s |
 | **0–9** | Jump to 0 %, 10 % … 90 % of the film (0 = restart from the beginning) |
 | **Info** | Stream info |
-| **Menu** | Player menu (next-episode prompt, sleep timer, record, chapters, self-test, help) |
+| **Menu** | Panel: **Picture** (Full, 14:9, 4:3 — black side bars for narrow films) · **Timer · Rec** (sleep Off/30/60/90/120 min, record start/stop) · **Settings** (next-episode prompt on/off, skip-intro length 60/90/120 s used by Green, chapters, help, self-test). Picture, sleep and settings rows apply without closing the panel |
 | **Stop / Exit** | Leave the player (the position is saved) |
 
 Notes:

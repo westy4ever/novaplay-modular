@@ -104,7 +104,7 @@ class _ColumnPanel(Screen):
         keys = [k for k, _x, _w, _t in self.COLS]
         self._col = start_col if start_col in keys else next(
             (k for k in keys if self._data[k]), keys[0])
-        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"], {
+        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"], {
             "ok": self._ok,
             "cancel": lambda: self.close(None),
             self.CLOSE_KEY: lambda: self.close(None),
@@ -254,3 +254,22 @@ class NovaQualityPanel(_ColumnPanel):
     def __init__(self, session, quality, server, start_col="quality"):
         _ColumnPanel.__init__(self, session, {"quality": quality, "server": server},
                               start_col=start_col)
+
+
+_MENU_COLS = (
+    ("picture", 300, 300, u"PICTURE — الصورة"),
+    ("timer", 630, 480, u"TIMER · REC — مؤقت وتسجيل"),
+    ("settings", 1140, 480, u"SETTINGS — إعدادات"),
+)
+
+
+class NovaMenuPanel(_ColumnPanel):
+    """Menu: Picture | Timer and record | Settings."""
+    COLS = _MENU_COLS
+    CLOSE_KEY = "menu"
+    skin = scale_skin_xml(_skin("NovaMenuPanel", _MENU_COLS))
+
+    def __init__(self, session, picture, timer, settings, live_cb=None, start_col="picture"):
+        _ColumnPanel.__init__(self, session,
+                              {"picture": picture, "timer": timer, "settings": settings},
+                              start_col=start_col, live_cb=live_cb)

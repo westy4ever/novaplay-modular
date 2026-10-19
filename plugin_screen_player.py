@@ -3098,21 +3098,95 @@ class NovaPlaySimplePlayer(Screen):
         self.__showOSD(True)
 
     def _playerMenu(self):
+        """[menu-panel] Menu: Picture | Timer and record | Settings."""
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        from plugin_player_panel import NovaMenuPanel
+        self.__hideOSD()
+        self._menu_panel = self.session.openWithCallback(
+            self._onMenuPanel, NovaMenuPanel, self._menuPictureItems(), self._menuTimerItems(),
+            self._menuSettingsItems(), live_cb=self._menuLive)
+
+    _SLEEP_STEPS = (0, 30, 60, 90, 120)
+    _SKIP_STEPS = (60, 90, 120)
+
+    def _menuPictureItems(self):
+        cur = getattr(self, "_aspect_idx", 0)
+        return [(lbl, i == cur, True) for i, (lbl, _bar) in enumerate(self._ASPECT_MODES)]
+
+    def _menuTimerItems(self):
+        rows = [((u"Sleep: Off" if m == 0 else u"Sleep {} min".format(m)),
+                 (self._sleep_minutes or 0) == m, True) for m in self._SLEEP_STEPS]
         rec_on = (getattr(self, "_record_task", None) is not None
                   and self._record_task.status == "downloading")
-        items = [
-            ("Subtitle — الترجمة", "subs"),
-            ("Audio track — الصوت", "audio"),
-            ("Stream info — معلومات", "info"),
-            ("Next-episode prompt — التالي تلقائياً: %s" % ("ON" if self._next_prompt_enabled else "OFF"), "nxtep"),
-            ("Sleep timer — مؤقت النوم: %s" % self._sleepLabel(), "sleep"),
-            ("%s Record stream — تسجيل البث" % ("● REC" if rec_on else "○"), "record"),
-            ("Stop recording — إيقاف التسجيل", "stoprec"),
-            ("Chapters / jump points — فصول", "chapters"),
-            ("Self-test — فحص ذاتي", "selftest"),
-            ("Help / controls — المساعدة", "help"),
-        ]
-        self.session.openWithCallback(self._onPlayerMenuChoice, ChoiceBox, "Player Menu", items)
+        rows.append((u"■ Stop recording" if rec_on else u"● Record stream", rec_on))
+        return rows
+
+    def _menuSettingsItems(self):
+        try:
+            skip = int(_get_config("skip_intro_secs", "90") or 90)
+        except Exception:
+            skip = 90
+        rows = [(u"Next-ep prompt: {}".format("ON" if self._next_prompt_enabled else "OFF"),
+                 self._next_prompt_enabled, True)]
+        rows += [(u"Skip intro {}s".format(v), skip == v, True) for v in self._SKIP_STEPS]
+        rows += [(u"Chapters — فصول", False), (u"Help — المساعدة", False), (u"Self-test", False)]
+        return rows
+
+    def _menuLive(self, col, idx):
+        msg = u""
+        if col == "picture":
+            self._aspect_idx = idx
+            self._applyAspectMode()
+            msg = u"Picture: {}".format(self._ASPECT_MODES[idx][0])
+        elif col == "timer" and idx < len(self._SLEEP_STEPS):
+            self.__sleepPicked((u"", self._SLEEP_STEPS[idx]))
+            msg = u"Sleep: {}".format(self._sleepLabel())
+        elif col == "settings":
+            if idx == 0:
+                self._next_prompt_enabled = not self._next_prompt_enabled
+                _set_config("next_episode_prompt", "true" if self._next_prompt_enabled else "false")
+                msg = u"Next-episode prompt: {}".format("ON" if self._next_prompt_enabled else "OFF")
+            elif 1 <= idx <= len(self._SKIP_STEPS):
+                v = self._SKIP_STEPS[idx - 1]
+                _set_config("skip_intro_secs", str(v))
+                msg = u"Skip intro: {}s".format(v)
+        p = getattr(self, "_menu_panel", None)
+        if p is not None:
+            builders = {"picture": self._menuPictureItems, "timer": self._menuTimerItems,
+                        "settings": self._menuSettingsItems}
+            p.setColumn(col, builders[col]())
+            try:
+                p._sel[col] = idx
+                p._paint()
+            except Exception:
+                pass
+        return msg
+
+    def _onMenuPanel(self, res):
+        self._menu_panel = None
+        if not res:
+            return
+        col, idx = res
+        try:
+            if col == "timer" and idx == len(self._SLEEP_STEPS):
+                rec_on = (getattr(self, "_record_task", None) is not None
+                          and self._record_task.status == "downloading")
+                if rec_on:
+                    self.__stopRecording()
+                else:
+                    self.__recordCurrentStream()
+            elif col == "settings":
+                base = 1 + len(self._SKIP_STEPS)
+                act = idx - base
+                if act == 0:
+                    self._showChapters()
+                elif act == 1:
+                    self._showHelp()
+                elif act == 2:
+                    self._runSelfTest()
+        except Exception as e:
+            my_log("menu panel pick error: {}".format(e))
 
     def _onPlayerMenuChoice(self, choice):
         if not choice:
@@ -3225,9 +3299,8 @@ class NovaPlaySimplePlayer(Screen):
             u"YELLOW        الجودة / السيرفر / السرعة — Quality, server, speed panel",
             u"INFO          معلومات البث — Stream info",
             u"",
-            u"MENU          القائمة — الترجمة، الصوت، المعلومات، الحلقة",
-            u"              التالية، مؤقت النوم، التسجيل، الفصول،",
-            u"              الفحص الذاتي، المساعدة",
+            u"MENU          الصورة (Full/14:9/4:3) · مؤقت النوم والتسجيل ·",
+            u"              الإعدادات (الحلقة التالية، مدة تخطي المقدمة، فصول، مساعدة)",
         ]
         self.session.open(MessageBox, u"\n".join(lines), MessageBox.TYPE_INFO)
 
