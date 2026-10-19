@@ -37,6 +37,6 @@ python3 run_site_test.py --all
 ```
 
 Full guide: [docs/SITE_TEST_GUIDE.md](docs/SITE_TEST_GUIDE.md) — commands, how to read the report, what to do for each result.
-- `docs/NEW_SITE_GUIDE.md`: adding and testing a new site, from the browser recording to the TV
+New sites: [docs/NEW_SITE_GUIDE.md](docs/NEW_SITE_GUIDE.md) — adding and testing a new site, from the browser recording to the TV.
 
 To capture a site for a new resolver, use [Stream Recorder Pro](https://github.com/westy4ever/Stream-Recorder-Pro-12) — see its [guide](https://github.com/westy4ever/Stream-Recorder-Pro-12/blob/main/docs/GUIDE.md).
