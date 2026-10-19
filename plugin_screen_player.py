@@ -1264,28 +1264,41 @@ class NovaPlaySimplePlayer(Screen):
                 pass
 
             if self._total_secs > 0 and not self._osd_video_info:
+                # [FIX] width/height read 0/-1 for the first seconds of a stream and the
+                # frame rate comes in thousandths (24000 = 24 fps): keep asking until the
+                # size is known, and show the rate as fps.
                 try:
                     service = self.session.nav.getCurrentService()
                     info = service.info() if service else None
-                    parts = []
+                    w = h = fr = 0
                     if info is not None and iServiceInformation is not None:
-                        try:
-                            x = info.getInfo(iServiceInformation.sWidth)
-                            y = info.getInfo(iServiceInformation.sHeight)
-                            if x > 0 and y > 0:
-                                parts.append("{}×{}".format(x, y))
-                        except Exception:
-                            pass
+                        for wk, hk in (("sVideoWidth", "sVideoHeight"), ("sWidth", "sHeight")):
+                            try:
+                                w = info.getInfo(getattr(iServiceInformation, wk))
+                                h = info.getInfo(getattr(iServiceInformation, hk))
+                            except Exception:
+                                w = h = 0
+                            if w > 0 and h > 0:
+                                break
                         try:
                             fr = info.getInfo(iServiceInformation.sFrameRate)
-                            if fr > 0:
-                                parts.append("· {}fps".format(fr))
                         except Exception:
-                            pass
-                    self._osd_video_info = "  ".join(parts)
+                            fr = 0
+                    parts = []
+                    if w > 0 and h > 0:
+                        parts.append(u"{}×{}".format(w, h))
+                    if fr and fr > 0:
+                        fps = fr / 1000.0 if fr > 1000 else float(fr)
+                        parts.append(u"{:g}fps".format(round(fps, 3)))
+                    # only keep it once the size is known (otherwise ask again next tick)
+                    if w > 0 and h > 0:
+                        self._osd_video_info = u" · ".join(parts)
+                    else:
+                        self["osd_videinfo"].setText(u" · ".join(parts))
                 except Exception:
                     self._osd_video_info = ""
-            self["osd_videinfo"].setText(self._osd_video_info)
+            if self._osd_video_info:
+                self["osd_videinfo"].setText(self._osd_video_info)
 
             try:
                 from novaplay_subtitles import get_subtitle_state
