@@ -2838,6 +2838,82 @@ def resolve_vaplayer_api(url, referer=None, start_index=0):
         return None
 
 
+# ─── VidBolt (vidsrc.win "Bolt" server) ─────────────────────────────────────
+# [NEW 2026-10-19] From a Stream Recorder Pro capture of vidsrc.win (Tenzing,
+# tmdb 1288069): vidbolt.xyz/movie/<id> is a static page whose inline script
+# builds q="type=movie&id=<id>" (plus the TV fields for an episode) and calls
+# GET /api/resolve?<q>[&prefer=<server>] -> JSON {stream:{sources:[{url}]}}.
+# window.__VB__.servers lists its backends (Orion, Callisto, FastVa, Vega,
+# Quantum, Quasar, Tampa); "prefer" picks one when the default has nothing.
+# The playlist is on proxy.vidbolt.xyz (segments come back as image/jpeg;
+# the local proxy strips any fake image header in front of the TS data).
+_VIDBOLT_ORIGIN = "https://vidbolt.xyz"
+
+
+def _vidbolt_pick(data):
+    stream = (data or {}).get("stream") if isinstance(data, dict) else None
+    if not isinstance(stream, dict):
+        return None, {}
+    srcs = stream.get("sources") or []
+    best = None
+    for s in srcs:
+        if isinstance(s, dict) and str(s.get("url") or "").startswith("http"):
+            best = s
+            break
+    if not best:
+        return None, {}
+    hdrs = best.get("headers") or stream.get("headers") or {}
+    return best["url"].replace("\\/", "/"), hdrs if isinstance(hdrs, dict) else {}
+
+
+def resolve_vidbolt(url, referer=None):
+    try:
+        p = urlparse(url)
+        origin = "{}://{}".format(p.scheme or "https", p.netloc or "vidbolt.xyz")
+        page = origin + p.path
+        q, servers = "", []
+        try:
+            html, _f = fetch(page, referer="https://vidsrc.win/", timeout=15)
+        except Exception:
+            html = ""
+        m = re.search(r'var\s+q\s*=\s*"([^"]+)"', html or "")
+        if m:
+            q = m.group(1)
+        mv = re.search(r'window\.__VB__\s*=\s*(\{.*?\});', html or "", re.S)
+        if mv:
+            try:
+                servers = [s.get("id") for s in json.loads(mv.group(1)).get("servers") or []
+                           if isinstance(s, dict) and s.get("id")]
+            except ValueError:
+                servers = []
+        if not q:
+            parsed = _parse_tmdb_media(url)
+            if not parsed:
+                log("resolve_vidbolt: no TMDB id in {}".format(url[:100]))
+                return None
+            mt, tid, season, episode = parsed
+            q = "type={}&id={}".format(mt, tid)
+            if mt == "tv":
+                q += "&season={}&episode={}".format(season or 1, episode or 1)
+        hdr = {"Referer": page, "Origin": origin}
+        for pref in [None] + servers[:7]:
+            api = "{}/api/resolve?{}".format(origin, q)
+            if pref:
+                api += "&prefer=" + quote(pref, safe="")
+            data = fetch_json(api, referer=page, extra_headers={"Accept": "application/json"})
+            stream_url, extra = _vidbolt_pick(data)
+            if stream_url:
+                log("resolve_vidbolt: SUCCESS ({}): {}".format(pref or "default", stream_url[:100]))
+                h = dict(hdr)
+                h.update({k: v for k, v in extra.items() if isinstance(v, str)})
+                return _vidnest_headers_suffix(stream_url, h)
+            log("resolve_vidbolt: {} -> no stream".format(pref or "default"))
+        return None
+    except Exception as e:
+        log("resolve_vidbolt error for {}: {}".format(url[:100], e))
+        return None
+
+
 def resolve_yapgrid(url, referer=None):
     """[NEW 2026-10-18] A browser recording of SFlix's YapGrid server showed its
     player loading vsembed.ru (VidSrc-Embed's player) and playing from the same
@@ -4156,6 +4232,13 @@ HOST_RESOLVERS = {
     "embdmstrplayer.com":   resolve_embedmaster,
     # [NEW] SFlix "VidSrc-Embed": skip the (box-blocked) host, go straight to the API
     "vidsrc-embed.ru":    resolve_vaplayer_api,
+    # [2026-10-19] vidsrc.win's VidSrc-family players (vsembed.ru, vidsrc2.ru,
+    # stellarconductornexus.com) load the same vaplayer source
+    "vsembed.ru":         resolve_vaplayer_api,
+    "vidsrc2.ru":         resolve_vaplayer_api,
+    "stellarconductornexus.com": resolve_vaplayer_api,
+    "vidbolt.xyz":        resolve_vidbolt,
+    "vidbolt.pro":        resolve_vidbolt,
     "yapgrid.com":        resolve_yapgrid,
     "cloudorchestranova.com": resolve_cloudorchestra,
     "panoplypalaver.site":  resolve_cloudorchestra,

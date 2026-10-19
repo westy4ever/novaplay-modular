@@ -236,6 +236,18 @@ def _rewrite_manifest(text, base_url, referer, ua, cookie, xor="", origin="", he
 _PLAIN_CACHE = {}
 
 
+def _ts_start(data):
+    """Offset of the first MPEG-TS packet run (0x47 every 188 bytes, 3 in a row),
+    or None when the data is not TS."""
+    n = len(data)
+    i = data.find(b"\x47")
+    while 0 <= i and i + 376 < n:
+        if data[i + 188] == 0x47 and data[i + 376] == 0x47:
+            return i
+        i = data.find(b"\x47", i + 1)
+    return None
+
+
 def _plain_segment_mode(text, base_url, headers):
     """Look at the first piece of an 'AES-128' playlist: 'mp4' / 'ts' when it is
     in fact unencrypted, None when it really is encrypted (or can't be read)."""
@@ -1169,6 +1181,32 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     pass
             return
+
+        # [2026-10-19] video pieces disguised as pictures (VidBolt's proxy sends
+        # its TS segments as image/jpeg, some CDNs put a real PNG/JPEG header in
+        # front): drop everything before the first run of TS sync bytes.
+        if (method == "GET" and not has_range and status == 200
+                and ctype.startswith("image/")):
+            try:
+                head = pending_head + resp.read(max(0, 65536 - len(pending_head)))
+            except Exception:
+                head = pending_head
+            cut = _ts_start(head)
+            if cut is not None:
+                if cut:
+                    _log("Proxy: dropped a {}-byte {} header in front of TS data: {}".format(
+                        cut, ctype, stream_url[:80]))
+                pending_head = head[cut:]
+                try:
+                    total = int(resp_hdrs.get("content-length") or 0)
+                except (TypeError, ValueError):
+                    total = 0
+                resp_hdrs.pop("content-length", None)
+                resp_hdrs["content-type"] = "video/mp2t"
+                if total > cut:
+                    resp_hdrs["content-length"] = str(total - cut)
+            else:
+                pending_head = head
 
         self.send_response(status)
         for key in ("content-type", "content-length", "content-range",

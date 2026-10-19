@@ -1,7 +1,20 @@
 # -*- coding: utf-8 -*-
 """
 VidSrc Extractor
-Uses TMDB API to list movies and TV shows, and resolves streams via tvembed.cc, 2embed, and VidSrc.win.
+Uses TMDB API to list movies and TV shows.
+
+Servers (2026-10-19): the old tvembed.cc / 2embed.skin / vidsrc.win/watch
+entries had no resolver on the box. They are replaced by the players that
+vidsrc.win's own server menu loads (seen in a Stream Recorder Pro capture of
+vidsrc.win/watch/1288069) and that NovaPlay can resolve:
+  Vidsrc  -> vsembed.ru        (vaplayer API, resolve_vaplayer_api)
+  Nest    -> vidnest.fun       (resolve_vidnest)
+  VidCore -> vidcore.io        (bytecode VM, vidvm.py)
+  VidFast -> vidfast.vc        (bytecode VM, vidvm.py)
+  Bolt    -> vidbolt.xyz       (/api/resolve JSON, resolve_vidbolt)
+  Pass    -> play.xpass.top    (resolve_xpass)
+  Vidplay -> vaplayer.ru       (resolve_vaplayer)
+  MoviesAPI, ZXC Stream, SuperFlix (movies only) as backups.
 """
 import re
 import urllib.parse
@@ -187,11 +200,7 @@ class VidsrcExtractor(BaseExtractor):
             season_num = parts[3]
             ep_num = parts[4]
 
-            servers = [
-                {"name": "Server 1 (tvembed)", "url": "https://tvembed.cc/tv/{}/{}/{}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
-                {"name": "Server 2 (2Embed)", "url": "https://www.2embed.skin/embedtv/{}&s={}&e={}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
-                {"name": "Server 3 (VidSrc.win)", "url": "https://vidsrc.win/watch/{}?s={}&e={}".format(tmdb_id, season_num, ep_num), "quality": "HD"},
-            ]
+            servers = self._servers(tmdb_id, season_num, ep_num)
 
             ep_data = self._tmdb_request("/tv/{}/season/{}/episode/{}".format(tmdb_id, season_num, ep_num))
             return {
@@ -205,13 +214,7 @@ class VidsrcExtractor(BaseExtractor):
 
         elif url.startswith("vidsrc_movie_"):
             tmdb_id = url.replace("vidsrc_movie_", "")
-            servers = [
-                {"name": "Server 1 (tvembed)", "url": "https://tvembed.cc/movie/{}".format(tmdb_id), "quality": "HD"},
-                {"name": "Server 2 (2Embed)", "url": "https://www.2embed.skin/embed/{}".format(tmdb_id), "quality": "HD"},
-                {"name": "Server 3 (VidSrc.win)", "url": "https://vidsrc.win/watch/{}".format(tmdb_id), "quality": "HD"},
-                {"name": "Server 4 (SuperFlix)", "url": "https://superflixapi.sbs/filme/{}".format(tmdb_id), "quality": "HD"},
-                {"name": "Server 5 (ZXC Stream)", "url": "https://zxcstream.xyz/player/movie/{}".format(tmdb_id), "quality": "HD"},
-            ]
+            servers = self._servers(tmdb_id)
 
             movie_data = self._tmdb_request("/movie/{}".format(tmdb_id))
             return {
@@ -224,6 +227,31 @@ class VidsrcExtractor(BaseExtractor):
             }
 
         return None
+
+    # (name, movie url, tv url) in try order; {i}=tmdb id, {s}/{e}=season/episode
+    _SERVERS = (
+        ("Vidsrc", "https://vsembed.ru/embed/movie/{i}", "https://vsembed.ru/embed/tv/{i}/{s}/{e}"),
+        ("Nest", "https://vidnest.fun/movie/{i}", "https://vidnest.fun/tv/{i}/{s}/{e}"),
+        ("VidCore", "https://vidcore.io/movie/{i}?autoPlay=true", "https://vidcore.io/tv/{i}/{s}/{e}?autoPlay=true"),
+        ("VidFast", "https://vidfast.vc/movie/{i}?autoPlay=true", "https://vidfast.vc/tv/{i}/{s}/{e}?autoPlay=true"),
+        ("Bolt", "https://vidbolt.xyz/movie/{i}", "https://vidbolt.xyz/tv/{i}/{s}/{e}"),
+        ("Pass", "https://play.xpass.top/e/movie/{i}", "https://play.xpass.top/e/tv/{i}/{s}/{e}"),
+        ("Vidplay", "https://vaplayer.ru/embed/movie/{i}", "https://vaplayer.ru/embed/tv/{i}/{s}/{e}"),
+        ("MoviesAPI", "https://moviesapi.to/movie/{i}", "https://moviesapi.to/tv/{i}/{s}/{e}"),
+        ("ZXC Stream", "https://zxcstream.xyz/player/movie/{i}", "https://zxcstream.xyz/player/tv/{i}/{s}/{e}"),
+        ("SuperFlix", "https://superflixapi.sbs/filme/{i}", None),
+    )
+
+    def _servers(self, tmdb_id, season=None, episode=None):
+        out = []
+        for n, (name, movie, tv) in enumerate(self._SERVERS, start=1):
+            tpl = tv if season else movie
+            if not tpl:
+                continue
+            out.append({"name": "Server {} ({})".format(len(out) + 1, name),
+                        "url": tpl.format(i=tmdb_id, s=season, e=episode),
+                        "quality": "HD"})
+        return out
 
     def extract_stream(self, url):
         log("VidSrc: resolving embed {}".format(url))
