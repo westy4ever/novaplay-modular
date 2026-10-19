@@ -112,7 +112,10 @@ class MovyExtractor(SflixProExtractor):
             return self._home
         props = {}
         try:
-            html = fetch(self.main_url + "/", referer=self.main_url + "/") or ""
+            # fetch() returns (html, final_url) -- the tuple itself used to be
+            # searched, so the home rows always fell back to TMDB
+            res = fetch(self.main_url + "/", referer=self.main_url + "/")
+            html = (res[0] if isinstance(res, tuple) else res) or ""
             m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
             if m:
                 props = (json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}
