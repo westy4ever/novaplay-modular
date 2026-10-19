@@ -496,7 +496,7 @@ class NovaPlaySimplePlayer(Screen):
         self["seekFrame"]    = Label("")
         self["seekMarker"]   = Label("")
         self["progBack"]     = Label("")
-        self["keyRed"]       = Label("تأخير الترجمة −")
+        self["keyRed"]       = Label(u"سيرفر تالي ⏭")
         self["keyGreen"]     = Label("إعادة")
         self["keyYellow"]    = Label(u"جودة · سيرفر")
         self["keyBlue"]      = Label(u"صوت · ترجمة")
@@ -770,7 +770,7 @@ class NovaPlaySimplePlayer(Screen):
             "seekdef:7": lambda: self.__seekPct(70),
             "seekdef:9": lambda: self.__seekPct(90),
             "green":            self.__onRestart,
-            "red":              self.__subtitleDelayBack,
+            "red":              self.__nextServer,
             "blue":             self._subsPanel,
             "yellow":           self.__panelMenu,
             "subtitles":        self._subsPanel,
@@ -1629,6 +1629,21 @@ class NovaPlaySimplePlayer(Screen):
             self["status"].setText(u"السرعة {}x غير مدعومة في هذا المشغل".format(v))
         self.__showOSD(True)
 
+    def __nextServer(self):
+        """Red: jump to the next server of this title, same minute."""
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        if getattr(self, "_quality_switch_in_flight", False):
+            return
+        n = len(self._servers)
+        if n < 2:
+            self["status"].setText(u"لا يوجد سيرفر آخر")
+            self.__showOSD(True)
+            return
+        i = next((k for k, sv in enumerate(self._servers) if sv.get("url") == self._server_url), -1)
+        nxt = self._servers[(i + 1) % n]
+        self.__serverSwitch(nxt)
+
     def _cancelSpeed(self):
         """Back to 1x before a pause/seek/stream change: the position clock and
         the pause/seek maths all assume normal speed."""
@@ -2067,6 +2082,10 @@ class NovaPlaySimplePlayer(Screen):
         self._quality_switch_in_flight = False
         self._switch_kind = "quality"
         self._server_prev = None
+        try:
+            self._startVidySearch()
+        except Exception:
+            pass
         start_pos_tracker(self.session, self._item_url, start_pos=self._resume_pos)
         try:
             maybe_resume_subtitle(self.session, self.title, self._item_url)
@@ -3156,10 +3175,10 @@ class NovaPlaySimplePlayer(Screen):
             u"",
             u"المسارات والترجمة — Tracks & Subtitles",
             u"BLUE / SUBTITLE  الصوت / الترجمة / المزيد — Audio, subtitles panel",
-            u"RED              تأخير الترجمة -100ms — Subtitle sync -100ms",
             u"AUDIO            اختيار المسار الصوتي — Audio track selection",
             u"",
             u"الجودة والمعلومات — Quality & Info",
+            u"RED           السيرفر التالي — Next server",
             u"YELLOW        الجودة / السيرفر / السرعة — Quality, server, speed panel",
             u"INFO          معلومات البث — Stream info",
             u"",
@@ -3425,18 +3444,26 @@ class NovaPlaySimplePlayer(Screen):
         self.__hideOSD()
         self._subs_panel = self.session.openWithCallback(
             self._onSubsPanel, NovaSubsPanel, audio, subs, more, live_cb=self._subsLive)
-        if getattr(self, "_vidy_results", None) is None and not getattr(self, "_vidy_busy", False):
-            self._vidy_busy = True
-            title, item_url = self._raw_title or self.title, self._item_url
+        self._startVidySearch()
 
-            def _bg():
-                try:
-                    from novaplay_subtitles import vidy_search
-                    ok, err, res = vidy_search(title, item_url)
-                except Exception as e:
-                    ok, err, res = False, str(e)[:40], []
-                callInMainThread(self._onVidyResults, res if ok else [], "" if ok else err)
-            threading.Thread(target=_bg, daemon=True).start()
+    def _startVidySearch(self):
+        """Movy subtitle list, fetched once per film in the background (started
+        when playback is confirmed, so Blue opens with the list already there)."""
+        if getattr(self, "_vidy_results", None) is not None or getattr(self, "_vidy_busy", False):
+            return
+        if getattr(self, "_is_preview", False):
+            return
+        self._vidy_busy = True
+        title, item_url = self._raw_title or self.title, self._item_url
+
+        def _bg():
+            try:
+                from novaplay_subtitles import vidy_search
+                ok, err, res = vidy_search(title, item_url)
+            except Exception as e:
+                ok, err, res = False, str(e)[:40], []
+            callInMainThread(self._onVidyResults, res if ok else [], "" if ok else err)
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _onVidyResults(self, res, err):
         self._vidy_busy = False
