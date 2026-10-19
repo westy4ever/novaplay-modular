@@ -74,24 +74,41 @@ def main():
     st, _, eps = get("%s/episodes/%s" % (api, SLUG))
     print("\n----- EPISODES %s\n%s" % (st, eps[:600]))
 
-    bases = [stream_api] if stream_api else []
-    bases += [b for b in ("https://api.wecollege.net", "https://anime.vidy.st/api",
-                          "https://anime.vidy.st") if b not in bases]
     first_url = None
-    for base in bases:
+    first_hdr = {}
+    ep_id = ""
+    m = re.search(r'"id":"(\d+)","episode_no":1\b', eps)
+    if m:
+        ep_id = m.group(1)
+    m = re.search(r'"animeId":(\d+)', info)
+    anime_id = m.group(1) if m else ""
+    base = stream_api or "https://api.wecollege.net"
+    tries = [(SLUG, "1"), (SLUG, ep_id), (anime_id, "1"), (anime_id, ep_id),
+             (SLUG.rsplit("-", 1)[0], "1")]
+    for slug2 in ("high-school-dxd-born-itq7r", "gantz-o-huhfl"):
+        tries.append((slug2, "1"))
+    for prov, ep in tries:
+        if not prov or not ep:
+            continue
         for dub in ("false", "true"):
-            u = "%s/anikoto/sources-id?providerId=%s&episodeId=1&dub=%s" % (
-                base, urllib.parse.quote(SLUG), dub)
-            st, _, body = get(u)
-            print("\n----- SOURCES %s dub=%s -> %s\n%s" % (base, dub, st, body[:2500]))
+            u = "%s/anikoto/sources-id?providerId=%s&episodeId=%s&dub=%s" % (
+                base, urllib.parse.quote(prov), ep, dub)
+            st, _, body = get(u, ref=SITE + "/anime/%s/%s" % (SLUG, 1))
+            print("\n----- SOURCES providerId=%s episodeId=%s dub=%s -> %s\n%s"
+                  % (prov, ep, dub, st, body[:1500]))
             if st == 200 and not first_url:
                 mm = re.search(r'"(?:url|file|src)"\s*:\s*"(https?:[^"]+)"', body)
                 if mm:
                     first_url = mm.group(1).replace("\\/", "/")
                     hd = re.search(r'"headers"\s*:\s*(\{[^}]*\})', body)
-                    first_hdr = json.loads(hd.group(1)) if hd else {}
-        if first_url:
-            break
+                    if hd:
+                        try:
+                            first_hdr = json.loads(hd.group(1))
+                        except ValueError:
+                            pass
+    # real slugs for the extra titles come from search
+    st, _, sr = get("%s/search?keyword=one%%20piece&page=1" % api)
+    print("\n----- SEARCH one piece %s\n%s" % (st, sr[:700]))
 
     if first_url:
         print("\n----- STREAM", first_url)
