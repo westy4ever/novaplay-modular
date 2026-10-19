@@ -230,16 +230,17 @@ class VidsrcExtractor(BaseExtractor):
 
     # (name, movie url, tv url) in try order; {i}=tmdb id, {s}/{e}=season/episode
     _SERVERS = (
-        ("Vidsrc", "https://vsembed.ru/embed/movie/{i}", "https://vsembed.ru/embed/tv/{i}/{s}/{e}"),
-        ("Nest", "https://vidnest.fun/movie/{i}", "https://vidnest.fun/tv/{i}/{s}/{e}"),
-        ("VidCore", "https://vidcore.io/movie/{i}?autoPlay=true", "https://vidcore.io/tv/{i}/{s}/{e}?autoPlay=true"),
-        ("VidFast", "https://vidfast.vc/movie/{i}?autoPlay=true", "https://vidfast.vc/tv/{i}/{s}/{e}?autoPlay=true"),
-        ("Bolt", "https://vidbolt.xyz/movie/{i}", "https://vidbolt.xyz/tv/{i}/{s}/{e}"),
-        ("Pass", "https://play.xpass.top/e/movie/{i}", "https://play.xpass.top/e/tv/{i}/{s}/{e}"),
+        # box test 2026-10-19 (Tenzing 1288069 / GoT S01E01): time to resolve
+        ("Vidsrc", "https://vsembed.ru/embed/movie/{i}", "https://vsembed.ru/embed/tv/{i}/{s}/{e}"),        # 1.5 s
+        ("Bolt", "https://vidbolt.xyz/movie/{i}", "https://vidbolt.xyz/tv/{i}/{s}/{e}"),                    # 2-3 s, 1080p
+        ("VidCore", "https://vidcore.io/movie/{i}?autoPlay=true", "https://vidcore.io/tv/{i}/{s}/{e}?autoPlay=true"),  # 9 s
+        ("VidFast", "https://vidfast.vc/movie/{i}?autoPlay=true", "https://vidfast.vc/tv/{i}/{s}/{e}?autoPlay=true"),  # 9 s
+        ("Nest", "https://vidnest.fun/movie/{i}", "https://vidnest.fun/tv/{i}/{s}/{e}"),                    # TV ok, movie missing
+        ("MoviesAPI", "https://moviesapi.to/movie/{i}", "https://moviesapi.to/tv/{i}/{s}/{e}"),             # 20 s
+        # same source as Vidsrc but 55-90 s through the page scrape: last resort
         ("Vidplay", "https://vaplayer.ru/embed/movie/{i}", "https://vaplayer.ru/embed/tv/{i}/{s}/{e}"),
-        ("MoviesAPI", "https://moviesapi.to/movie/{i}", "https://moviesapi.to/tv/{i}/{s}/{e}"),
-        ("ZXC Stream", "https://zxcstream.xyz/player/movie/{i}", "https://zxcstream.xyz/player/tv/{i}/{s}/{e}"),
-        ("SuperFlix", "https://superflixapi.sbs/filme/{i}", None),
+        # dropped after the box test: Pass (xpass /data reply is encrypted),
+        # ZXC Stream and SuperFlix (90 s time-outs)
     )
 
     def _servers(self, tmdb_id, season=None, episode=None):
