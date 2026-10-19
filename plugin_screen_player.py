@@ -67,7 +67,7 @@ from plugin_util import SAFE_UA, _single_line_text
 from novaplay_subtitles import (maybe_resume_subtitle, remember_subtitle,
                                 apply_subtitle, get_subtitle_state,
                                 SYNC_STEP_MS, adjust_sync, reset_sync,
-                                disable_subtitle, _cfg,
+                                disable_subtitle, turn_off_subtitle, _cfg,
                                 has_subtitle_for, update_subtitle_state,
                                 NovaSubtitleBrowser, NovaOnlineSubsScreen)
 from plugin_assets import placeholder_for_item
@@ -3635,7 +3635,7 @@ class NovaPlaySimplePlayer(Screen):
             elif col == "subs":
                 act, data = self._subs_acts[idx]
                 if act == "off":
-                    disable_subtitle(self.session)
+                    turn_off_subtitle(self.session, self._item_url)
                     self["status"].setText(u"CC off")
                     self.__showOSD(True)
                 elif act == "vidy":
@@ -3665,6 +3665,8 @@ class NovaPlaySimplePlayer(Screen):
             return
         if ok and path:
             remember_subtitle(self._item_url, path, 0)
+            update_subtitle_state(path=path, _orig_path=path, offset_ms=0)
+            disable_subtitle(self.session)
             apply_subtitle(self.session, path)
             self["status"].setText(u"CC ✓ {}".format(r.get("language", "")))
         else:
@@ -3754,11 +3756,13 @@ class NovaPlaySimplePlayer(Screen):
         elif choice == "sync0":
             my_log(reset_sync(self.session))
         elif choice == "off":
-            disable_subtitle(self.session)
+            turn_off_subtitle(self.session, self._item_url)
 
     def _onSubtitlePicked(self, path):
         if path and os.path.exists(path):
             remember_subtitle(self._item_url, path, 0)
+            update_subtitle_state(path=path, _orig_path=path, offset_ms=0)
+            disable_subtitle(self.session)
             apply_subtitle(self.session, path)
 
     # ── Subtitle Studio overlay (v3) ─────────────────────────────────────
@@ -3775,9 +3779,9 @@ class NovaPlaySimplePlayer(Screen):
             ("Delay — التأخير", "%+d ms" % _delay_val, "delay", 250),
             ("Size — الحجم", str(s["size"]), "size", 2),
             ("Font — الخط", font_lbl, "font", 1),
-            ("Color — اللون", ["White","Yellow","Gold","Cyan"][s["color_idx"]], "color", 1),
+            ("Color — اللون", ["White","Yellow","Gold","Cyan","Red","Green"][s["color_idx"] % 6], "color", 1),
             ("Outline — الحدود", "On" if s["outline"] else "Off", "outline", 1),
-            ("Outline color — لون الحدود", ["White","Yellow","Gold","Cyan"][s["outline_color_idx"]], "ocolor", 1),
+            ("Outline color — لون الحدود", ["White","Yellow","Gold","Cyan","Red","Green"][s["outline_color_idx"] % 6], "ocolor", 1),
             ("Background — الخلفية", "On" if s["bg"] else "Off", "bg", 1),
             ("BG Alpha — الشفافية", str(s["bg_alpha"]), "bg_alpha", 16),
             ("Position — الموضع", str(s["offset_y"]), "offset_y", 10),
@@ -3796,8 +3800,10 @@ class NovaPlaySimplePlayer(Screen):
         self._studioItems = self._studioItemsList()
         if self._studioIdx >= len(self._studioItems):
             self._studioIdx = 0
+        # [FIX] keep the subtitles running under the overlay so every edit is
+        # seen live on the real subtitle (the tick used to be stopped here)
         try:
-            self._studioTimer.stop()
+            self._studioTimer.start(100, False)
         except Exception:
             pass
         for k in self._STUDIO_KEYS:
@@ -3940,7 +3946,7 @@ class NovaPlaySimplePlayer(Screen):
             s["size"] = max(22, min(80, s["size"] + stp * step))
             STUDIO._layout_static()
         elif key == "color":
-            s["color_idx"] = (s["color_idx"] + step) % 4
+            s["color_idx"] = (s["color_idx"] + step) % 6
             STUDIO._layout_static()
         elif key == "bg":
             s["bg"] = not s["bg"]
@@ -3954,7 +3960,7 @@ class NovaPlaySimplePlayer(Screen):
         elif key == "outline":
             s["outline"] = not s["outline"]
         elif key == "ocolor":
-            s["outline_color_idx"] = (s["outline_color_idx"] + step) % 4
+            s["outline_color_idx"] = (s["outline_color_idx"] + step) % 6
             STUDIO._layout_static()
         elif key == "align":
             s["align"] = (s["align"] + step) % 3
@@ -3972,10 +3978,14 @@ class NovaPlaySimplePlayer(Screen):
         elif key == "reset":
             STUDIO.reset_style()
         elif key == "remove":
-            disable_subtitle(self.session)
+            turn_off_subtitle(self.session, self._item_url)
         elif key == "pickline":
             self._studioPickLine()
             return
+        try:
+            STUDIO.refresh()
+        except Exception:
+            pass
         self._studioItems = self._studioItemsList()
         self._studioRefresh()
 
@@ -4025,7 +4035,7 @@ class NovaPlaySimplePlayer(Screen):
             elif key == "size":
                 choices = [(str(v), v) for v in range(22, 81, 2)]
             elif key == "color":
-                choices = [("White", 0), ("Yellow", 1), ("Gold", 2), ("Cyan", 3)]
+                choices = [("White", 0), ("Yellow", 1), ("Gold", 2), ("Cyan", 3), ("Red", 4), ("Green", 5)]
             elif key == "bg":
                 choices = [("On", 1), ("Off", 0)]
             elif key == "bg_alpha":
@@ -4037,7 +4047,7 @@ class NovaPlaySimplePlayer(Screen):
             elif key == "outline":
                 choices = [("On", 1), ("Off", 0)]
             elif key == "ocolor":
-                choices = [("White", 0), ("Yellow", 1), ("Gold", 2), ("Cyan", 3)]
+                choices = [("White", 0), ("Yellow", 1), ("Gold", 2), ("Cyan", 3), ("Red", 4), ("Green", 5)]
             elif key == "align":
                 choices = [("Top — أعلى", 0), ("Bottom — أسفل", 1), ("Center — وسط", 2)]
             self._studioChoiceKey = key
@@ -4062,7 +4072,7 @@ class NovaPlaySimplePlayer(Screen):
                 s["size"] = int(value)
                 STUDIO._layout_static()
             elif key == "color":
-                s["color_idx"] = int(value) % 4
+                s["color_idx"] = int(value) % 6
                 STUDIO._layout_static()
             elif key == "bg":
                 s["bg"] = bool(value)
@@ -4076,10 +4086,14 @@ class NovaPlaySimplePlayer(Screen):
             elif key == "outline":
                 s["outline"] = bool(value)
             elif key == "ocolor":
-                s["outline_color_idx"] = int(value) % 4
+                s["outline_color_idx"] = int(value) % 6
                 STUDIO._layout_static()
             elif key == "align":
                 s["align"] = int(value) % 3
+        except Exception:
+            pass
+        try:
+            STUDIO.refresh()
         except Exception:
             pass
         self._studioItems = self._studioItemsList()

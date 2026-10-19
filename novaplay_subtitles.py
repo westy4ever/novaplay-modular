@@ -465,8 +465,13 @@ def remember_subtitle(item_url, path, offset_ms=0):
                       "time": int(time.time())}
     _save_subs_memory(data)
     global _CURRENT_SUB
-    _CURRENT_SUB.update({"item_url": item_url, "path": str(path),
-                         "offset_ms": int(offset_ms or 0)})
+    # [FIX] also reset _orig_path: a stale one from an earlier (synced) file made
+    # the next sync step shift the OLD file. With an offset, the caller has
+    # already put the shifted copy in "path" -- keep it.
+    upd = {"item_url": item_url, "_orig_path": str(path), "offset_ms": int(offset_ms or 0)}
+    if not offset_ms:
+        upd["path"] = str(path)
+    _CURRENT_SUB.update(upd)
 
 
 def recall_subtitle(item_url):
@@ -1558,6 +1563,22 @@ def apply_subtitle(session, path):
     except Exception:
         pass
     return False
+
+
+def turn_off_subtitle(session, item_url=""):
+    """[FIX] user switched subtitles OFF: stop rendering AND clear the state
+    (the CC mark, the sync rows and the Blue panel used to keep showing the
+    old file) and forget it for this title so it doesn't come back on resume."""
+    disable_subtitle(session)
+    url = item_url or _CURRENT_SUB.get("item_url") or ""
+    _CURRENT_SUB.update({"path": "", "_orig_path": "", "offset_ms": 0})
+    if url:
+        try:
+            data = _load_subs_memory()
+            if data.pop(str(url).strip(), None) is not None:
+                _save_subs_memory(data)
+        except Exception:
+            pass
 
 
 def disable_subtitle(session):

@@ -506,6 +506,10 @@ class SubtitleStudio(object):
         self._cues = cues
         self._starts = [c[0] for c in cues]
         self._path = path
+        # [FIX] a new file starts unshifted: the previous file's in-memory
+        # offset used to carry over (the state said 0 ms, the text was late/early).
+        # attach_with_offset() and the player's delay setter set it afterwards.
+        self._offset_ms = 0
         self._last_rendered = None
         self._preview_body = None
         self._current_cue_index = -1
@@ -618,8 +622,16 @@ class SubtitleStudio(object):
                     applied = True
                     if _pc is not None:
                         w.instance.setForegroundColor(_pc(self._style_color_hex()))
-                        w.instance.setShadowColor(_pc(self._style_outline_hex()))
-                        w.instance.setShadowOffset((-2, -2))
+                        # [FIX] setShadowOffset takes an ePoint (a tuple raised and
+                        # skipped line 2 + the box colours); outline off = no shadow
+                        try:
+                            if self._style_outline_on():
+                                w.instance.setShadowColor(_pc(self._style_outline_hex()))
+                                w.instance.setShadowOffset(ePoint(-2, -2))
+                            else:
+                                w.instance.setShadowOffset(ePoint(0, 0))
+                        except Exception:
+                            pass
             for key in self._SHADOW_KEYS:
                 w = self._w(key)
                 if w is not None:
@@ -719,8 +731,14 @@ class SubtitleStudio(object):
         if self._rise_y:
             y1 += self._rise_y
         y2 = y1 + line_h + gap
+        # [FIX] a one-line cue goes on the LOWER line when anchored at the bottom
+        # (it used to sit one line higher than the last line of two-line cues)
+        if not line2 and self.style["align"] == 1 and not (pos and self.style.get("use_cue_pos", True) and "Y1" in pos):
+            y1 = y2
         # Font pass — ONLY when the font state actually changed.
-        want = "Italic" if italic else None
+        # [FIX] the box has no font registered as "Italic": asking for it drew
+        # italic cues invisible. Italic cues use the normal face.
+        want = None
         new_font = (want or self._fallback_font(), size)
         if getattr(self, "_font_state", None) != new_font:
             self._apply_font_all(want)
@@ -837,6 +855,11 @@ class SubtitleStudio(object):
                 self._hide_lines()
                 self._current_cue_index = -1
                 self._rise_y = 0
+
+    def refresh(self):
+        """Re-draw the current cue with the current style right away."""
+        self._last_rendered = None
+        self._rise_y = 0
 
     def get_preview(self):
         """Current cue body for the overlay's live preview strip —
