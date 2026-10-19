@@ -499,7 +499,7 @@ class NovaPlaySimplePlayer(Screen):
         self["keyRed"]       = Label("تأخير الترجمة −")
         self["keyGreen"]     = Label("إعادة")
         self["keyYellow"]    = Label(u"جودة · سيرفر")
-        self["keyBlue"]      = Label("ترجمة")
+        self["keyBlue"]      = Label(u"صوت · ترجمة")
         self["osd_subdetail"] = Label("")
         self["osd_episode"]  = Label("")
         self["osd_jump"]     = Label("")
@@ -771,10 +771,10 @@ class NovaPlaySimplePlayer(Screen):
             "seekdef:9": lambda: self.__seekPct(90),
             "green":            self.__onRestart,
             "red":              self.__subtitleDelayBack,
-            "blue":             self._onSubtitles,
+            "blue":             self._subsPanel,
             "yellow":           self.__panelMenu,
-            "subtitles":        self._onSubtitles,
-            "subtitleSelection": self._onSubtitles,
+            "subtitles":        self._subsPanel,
+            "subtitleSelection": self._subsPanel,
             "audioSelection":   self.__audioSelect,
             "menu":             self._playerMenu,
             "showMenu":         self._playerMenu,
@@ -3033,7 +3033,7 @@ class NovaPlaySimplePlayer(Screen):
             return
         action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
         if action == "subs":
-            self._onSubtitles()
+            self._subsPanel()
         elif action == "audio":
             self.__audioSelect()
         elif action == "info":
@@ -3131,7 +3131,7 @@ class NovaPlaySimplePlayer(Screen):
             u"0-9              قفز إلى 0%/10%/20%/…/90% من المدة",
             u"",
             u"المسارات والترجمة — Tracks & Subtitles",
-            u"BLUE / SUBTITLE  قائمة الترجمة — Subtitle menu",
+            u"BLUE / SUBTITLE  الصوت / الترجمة / المزيد — Audio, subtitles panel",
             u"RED              تأخير الترجمة -100ms — Subtitle sync -100ms",
             u"AUDIO            اختيار المسار الصوتي — Audio track selection",
             u"",
@@ -3315,6 +3315,192 @@ class NovaPlaySimplePlayer(Screen):
         except Exception as e:
             my_log("aspect: restore error: {}".format(e))
         self._av_aspect_dirty = False
+
+    # ── [subs-panel] Blue: Audio | Subtitles | More (Movy-style) ─────────
+    def _audioTrackItems(self):
+        items = []
+        try:
+            service = self.session.nav.getCurrentService()
+            tracks = service and service.audioTracks()
+            n = tracks.getNumberOfTracks() if tracks else 0
+            cur = tracks.getCurrentTrack() if n else -1
+            for i in range(n):
+                name = ""
+                try:
+                    info = tracks.getTrackInfo(i)
+                    name = " ".join(x for x in (info.getLanguage(), info.getDescription()) if x)
+                except Exception:
+                    pass
+                if not name:
+                    try:
+                        name = tracks.getTrackName(i) or ""
+                    except Exception:
+                        name = ""
+                items.append((name or u"Track {}".format(i + 1), i == cur))
+        except Exception as e:
+            my_log("audio tracks: {}".format(e))
+        return items
+
+    def _subsItems(self):
+        """Subtitles column + the action behind each row."""
+        st = get_subtitle_state() or {}
+        path = st.get("path") or ""
+        rows, acts = [], []
+        rows.append((u"Off — بدون ترجمة", not path)); acts.append(("off", None))
+        if path:
+            rows.append((os.path.basename(st.get("_orig_path") or path)[:40], True)); acts.append(("cur", None))
+        res = getattr(self, "_vidy_results", None)
+        if res is None:
+            rows.append((u"⏳ Movy subtitles…", False)); acts.append(("wait", None))
+        elif not res:
+            rows.append((u"Movy: " + (getattr(self, "_vidy_error", "") or u"لا توجد ترجمة")[:34], False))
+            acts.append(("wait", None))
+        else:
+            for r in res[:60]:
+                hi = u" HI" if "(HI)" in (r.get("label") or "") else u""
+                rows.append((u"{} · {}{}".format(r.get("language", "?"), r.get("title", "")[:30], hi), False))
+                acts.append(("vidy", r))
+        self._subs_acts = acts
+        return rows
+
+    def _moreItems(self):
+        st = get_subtitle_state() or {}
+        autosub_on = str(_get_config("autosub", "true")).lower() in ("true", "1", "yes", "on")
+        studio_on = str(_get_config("substudio_mode", "false")).lower() == "true"
+        try:
+            skip_s = max(10, min(600, int(_get_config("skip_intro_secs", "90") or 90)))
+        except Exception:
+            skip_s = 90
+        rows, acts = [], []
+        if st.get("path"):
+            off = int(st.get("offset_ms") or 0)
+            rows += [(u"Sync +{} ms".format(SYNC_STEP_MS), False, True),
+                     (u"Sync −{} ms".format(SYNC_STEP_MS), False, True),
+                     (u"Reset sync ({:+d})".format(off), False, True)]
+            acts += ["sync+", "sync-", "sync0"]
+        rows.append((u"Auto subs: {}".format("ON" if autosub_on else "OFF"), autosub_on, True)); acts.append("autosub_toggle")
+        rows.append((u"Skip intro +{}s".format(skip_s), False)); acts.append("skipintro")
+        rows.append((u"Studio: {}".format("ON" if studio_on else "OFF"), studio_on)); acts.append("studio_toggle")
+        if studio_on:
+            rows.append((u"Studio settings", False)); acts.append("studio_open")
+        rows += [(u"SubSource", False), (u"OpenSubtitles", False), (u"Local files", False)]
+        acts += ["subsource", "opensubtitles", "browse"]
+        self._more_acts = acts
+        return rows
+
+    def _subsPanel(self):
+        if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
+            return
+        from plugin_player_panel import NovaSubsPanel
+        audio = self._audioTrackItems()
+        self._audio_count = len(audio)
+        if not audio:
+            audio = [(u"— " + u"مسار واحد", True)]
+        subs = self._subsItems()
+        more = self._moreItems()
+        self.__hideOSD()
+        self._subs_panel = self.session.openWithCallback(
+            self._onSubsPanel, NovaSubsPanel, audio, subs, more, live_cb=self._subsLive)
+        if getattr(self, "_vidy_results", None) is None and not getattr(self, "_vidy_busy", False):
+            self._vidy_busy = True
+            title, item_url = self._raw_title or self.title, self._item_url
+
+            def _bg():
+                try:
+                    from novaplay_subtitles import vidy_search
+                    ok, err, res = vidy_search(title, item_url)
+                except Exception as e:
+                    ok, err, res = False, str(e)[:40], []
+                callInMainThread(self._onVidyResults, res if ok else [], "" if ok else err)
+            threading.Thread(target=_bg, daemon=True).start()
+
+    def _onVidyResults(self, res, err):
+        self._vidy_busy = False
+        self._vidy_results = res or []
+        self._vidy_error = err or ""
+        my_log("subs panel: Movy subtitles {} ({})".format(len(self._vidy_results), err or "ok"))
+        p = getattr(self, "_subs_panel", None)
+        if p is not None:
+            try:
+                p.setColumn("subs", self._subsItems())
+            except Exception:
+                pass
+
+    def _subsLive(self, col, idx):
+        """'stay' rows: run without closing the panel; the text goes on its help line."""
+        if col != "more":
+            return ""
+        act = self._more_acts[idx] if idx < len(self._more_acts) else ""
+        msg = ""
+        if act == "sync+":
+            msg = adjust_sync(self.session, SYNC_STEP_MS)
+        elif act == "sync-":
+            msg = adjust_sync(self.session, -SYNC_STEP_MS)
+        elif act == "sync0":
+            msg = reset_sync(self.session)
+        elif act == "autosub_toggle":
+            was = str(_get_config("autosub", "true")).lower() in ("true", "1", "yes", "on")
+            _set_config("autosub", "false" if was else "true")
+            msg = u"Auto subtitles: {}".format("OFF" if was else "ON")
+        p = getattr(self, "_subs_panel", None)
+        if p is not None:
+            sel = idx
+            p.setColumn("more", self._moreItems())
+            try:
+                p._sel["more"] = min(sel, len(p._data["more"]) - 1)
+                p._paint()
+            except Exception:
+                pass
+        my_log("subs panel: {} -> {}".format(act, msg))
+        return msg or u"✓"
+
+    def _onSubsPanel(self, res):
+        self._subs_panel = None
+        if not res:
+            return
+        col, idx = res
+        try:
+            if col == "audio":
+                if idx < getattr(self, "_audio_count", 0):
+                    self.__audioPicked((u"", idx))
+            elif col == "subs":
+                act, data = self._subs_acts[idx]
+                if act == "off":
+                    disable_subtitle(self.session)
+                    self["status"].setText(u"CC off")
+                    self.__showOSD(True)
+                elif act == "vidy":
+                    self._downloadVidySub(data)
+            elif col == "more":
+                act = self._more_acts[idx]
+                self._onSubtitleAction((u"", act))
+        except Exception as e:
+            my_log("subs panel pick error: {}".format(e))
+
+    def _downloadVidySub(self, r):
+        self["status"].setText(u"⬇ {} …".format(r.get("language", "")))
+        self.__showOSD(True)
+        title, item_url = self._raw_title or self.title, self._item_url
+
+        def _bg():
+            try:
+                from novaplay_subtitles import vidy_download
+                ok, err, path = vidy_download(r.get("id"), title)
+            except Exception as e:
+                ok, err, path = False, str(e)[:60], ""
+            callInMainThread(self._onVidyDownloaded, ok, err, path, r)
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _onVidyDownloaded(self, ok, err, path, r):
+        if getattr(self, "_closed_flag", False):
+            return
+        if ok and path:
+            remember_subtitle(self._item_url, path, 0)
+            apply_subtitle(self.session, path)
+            self["status"].setText(u"CC ✓ {}".format(r.get("language", "")))
+        else:
+            self["status"].setText(u"✗ {}".format(err or u"download failed"))
+        self.__showOSD(True)
 
     def _onSubtitles(self):
         studio_on = str(_get_config("substudio_mode", "false")).lower() == "true"
