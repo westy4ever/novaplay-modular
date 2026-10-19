@@ -2850,23 +2850,51 @@ def resolve_vaplayer_api(url, referer=None, start_index=0):
 _VIDBOLT_ORIGIN = "https://vidbolt.xyz"
 
 
-def _vidbolt_pick(data):
+def _vidbolt_sources(data):
+    """All playable-looking sources of an /api/resolve reply, best first
+    (highest quality up to 1080p, 4K last)."""
     stream = (data or {}).get("stream") if isinstance(data, dict) else None
     if not isinstance(stream, dict):
-        return None, {}
+        return []
     srcs = [s for s in stream.get("sources") or []
             if isinstance(s, dict) and str(s.get("url") or "").startswith("http")]
 
     def _h(s):
         m = re.search(r'(\d{3,4})', str(s.get("quality") or ""))
         h = int(m.group(1)) if m else 0
-        return (h <= 1080, h)    # best up to 1080p, 4K only when nothing else
+        return (h <= 1080, h)
     srcs.sort(key=_h, reverse=True)
-    best = srcs[0] if srcs else None
-    if not best:
-        return None, {}
-    hdrs = best.get("headers") or stream.get("headers") or {}
-    return best["url"].replace("\\/", "/"), hdrs if isinstance(hdrs, dict) else {}
+    out = []
+    for s in srcs:
+        hdrs = s.get("headers") or stream.get("headers") or {}
+        out.append((s["url"].replace("\\/", "/"), hdrs if isinstance(hdrs, dict) else {},
+                    str(stream.get("server") or "")))
+    return out
+
+
+def _vidbolt_pick(data):
+    srcs = _vidbolt_sources(data)
+    return (srcs[0][0], srcs[0][1]) if srcs else (None, {})
+
+
+def _vidbolt_box_playable(stream_url, headers):
+    """[2026-10-19] The box's players can't play an HLS master whose audio is in
+    separate renditions (#EXT-X-MEDIA TYPE=AUDIO with a URI): one VidBolt
+    backend (img.rousav.tech, 8 audio languages) played only a few seconds of
+    picture. Such a source is skipped so another backend is tried."""
+    try:
+        text, _f = fetch(stream_url, referer=headers.get("Referer"),
+                         extra_headers={k: v for k, v in headers.items() if k != "Referer"},
+                         timeout=12)
+    except Exception:
+        return True
+    text = text or ""
+    if "#EXTM3U" not in text[:200]:
+        return True          # can't tell; let the player try
+    if re.search(r'#EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*URI=', text):
+        log("resolve_vidbolt: separate audio tracks (box can't play): {}".format(stream_url[:90]))
+        return False
+    return True
 
 
 def resolve_vidbolt(url, referer=None):
@@ -2899,18 +2927,31 @@ def resolve_vidbolt(url, referer=None):
             if mt == "tv":
                 q += "&season={}&episode={}".format(season or 1, episode or 1)
         hdr = {"Referer": page, "Origin": origin}
+        seen, tried_servers = set(), set()
         for pref in [None] + servers[:7]:
+            if pref and pref in tried_servers:
+                continue
             api = "{}/api/resolve?{}".format(origin, q)
             if pref:
                 api += "&prefer=" + quote(pref, safe="")
             data = fetch_json(api, referer=page, extra_headers={"Accept": "application/json"})
-            stream_url, extra = _vidbolt_pick(data)
-            if stream_url:
-                log("resolve_vidbolt: SUCCESS ({}): {}".format(pref or "default", stream_url[:100]))
+            srcs = _vidbolt_sources(data)
+            if not srcs:
+                log("resolve_vidbolt: {} -> no stream".format(pref or "default"))
+                continue
+            for stream_url, extra, server in srcs:
+                if server:
+                    tried_servers.add(server)
+                if stream_url in seen:
+                    continue
+                seen.add(stream_url)
                 h = dict(hdr)
                 h.update({k: v for k, v in extra.items() if isinstance(v, str)})
+                if not _vidbolt_box_playable(stream_url, h):
+                    continue
+                log("resolve_vidbolt: SUCCESS ({} / {}): {}".format(
+                    pref or "default", server or "?", stream_url[:100]))
                 return _vidnest_headers_suffix(stream_url, h)
-            log("resolve_vidbolt: {} -> no stream".format(pref or "default"))
         return None
     except Exception as e:
         log("resolve_vidbolt error for {}: {}".format(url[:100], e))
