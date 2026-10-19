@@ -37,10 +37,28 @@ import re
 import time
 import urllib.parse
 
-from .base import fetch, log
+from .base import fetch, fetch_json, log
 from .sflix_pro import SflixProExtractor
 
 _HOME_TTL = 30 * 60
+
+# Movy's anime catalogue (anime.vidy.st, the AniKoto API behind /browse/anime).
+# Its own anime player (api.wecollege.net/anikoto/sources-id) returns no
+# sources at the moment, so an anime title is matched to its TMDB entry and
+# played through Movy's city servers like any other show.
+_ANIME_API = "https://anime.vidy.st/api"
+_ANIME_GENRES = (
+    "Action", "Adventure", "Cars", "Comedy", "Demons", "Drama", "Fantasy",
+    "Game", "Harem", "Historical", "Horror", "Isekai", "Josei", "Kids",
+    "Magic", "Martial Arts", "Mecha", "Military", "Music", "Mystery",
+    "Parody", "Police", "Psychological", "Romance", "Samurai", "School",
+    "Sci-Fi", "Seinen", "Shoujo", "Shounen", "Slice of Life", "Space",
+    "Sports", "Super Power", "Supernatural", "Thriller", "Vampire",
+)
+# "Season 2", "2nd Season", "Part 2", "(2021)" ... -> stripped for TMDB search
+_SEASON_RE = re.compile(
+    r'\s*(?:[:\-]\s*)?(?:season\s*(\d+)|(\d+)(?:st|nd|rd|th)\s+season|'
+    r'part\s*\d+|cour\s*\d+|\(\d{4}\))\s*$', re.I)
 
 # (pageProps key, section name or None, menu title, item type)
 _HOME_ROWS = (
@@ -169,9 +187,14 @@ class MovyExtractor(SflixProExtractor):
             if not props and i not in self._ROW_FALLBACK:
                 continue
             cats.append({"title": title, "url": "movy_home_{}".format(i), "type": "category"})
-        cats.append({"title": "🎌 Anime", "url": "", "type": "separator"})
-        cats.append({"title": "🎌 Top Airing Anime", "url": "movy_series_genre_16", "type": "category"})
-        cats.append({"title": "🎌 Anime Movies", "url": "movy_movie_genre_16", "type": "category"})
+        cats.append({"title": "🎌 Movy Anime", "url": "", "type": "separator"})
+        cats.append({"title": "🎌 Featured Anime", "url": "movy_anime_featured", "type": "category"})
+        cats.append({"title": "🎌 Top Airing Anime (TMDB)", "url": "movy_series_genre_16", "type": "category"})
+        cats.append({"title": "🎌 Anime Movies (TMDB)", "url": "movy_movie_genre_16", "type": "category"})
+        for g in _ANIME_GENRES:
+            cats.append({"title": "🎌 Anime · {}".format(g),
+                         "url": "movy_anime_genre_{}".format(self._genre_slug(g)),
+                         "type": "category"})
         for c in super().get_categories(mtype):
             if c.get("url") == "sflix_series_genre_16" and c.get("title", "").endswith("Anime"):
                 continue
@@ -186,6 +209,11 @@ class MovyExtractor(SflixProExtractor):
     }
 
     def get_category_items(self, url, page=1):
+        if url == "movy_anime_featured":
+            return self._anime_featured(page)
+        if url.startswith("movy_anime_genre_"):
+            return self._anime_list("/genre/{}?page={}".format(
+                url[len("movy_anime_genre_"):], int(page or 1)))
         m = re.match(r'movy_home_(\d+)$', url)
         if m:
             idx = int(m.group(1))
@@ -208,6 +236,8 @@ class MovyExtractor(SflixProExtractor):
         return self._from_sflix(super().search(query, page))
 
     def get_page(self, url, m_type=None):
+        if url.startswith("movy_anime_") and not url.startswith("movy_anime_genre_"):
+            return self._anime_page(url[len("movy_anime_"):], m_type)
         res = super().get_page(self._to_sflix(url), m_type)
         if res and res.get("servers"):
             try:
@@ -240,3 +270,174 @@ class MovyExtractor(SflixProExtractor):
                                season=season, episode=episode,
                                total_seasons=d.get("number_of_seasons"))
         return []
+
+    # ─── Movy anime (anime.vidy.st) ───────────────────────────────────────
+
+    _anime_map = {}      # slug -> (kind, tmdb_id, season) or None
+
+    @staticmethod
+    def _genre_slug(name):
+        return re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+
+    def _anime_api(self, path):
+        d = fetch_json(_ANIME_API + path, referer=self.main_url + "/",
+                       extra_headers={"Origin": self.main_url}) or {}
+        return d.get("results") if isinstance(d, dict) else None
+
+    def _anime_item(self, r):
+        # genre API: "dandadan-lzcmw/ep-1"; browse grid: "/anime/dandadan-lzcmw"
+        slug = re.sub(r'^/?anime/', '', r.get("slug") or "").split("/")[0] or str(r.get("id") or "")
+        if not slug:
+            return None
+        kind = (r.get("type") or r.get("animeType") or "").upper()
+        cnt = r.get("animeEpisodeCount") or {}
+        sub = r.get("sub", cnt.get("sub")) or 0
+        dub = r.get("dub", cnt.get("dub")) or 0
+        try:
+            rating = "{:.1f}".format(float(r.get("rating") or 0)) if float(r.get("rating") or 0) > 0 else ""
+        except (TypeError, ValueError):
+            rating = ""
+        it = {
+            "title": r.get("title") or r.get("name") or slug,
+            "poster": r.get("poster") or "",
+            "url": "movy_anime_" + slug,
+            "type": "movie" if kind == "MOVIE" else "series",
+            "year": "",
+            "rating": rating,
+        }
+        lab = []
+        if kind and kind not in ("TV",):
+            lab.append(kind)
+        if sub:
+            lab.append("SUB {}".format(sub))
+        if dub:
+            lab.append("DUB {}".format(dub))
+        if lab:
+            it["label"] = " · ".join(lab)
+        return it
+
+    def _anime_list(self, path):
+        res = self._anime_api(path) or {}
+        out = []
+        for r in res.get("data") or []:
+            if isinstance(r, dict):
+                it = self._anime_item(r)
+                if it:
+                    out.append(it)
+        return out
+
+    def _anime_featured(self, page=1):
+        if int(page or 1) == 1:
+            try:
+                res = fetch(self.main_url + "/browse/anime", referer=self.main_url + "/")
+                html = (res[0] if isinstance(res, tuple) else res) or ""
+                m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+                if m:
+                    pp = (json.loads(m.group(1)).get("props") or {}).get("pageProps") or {}
+                    items = [self._anime_item(r) for r in pp.get("initialGrid") or []
+                             if isinstance(r, dict)]
+                    items = [i for i in items if i]
+                    if items:
+                        return items
+            except Exception as e:
+                log("[Movy] anime browse: {}".format(e))
+        return self._anime_list("/genre/action?page={}".format(int(page or 1)))
+
+    @staticmethod
+    def _norm(t):
+        return re.sub(r'[^a-z0-9]+', ' ', (t or "").lower()).strip()
+
+    def _match_tmdb(self, info):
+        """Find the TMDB entry for an AniKoto title -> (kind, id, season)."""
+        title = info.get("title") or ""
+        kind = "movie" if (info.get("type") or "").upper() == "MOVIE" else "tv"
+        m = re.search(r'(\d{4})', info.get("aired") or info.get("premiered") or "")
+        year = m.group(1) if m else ""
+        backdrop = (info.get("backgroundImage") or "").rsplit("/", 1)[-1]
+        season = None
+        sm = _SEASON_RE.search(title)
+        if sm and (sm.group(1) or sm.group(2)):
+            season = int(sm.group(1) or sm.group(2))
+        names = []
+        for n in [title, info.get("japaneseTitle")] + (info.get("altNames") or "").replace(";", ",").split(","):
+            n = (n or "").strip()
+            base = _SEASON_RE.sub("", n).strip(" :-")
+            for x in (base, n):
+                if x and x.lower() not in [y.lower() for y in names]:
+                    names.append(x)
+        best, best_score = None, 0
+        for q in names[:5]:
+            for k in ((kind, "tv") if kind == "movie" else ("tv", "movie")):
+                params = {"query": q}
+                if k == kind and year and season is None:
+                    params["first_air_date_year" if k == "tv" else "year"] = year
+                d = self._tmdb_request("/search/{}".format(k), params)
+                for i, r in enumerate((d.get("results") or [])[:8]):
+                    sc = 0
+                    if backdrop and (r.get("backdrop_path") or "").endswith(backdrop):
+                        sc += 100
+                    if 16 in (r.get("genre_ids") or []):
+                        sc += 20
+                    if "JP" in (r.get("origin_country") or []) or r.get("original_language") == "ja":
+                        sc += 15
+                    nm = self._norm(r.get("name") or r.get("title"))
+                    on = self._norm(r.get("original_name") or r.get("original_title"))
+                    if self._norm(q) in (nm, on):
+                        sc += 25
+                    ry = (r.get("first_air_date") or r.get("release_date") or "")[:4]
+                    if year and ry == year:
+                        sc += 10
+                    if k == kind:
+                        sc += 5
+                    sc -= i
+                    if sc > best_score:
+                        best, best_score = (k, r.get("id")), sc
+                if best_score >= 100:
+                    break
+            if best_score >= 100:
+                break
+        if not best or best_score < 30:
+            return None
+        k, tid = best
+        if k == "tv" and season:
+            d = self._tmdb_request("/tv/{}".format(tid))
+            nums = [x.get("season_number") for x in d.get("seasons") or []]
+            if season not in nums:
+                season = None
+        return (k, tid, season if k == "tv" else None)
+
+    def _anime_page(self, slug, m_type=None):
+        info = self._anime_api("/info?id={}".format(urllib.parse.quote(slug))) or {}
+        if slug not in self._anime_map:
+            try:
+                self._anime_map[slug] = self._match_tmdb(info) if info else None
+            except Exception as e:
+                log("[Movy] anime match {}: {}".format(slug, e))
+                self._anime_map[slug] = None
+        hit = self._anime_map.get(slug)
+        log("[Movy] anime {} -> {}".format(slug, hit))
+        if hit:
+            k, tid, season = hit
+            if k == "movie":
+                target = "movy_movie_{}".format(tid)
+            elif season:
+                target = "movy_season_{}_{}".format(tid, season)
+            else:
+                target = "movy_series_{}".format(tid)
+            res = self.get_page(target, m_type)
+            if res:
+                if info.get("poster") and not res.get("poster"):
+                    res["poster"] = info["poster"]
+                if season and info.get("title"):
+                    res["title"] = "{} · {}".format(info["title"], res.get("title") or "")
+                return res
+        plot = info.get("synopsis") or ""
+        return {
+            "title": info.get("title") or slug,
+            "plot": ("No TMDB match for this title, so it has no server yet.\n\n" + plot).strip(),
+            "poster": info.get("poster") or "",
+            "servers": [],
+            "items": [],
+            "type": "movie" if (info.get("type") or "").upper() == "MOVIE" else "series",
+            "genres": ", ".join(info.get("genres") or []),
+        }

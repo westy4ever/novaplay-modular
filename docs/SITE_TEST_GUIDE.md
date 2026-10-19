@@ -226,6 +226,19 @@ Movy's own servers have city names (Miami, Boise, Vegas, ... Cancun). NovaPlay a
 - To test one title: `python3 run_site_test.py movy --page movy_movie_1148365 --all-servers`
 - In the log, look for lines starting with `movy:`. `movy: miami -> 4 source(s)` means the API answered. `decrypt failed` means Movy changed its code, so send a new Stream Recorder Pro capture.
 
+
+### Movy anime
+
+The **🎌 Movy Anime** part of Movy's categories lists Movy's own anime catalogue: Featured, plus one row per genre (Action … Vampire). Each card shows SUB/DUB episode counts.
+
+Movy's own anime player returns no streams at the moment, so NovaPlay matches each anime to its TMDB entry and plays it through the normal city servers. "Season 2" titles open straight at season 2. If no TMDB match is found, the detail page says so and has no servers.
+
+Test it:
+
+```
+python3 run_site_test.py movy --page movy_anime_dandadan-lzcmw
+```
+
 ## Player keys
 
 While a film plays, the coloured keys open Movy-style panels. In every panel: ◀ ▶ moves between columns, ▲ ▼ moves in a column, OK picks, EXIT (or the same colour key) closes. ● marks what is playing now.
