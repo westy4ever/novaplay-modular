@@ -1844,7 +1844,9 @@ class NovaPlaySimplePlayer(Screen):
             self["status"].setText(status or u"🎛 تبديل الجودة: {}".format(label))
         except Exception:
             pass
-        self._startQualityWipe(_midpoint)
+        # [CHANGE] no full-screen cyan wipe any more (it flashed over the picture
+        # on every quality/server change): switch straight away.
+        _midpoint()
 
     def _onQualityRetry(self, ans):
         self._quality_switch_in_flight = False

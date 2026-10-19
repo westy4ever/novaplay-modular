@@ -425,10 +425,10 @@ class NovaPlayDetail(Screen):
         pos["meta"] = (y, max(1, ml) * 36)
         y += ml * 36 + (4 if ml else 0)
         pos["source"] = (y, max(1, sl) * 32)
-        y += sl * 32 + 18
-        pos["plot_title"] = (y, 30)
-        y += 38
-        pos["plot"] = (y, max(120, self._HDR_BOTTOM - y))
+        # the plot keeps its original place (user preference); only the
+        # title/details/source block is tightened
+        pos["plot_title"] = (355, 30)
+        pos["plot"] = (394, 256)
         self._hdr_y = dict((k, v[0]) for k, v in pos.items())
         if getattr(self, "_reveal_running", False):
             # the slide-in places them; just size them now
