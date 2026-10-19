@@ -2854,12 +2854,15 @@ def _vidbolt_pick(data):
     stream = (data or {}).get("stream") if isinstance(data, dict) else None
     if not isinstance(stream, dict):
         return None, {}
-    srcs = stream.get("sources") or []
-    best = None
-    for s in srcs:
-        if isinstance(s, dict) and str(s.get("url") or "").startswith("http"):
-            best = s
-            break
+    srcs = [s for s in stream.get("sources") or []
+            if isinstance(s, dict) and str(s.get("url") or "").startswith("http")]
+
+    def _h(s):
+        m = re.search(r'(\d{3,4})', str(s.get("quality") or ""))
+        h = int(m.group(1)) if m else 0
+        return (h <= 1080, h)    # best up to 1080p, 4K only when nothing else
+    srcs.sort(key=_h, reverse=True)
+    best = srcs[0] if srcs else None
     if not best:
         return None, {}
     hdrs = best.get("headers") or stream.get("headers") or {}
