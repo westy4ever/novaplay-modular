@@ -184,10 +184,10 @@ class NovaPlayDetail(Screen):
 
         <widget name="title" position="525,93" size="1320,90" font="Regular;42" foregroundColor="#00E5FF" transparent="1" zPosition="4" />
         <widget name="meta" position="525,183" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="source" position="525,243" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
+        <widget name="source" position="525,243" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" halign="left" zPosition="4" />
         <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
 
-        <widget name="plot_title" position="525,355" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
+        <widget name="plot_title" position="525,355" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" halign="left" zPosition="4" />
         <widget name="plot" position="525,394" size="1320,256" font="Regular;27" foregroundColor="#F0F6FC" transparent="1" halign="block" valign="top" zPosition="4" />
 
         <widget name="menu_box" position="45,652" size="1830,390" backgroundColor="#161B22" zPosition="2" />
@@ -403,6 +403,46 @@ class NovaPlayDetail(Screen):
             pass
         self._updateMenuAccent()
 
+    # ── [detail-layout] stack title / meta / source / plot with no gaps ──
+    _HDR_X = 525
+    _HDR_W = 1320
+    _HDR_BOTTOM = 650
+
+    def _layoutHeader(self):
+        """The skin reserves 2 lines for the title and the details; a one-line
+        title left a big gap. Place each block right under the previous one,
+        using as many lines as its text really has."""
+        def lines(key):
+            try:
+                t = self[key].getText() or ""
+            except Exception:
+                t = ""
+            return (t.count("\n") + 1) if t.strip() else 0
+        tl, ml, sl = max(1, lines("title")), lines("meta"), lines("source")
+        y = 93
+        pos = {"title": (y, tl * 54)}
+        y += tl * 54 + 6
+        pos["meta"] = (y, max(1, ml) * 36)
+        y += ml * 36 + (4 if ml else 0)
+        pos["source"] = (y, max(1, sl) * 32)
+        y += sl * 32 + 18
+        pos["plot_title"] = (y, 30)
+        y += 38
+        pos["plot"] = (y, max(120, self._HDR_BOTTOM - y))
+        self._hdr_y = dict((k, v[0]) for k, v in pos.items())
+        if getattr(self, "_reveal_running", False):
+            # the slide-in places them; just size them now
+            for k, (yy, h) in pos.items():
+                try:
+                    inst = self[k].instance
+                    if inst:
+                        inst.resize(eSize(self._HDR_W, int(h)))
+                except Exception:
+                    pass
+            return
+        for k, (yy, h) in pos.items():
+            self._moveResize(k, self._HDR_X, yy, self._HDR_W, h)
+
     # ── [detail-common] move+resize helper ─────────────────────────────
     def _moveResize(self, key, x, y, w, h):
         try:
@@ -422,6 +462,7 @@ class NovaPlayDetail(Screen):
         self._reveal_frame = 0
         for _name, widgets, ox, oy, _d, _dur in self._REVEAL_GROUPS:
             for key, dx, dy in widgets:
+                dy = getattr(self, "_hdr_y", {}).get(key, dy)
                 try:
                     inst = self[key].instance
                     if inst:
@@ -454,6 +495,7 @@ class NovaPlayDetail(Screen):
             xoff = int(ox * (1.0 - p_eased))
             yoff = int(oy * (1.0 - p_eased))
             for key, dx, dy in widgets:
+                dy = getattr(self, "_hdr_y", {}).get(key, dy)
                 try:
                     inst = self[key].instance
                     if inst:
@@ -1199,6 +1241,7 @@ class NovaPlayDetail(Screen):
         if current_title:
             plot_label = "{}: {}".format(plot_label, current_title[:32])
         self["plot_title"].setText(_single_line_text(plot_label, width=46, fallback="القصة"))
+        self._layoutHeader()
 
         plot_text, plot_source = _pick_plot_text_with_source(data, self._item)
         plot_text = re.sub(r"^\[.*?\]\s*|^المصدر:\s*.*?\|\s*", "", plot_text)
