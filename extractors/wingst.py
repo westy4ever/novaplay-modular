@@ -305,6 +305,10 @@ def resolve(url, referer=None):
                 return u + "|Referer=" + SITE + "/&Origin=" + SITE
         err = data.get("error") if isinstance(data, dict) else None
         log("wingst: {} -> status {} {}".format(path, status, err or ""))
-        if status in (200, 204) or (status and status != 404 and status < 500 and err and "path" not in str(err).lower()):
-            break      # path accepted but no source: other spellings won't help
+        # the server answered for this server/kind (e.g. 404 "Athens: empty
+        # mirror list for /e/movie/..."): other spellings won't help
+        named = isinstance(err, str) and err.lower().startswith(server.lower() + ":")
+        if status in (200, 204) or named or (
+                status and status != 404 and status < 500 and err and "path" not in str(err).lower()):
+            break
     return None
