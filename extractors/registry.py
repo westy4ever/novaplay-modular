@@ -126,6 +126,7 @@ from .cineby import CinebyExtractor
 from .sflix_pro import SflixProExtractor
 from .movy import MovyExtractor
 from .cinejoy import CinejoyExtractor
+from .zetmoon import ZetmoonExtractor
 
 # Site registry: maps site names to extractor classes.
 # "short" (optional) = the compact tagline shown on the home grid;
@@ -164,6 +165,7 @@ _SITE_REGISTRY = {
     "sflix_pro":       {"class": SflixProExtractor, "title": "SFlix", "tagline": "SFlix — Movies & TV Shows in HD", "short": "أفلام ومسلسلات أجنبية بجودة عالية"},
     "movy":            {"class": MovyExtractor, "title": "Movy", "tagline": "Movy — Movies, TV Shows & Anime in HD/4K", "short": "أفلام ومسلسلات وأنمي أجنبية بجودة عالية"},
     "cinejoy":         {"class": CinejoyExtractor, "title": "Cinejoy", "tagline": "Cinejoy — Movies & TV by provider and curated collections", "short": "أفلام ومسلسلات أجنبية حسب المنصة وقوائم مختارة"},
+    "zetmoon":         {"class": ZetmoonExtractor, "title": "ZetMoon", "tagline": "ZetMoon — Trending movies & series", "short": "أفلام ومسلسلات أجنبية رائجة"},
 }
 
 # Aggregated-search priority.
@@ -179,7 +181,7 @@ _SEARCH_SITE_ORDER = (
     "wecima", "wecima_sarl", "topcinema", "fasel", "faselhdx",
     "shaheed", "shahid4u", "arablionz", "mywecima", "mycima",
     "cimawebas", "cwb",
-    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby", "sflix_pro", "movy", "cinejoy",
+    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby", "sflix_pro", "movy", "cinejoy", "zetmoon",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
 
@@ -199,7 +201,7 @@ _HOME_SITE_ORDER = (
     "arabseed",
     "wecima", "shaheed", "topcinema",
     "fasel", "arablionz", "mywecima",
-    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby", "sflix_pro", "movy", "cinejoy",
+    "alooytv", "aflaam", "onlyflix", "fivetv", "cineby", "sflix_pro", "movy", "cinejoy", "zetmoon",
     "yts", "torrentio", "vidsrc", "imdb_su",
 )
 
