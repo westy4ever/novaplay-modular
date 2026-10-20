@@ -2961,6 +2961,12 @@ def resolve_vidbolt(url, referer=None):
         return None
 
 
+def resolve_wingst(url, referer=None):
+    """Cinejoy's own servers (Nebula, Lisbon, ...): sealed api.wing.st calls, see wingst.py."""
+    from .wingst import resolve
+    return resolve(url, referer)
+
+
 def resolve_yapgrid(url, referer=None):
     """[NEW 2026-10-18] A browser recording of SFlix's YapGrid server showed its
     player loading vsembed.ru (VidSrc-Embed's player) and playing from the same
@@ -4285,6 +4291,7 @@ HOST_RESOLVERS = {
     "vidsrc2.ru":         resolve_vaplayer_api,
     "stellarconductornexus.com": resolve_vaplayer_api,
     "vidbolt.xyz":        resolve_vidbolt,
+    "api.wing.st":        resolve_wingst,
     "vidbolt.pro":        resolve_vidbolt,
     "yapgrid.com":        resolve_yapgrid,
     "cloudorchestranova.com": resolve_cloudorchestra,
@@ -4542,7 +4549,7 @@ def resolve_generic_embed(url, referer=None):
 
 # JSON APIs with their own resolver: a page scrape of them finds nothing and
 # only wastes time (Movy's dubbed servers hit the 90 s test limit that way).
-_NO_GENERIC_FALLBACK = ("api.wecollege.net",)
+_NO_GENERIC_FALLBACK = ("api.wecollege.net", "api.wing.st")
 
 
 def resolve_host(url, referer=None):

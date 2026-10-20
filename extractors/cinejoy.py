@@ -180,4 +180,46 @@ class CinejoyExtractor(SflixProExtractor):
 
     def get_page(self, url, m_type=None):
         res = super().get_page(self._to_sflix(url), m_type)
+        if res and res.get("servers"):
+            try:
+                own = self._own_servers(url)
+            except Exception as e:
+                log("[Cinejoy] own servers: {}".format(e))
+                own = []
+            res["servers"] = own + res["servers"]
         return self._from_sflix(res) if res else res
+
+    _OWN_FALLBACK = ("Nebula", "Lisbon", "Solara", "Athens")
+
+    def _own_servers(self, url):
+        """Cinejoy's own servers (api.wing.st, sealed requests -- wingst.py)."""
+        from urllib.parse import urlencode
+        from .wingst import servers as wing_servers
+        if url.startswith("cinejoy_movie_"):
+            tid = url[len("cinejoy_movie_"):]
+            d = self._tmdb_request("/movie/{}".format(tid))
+            q = {"kind": "movie", "tmdb": tid, "imdb": d.get("imdb_id") or "",
+                 "year": (d.get("release_date") or "")[:4], "title": d.get("title") or ""}
+        elif url.startswith("cinejoy_episode_"):
+            _p = url.split("_")
+            tid, season, episode = _p[2], _p[3], _p[4]
+            d = self._tmdb_request("/tv/{}".format(tid), {"append_to_response": "external_ids"})
+            q = {"kind": "tv", "tmdb": tid, "season": season, "episode": episode,
+                 "imdb": (d.get("external_ids") or {}).get("imdb_id") or "",
+                 "year": (d.get("first_air_date") or "")[:4], "title": d.get("name") or ""}
+        else:
+            return []
+        try:
+            names = [(s.get("name"), s.get("4k")) for s in wing_servers()
+                     if (s.get("status") or "ok") == "ok"]
+        except Exception:
+            names = []
+        if not names:
+            names = [(n, False) for n in self._OWN_FALLBACK]
+        out = []
+        for name, is4k in names:
+            qq = dict(q, server=name)
+            out.append({"name": "Cinejoy {}{}".format(name, " 4K" if is4k else ""),
+                        "url": "https://api.wing.st/play?" + urlencode({k: v for k, v in qq.items() if v}),
+                        "quality": "4K" if is4k else "HD"})
+        return out
