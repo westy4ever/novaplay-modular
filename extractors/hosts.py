@@ -2967,31 +2967,69 @@ def resolve_wingst(url, referer=None):
     return resolve(url, referer)
 
 
+_ZM_RELAY = "https://proxy.semoteb377.workers.dev/?id="
+
+
+def _zm_relay_fetch(url, timeout=20):
+    """Fetch a page through ZetMoon's CORS relay (the box gets 403 from some
+    of the sites it reads). Request: id = base64(hex(urlencode(url) XOR 0x7c));
+    reply: hex of the page XOR 0x7c (plain text when not hex)."""
+    try:
+        enc = bytes(c ^ 0x7c for c in quote(url, safe="").encode()).hex()
+        rid = base64.b64encode(enc.encode()).decode()
+        body, _f = fetch(_ZM_RELAY + rid, referer="https://zetmoon.live/",
+                         extra_headers={"Origin": "https://zetmoon.live"}, timeout=timeout)
+        body = (body or "").strip()
+        if body and re.fullmatch(r"[0-9a-fA-F]+", body[:2000]) and len(body) % 2 == 0:
+            return bytes(c ^ 0x7c for c in bytes.fromhex(body)).decode("utf-8", "replace")
+        return body
+    except Exception as e:
+        log("zm relay: {} -> {}".format(url[:80], e))
+        return ""
+
+
+def _streamwish_from_html(html):
+    if not html:
+        return None
+    best = _best_media_url(html)
+    if best:
+        return best
+    for txt in _unpack_all(html):
+        best = _best_media_url(txt)
+        if best:
+            return best
+    return find_m3u8(html) or find_mp4(html)
+
+
 def resolve_vidapi(url, referer=None):
     """[2026-10-21] vidapi.xyz/embed/{movie,tv}/<id> (ZetMoon "Zeon"): the page
     keeps its player in <iframe id="iframesrc" data-src=
     "https://stream.vidapi.xyz/swish?id=<code>">, a StreamWish clone served as
-    vscdn.xyz/e/<code> (packed JW player). Older pages: vidsrc-family path."""
+    vscdn.xyz/e/<code> (packed JW player). vidapi.xyz answers the box with 403,
+    so its page (and vscdn's, if needed) is read through ZetMoon's relay."""
     try:
-        html, final = fetch(url, referer=referer or "https://zetmoon.live/", timeout=15)
+        html = ""
+        try:
+            html, _f = fetch(url, referer=referer or "https://zetmoon.live/", timeout=12, max_retries=0)
+        except Exception:
+            html = ""
+        if not html or "swish" not in html:
+            log("resolve_vidapi: direct page blocked, using the ZetMoon relay")
+            html = _zm_relay_fetch(url)
         html = html_module.unescape(html or "")
-        codes = re.findall(r'(?:stream\.vidapi\.xyz|vidapi\.xyz)/swish\?id=([A-Za-z0-9]+)', html)
-        for m in re.finditer(r'data-src=["\']([^"\']+)', html):
-            u = m.group(1)
-            if "swish" not in u and u.startswith("http") and "about:blank" not in u:
-                log("resolve_vidapi: other player {}".format(u[:90]))
-        for code in dict.fromkeys(codes):
-            for host in ("vscdn.xyz",):
-                emb = "https://{}/e/{}".format(host, code)
-                r = resolve_streamwish(emb)
-                if r:
-                    log("resolve_vidapi: {} -> {}".format(emb, r[:90]))
-                    return r
+        codes = list(dict.fromkeys(re.findall(r'vidapi\.xyz/swish\?id=([A-Za-z0-9]+)', html)))
         if not codes:
-            log("resolve_vidapi: no swish player on {}".format(url[:90]))
+            log("resolve_vidapi: no swish player on {} ({} bytes)".format(url[:90], len(html)))
+        for code in codes:
+            emb = "https://vscdn.xyz/e/{}".format(code)
+            r = resolve_streamwish(emb) or _streamwish_from_html(_zm_relay_fetch(emb))
+            if r:
+                log("resolve_vidapi: {} -> {}".format(emb, r[:90]))
+                return r
+            log("resolve_vidapi: {} gave no stream".format(emb))
     except Exception as e:
         log("resolve_vidapi error: {}".format(e))
-    return resolve_vidsrc_family(url, referer=referer)
+    return None
 
 
 def resolve_yapgrid(url, referer=None):
@@ -4577,7 +4615,7 @@ def resolve_generic_embed(url, referer=None):
 
 # JSON APIs with their own resolver: a page scrape of them finds nothing and
 # only wastes time (Movy's dubbed servers hit the 90 s test limit that way).
-_NO_GENERIC_FALLBACK = ("api.wecollege.net", "api.wing.st")
+_NO_GENERIC_FALLBACK = ("api.wecollege.net", "api.wing.st", "vidapi.xyz")
 
 
 def resolve_host(url, referer=None):
