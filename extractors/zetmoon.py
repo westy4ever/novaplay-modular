@@ -19,6 +19,18 @@ What the capture shows:
     worker keys or encrypted APIs. The detail pages therefore list the
     players that resolve on the box (the Vidsrc list, named after ZetMoon's
     buttons where they are the same player).
+  * The buttons are in two groups. "External Player" (Cinesrc ... Mapple)
+    embeds the other site's page. "Main Player" (Tea, Loto, Hunu, Seefa,
+    reelvault, Holly, Orion, Killjoy, Raze, Zeon, Levi) is ZetMoon's own
+    player fed by scrapers that read other sites through a CORS relay
+    (proxy.semoteb377.workers.dev?id=base64(hex(url XOR 0x7c))):
+        Tea      lordflix.app -> kembed worker (AES-wrapped key) -> kaembed.net
+        Loto/Hunu filesun.sbs/embed/movie/<imdb> -> sun worker -> embedsun.cc
+        Holly    hollymoviehd.cc (WP admin-ajax) -> goodstream.cc
+        Orion    api.insertunit.ws/embed/imdb/<imdb> (separate audio tracks)
+        Killjoy  m4uhdtv.tv,  Raze lucky-smoke worker,  Zeon fzmovies.live +
+                 vidapi.xyz/embed/movie/<tmdb> -> vscdn.xyz
+    Zeon's vidapi.xyz route is the only one that needs no per-site key.
 """
 import re
 
@@ -41,6 +53,8 @@ _SERVERS = (
     ("Nest", "https://vidnest.fun/movie/{i}", "https://vidnest.fun/tv/{i}/{s}/{e}"),
     ("MoviesAPI", "https://moviesapi.to/movie/{i}", "https://moviesapi.to/tv/{i}/{s}/{e}"),
     ("Vidplay", "https://vaplayer.ru/embed/movie/{i}", "https://vaplayer.ru/embed/tv/{i}/{s}/{e}"),
+    # Main Player "Zeon": vidapi.xyz -> vscdn.xyz (packed JW player, hls3 .txt playlist)
+    ("Zeon", "https://vidapi.xyz/embed/movie/{i}", "https://vidapi.xyz/embed/tv/{i}/{s}/{e}"),
 )
 
 
