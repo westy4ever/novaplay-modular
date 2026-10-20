@@ -2967,6 +2967,33 @@ def resolve_wingst(url, referer=None):
     return resolve(url, referer)
 
 
+def resolve_vidapi(url, referer=None):
+    """[2026-10-21] vidapi.xyz/embed/{movie,tv}/<id> (ZetMoon "Zeon"): the page
+    keeps its player in <iframe id="iframesrc" data-src=
+    "https://stream.vidapi.xyz/swish?id=<code>">, a StreamWish clone served as
+    vscdn.xyz/e/<code> (packed JW player). Older pages: vidsrc-family path."""
+    try:
+        html, final = fetch(url, referer=referer or "https://zetmoon.live/", timeout=15)
+        html = html_module.unescape(html or "")
+        codes = re.findall(r'(?:stream\.vidapi\.xyz|vidapi\.xyz)/swish\?id=([A-Za-z0-9]+)', html)
+        for m in re.finditer(r'data-src=["\']([^"\']+)', html):
+            u = m.group(1)
+            if "swish" not in u and u.startswith("http") and "about:blank" not in u:
+                log("resolve_vidapi: other player {}".format(u[:90]))
+        for code in dict.fromkeys(codes):
+            for host in ("vscdn.xyz",):
+                emb = "https://{}/e/{}".format(host, code)
+                r = resolve_streamwish(emb)
+                if r:
+                    log("resolve_vidapi: {} -> {}".format(emb, r[:90]))
+                    return r
+        if not codes:
+            log("resolve_vidapi: no swish player on {}".format(url[:90]))
+    except Exception as e:
+        log("resolve_vidapi error: {}".format(e))
+    return resolve_vidsrc_family(url, referer=referer)
+
+
 def resolve_yapgrid(url, referer=None):
     """[NEW 2026-10-18] A browser recording of SFlix's YapGrid server showed its
     player loading vsembed.ru (VidSrc-Embed's player) and playing from the same
@@ -4101,7 +4128,8 @@ def resolve_megamax(url, referer=None):
 HOST_RESOLVERS = {
     # ─── OnlyFlix server tabs — vidsrc-family players (2026-09-24) ──────
     "vidfast.vc":   resolve_vidvm_family,
-    "vidapi.xyz":   resolve_vidsrc_family,
+    "vidapi.xyz":   resolve_vidapi,
+    "vscdn.xyz":    resolve_streamwish,
     "cdnm.ink":     resolve_vidsrc_family,   # share.cdnm.ink
     "nontongo":     resolve_vidsrc_family,   # sv2.nontongo.stream / .day
 
