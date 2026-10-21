@@ -475,12 +475,19 @@ def _encode_unicode_url(url):
 # [PATCH 103] URLs of these hosts appear on ordinary pages (analytics beacon, CDN libraries)
 _BENIGN_CF_URL_RE = re.compile(
     r'https?://[^\s"\'<>]*(?:cloudflareinsights|cdnjs\.cloudflare)[^\s"\'<>]*', re.I)
+# [2026-10-21] Cloudflare's passive "JS detections" snippet (window.__CF$cv$params
+# + /cdn-cgi/challenge-platform/scripts/jsd/main.js) rides along on ordinary
+# pages -- e.g. the ~10 KB cdnmovies player -- and is not a challenge (real ones
+# load .../challenge-platform/h/<x>/orchestrate/...).
+_BENIGN_CF_JSD_RE = re.compile(
+    r'(?:https?://[^\s"\'<>]*)?/cdn-cgi/challenge-platform/(?:h/[a-z]/)?scripts/jsd/[^\s"\'<>;]*', re.I)
 
 
 def _is_cloudflare_challenge(html):
     """[PATCH 103] See _is_cloudflare_challenge_raw; benign Cloudflare-hosted URLs are ignored first."""
     if html:
         html = _BENIGN_CF_URL_RE.sub(" ", html)
+        html = _BENIGN_CF_JSD_RE.sub(" ", html)
     return _is_cloudflare_challenge_raw(html)
 
 
