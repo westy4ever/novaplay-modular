@@ -1,12 +1,26 @@
 # -*- coding: utf-8 -*-
-"""NovaPlay — settings screen + tools & diagnostics menu.
+"""NovaPlay — Settings screen (panel style, 2026-10-21).
 
-Adds (this revision):
-  * [A2] "📥 Downloads Manager" entry in the tools menu, opening
-    the new NovaPlayDownloads screen.
-  * [A3] "⏭️ Next-Episode Delay" entry — a ChoiceBox for the seconds
-    the auto-next card counts down before auto-starting.
+Layout (1920x1080): header with logo, title and clock; a SECTIONS sidebar
+(Playback, Subtitles, Sources & Network, Library & Display, Tools, About)
+with box info underneath; a 3-column grid of setting cards showing their
+current value; and a colour-key bar at the bottom.
+
+Keys
+  ▲ ▼          sidebar: section          cards: move up / down
+  ◀ ▶          cards: move; ◀ from the first column goes back to the sidebar
+  OK           sidebar: open the cards   cards: change / open the setting
+  RED GREEN YELLOW BLUE   Proxy, adult content, TMDb key, TorrServer URL
+  INFO         TMDb: back to the built-in key
+  MENU         jump to Tools
+  EXIT         close
+
+Icons: images/settings/*.png (tools/make_settings_icons.py).
 """
+import os
+import socket
+import sys
+import time
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
@@ -14,146 +28,559 @@ from Screens.ChoiceBox import ChoiceBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
-from Components.ScrollLabel import ScrollLabel
+from Components.Pixmap import Pixmap
+from enigma import eTimer
 
-from plugin_common import _PLUGIN_VERSION
+try:
+    from skin import parseColor
+except Exception:
+    parseColor = None
+
+from plugin_common import _PLUGIN_VERSION, PLUGIN_PATH, my_log
 from plugin_gridlist import scale_skin_xml
-from plugin_state import _get_config, _set_config, _PLUGIN_OWNER, _favorite_items, _history_items, _DEFAULT_TMDB_API_KEY
+from plugin_state import (_get_config, _set_config, _PLUGIN_OWNER, _favorite_items,
+                          _history_items, _DEFAULT_TMDB_API_KEY)
 from plugin_util import _site_label, _site_tagline
 from novaplay_diagnostics import NovaDiagnosticsScreen
 from install_dependencies import open_installer_with_restart, open_restart_prompt
 from plugin_screen_downloads import NovaPlayDownloads
 
+_ICONS = os.path.join(PLUGIN_PATH, "images", "settings")
+
+GOLD = "#F2C230"
+WHITE = "#FFFFFF"
+TEXT = "#D6DCE5"
+MUTED = "#A3ADBB"
+CARD = "#161C26"
+EDGE = "#262E3B"
+ROW_ON = "#222B3A"
+PANEL = "#121822"
+
+ROWS = 6            # sidebar sections
+CARDS = 9           # 3 x 3 grid
+COLS = 3
+_SIDE_Y0, _SIDE_STEP = 214, 74
+_CX = (430, 921, 1412)
+_CY = (222, 474, 726)
+_CW, _CH = 468, 230
+
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+_DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def _skin():
+    p = PLUGIN_PATH
+    parts = ["""
+    <screen name="NovaPlaySettings" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="#0C1017">
+        <eLabel position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="0" />
+        <ePixmap position="40,30" size="84,84" pixmap="{p}/images/plugin.png" alphatest="blend" scale="1" zPosition="2" />
+        <widget name="title" position="146,34" size="1000,52" font="Bold;40" foregroundColor="{gold}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+        <widget name="subtitle" position="146,88" size="1000,32" font="Regular;22" foregroundColor="{muted}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+        <widget name="clock_time" position="1380,22" size="500,64" font="Bold;54" halign="right" foregroundColor="{white}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+        <widget name="clock_date" position="1280,90" size="600,32" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+
+        <widget name="sideEdge" position="40,150" size="360,810" backgroundColor="{gold}" cornerRadius="16" zPosition="1" />
+        <eLabel position="42,152" size="356,806" backgroundColor="{panel}" cornerRadius="14" zPosition="2" />
+        <eLabel position="68,174" size="300,30" text="SECTIONS" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <eLabel position="68,690" size="304,1" backgroundColor="#2A3240" zPosition="3" />
+        <eLabel position="68,704" size="300,30" text="SYSTEM" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="sysinfo" position="68,740" size="316,212" font="Regular;22" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="3" />
+
+        <widget name="secTitle" position="430,148" size="1000,58" font="Bold;42" foregroundColor="{white}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+        <widget name="secCount" position="1380,162" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+
+        <widget name="aboutBox" position="430,222" size="1450,734" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
+        <widget name="aboutLeft" position="470,252" size="760,680" font="Regular;24" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aboutRight" position="1270,252" size="580,680" font="Regular;24" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+
+        <eLabel position="40,976" size="1840,76" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
+        <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="2" />
+        <widget name="key_red" position="106,994" size="230,40" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <eLabel position="352,1003" size="22,22" backgroundColor="#30A46C" cornerRadius="11" zPosition="2" />
+        <widget name="key_green" position="386,994" size="290,40" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <eLabel position="692,1003" size="22,22" backgroundColor="#F2C230" cornerRadius="11" zPosition="2" />
+        <widget name="key_yellow" position="726,994" size="230,40" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <eLabel position="972,1003" size="22,22" backgroundColor="#3E7BFA" cornerRadius="11" zPosition="2" />
+        <widget name="key_blue" position="1006,994" size="230,40" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <widget name="hint" position="1250,994" size="600,40" font="Regular;24" halign="right" valign="center" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="2" />
+    """.format(p=p, gold=GOLD, muted=MUTED, white=WHITE, panel=PANEL, card=CARD, text=TEXT)]
+    for i in range(ROWS):
+        y = _SIDE_Y0 + i * _SIDE_STEP
+        parts.append("""
+        <widget name="rowBg{i}" position="54,{y}" size="332,66" backgroundColor="{panel}" cornerRadius="10" zPosition="3" />
+        <widget name="rowBar{i}" position="54,{y}" size="5,66" backgroundColor="{gold}" zPosition="5" />
+        <widget name="rowIcon{i}" position="72,{iy}" size="36,36" alphatest="blend" scale="1" zPosition="5" />
+        <widget name="rowText{i}" position="124,{y}" size="256,66" font="Regular;28" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        """.format(i=i, y=y, iy=y + 15, panel=PANEL, gold=GOLD, text=TEXT))
+    for i in range(CARDS):
+        x, y = _CX[i % COLS], _CY[i // COLS]
+        parts.append("""
+        <widget name="cEdge{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{edge}" cornerRadius="14" zPosition="2" />
+        <widget name="cBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
+        <widget name="cIconBg{i}" position="{ix},{iy}" size="72,72" backgroundColor="#232B38" cornerRadius="14" zPosition="4" />
+        <widget name="cIcon{i}" position="{px},{py}" size="44,44" alphatest="blend" scale="1" zPosition="5" />
+        <widget name="cTitle{i}" position="{tx},{ty}" size="336,40" font="Bold;30" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="5" />
+        <widget name="cValue{i}" position="{tx},{vy}" size="336,34" font="Bold;24" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="5" />
+        <widget name="cDesc{i}" position="{dx},{dy}" size="424,96" font="Regular;22" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="5" />
+        """.format(i=i, x=x, y=y, w=_CW, h=_CH, x3=x + 3, y3=y + 3, w3=_CW - 6, h3=_CH - 6,
+                   ix=x + 22, iy=y + 22, px=x + 36, py=y + 36, tx=x + 112, ty=y + 26, vy=y + 68,
+                   dx=x + 24, dy=y + 114, edge=EDGE, card=CARD, white=WHITE, gold=GOLD))
+    parts.append("</screen>")
+    return "".join(parts)
+
+
+# ─── small helpers ──────────────────────────────────────────────────────
+
+def _on(key, default="true"):
+    return str(_get_config(key, default)).lower() in ("true", "1", "yes", "on")
+
+
+def _int(key, default):
+    try:
+        return int(_get_config(key, str(default)) or default)
+    except Exception:
+        return default
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def _system_lines():
+    model = _read("/proc/stb/info/vumodel")
+    model = ("Vu+ " + model.upper()) if model else (_read("/proc/stb/info/model") or _read("/etc/hostname") or "Enigma2")
+    image = ""
+    iv = _read("/etc/image-version")
+    if iv:
+        kv = dict(l.split("=", 1) for l in iv.splitlines() if "=" in l)
+        image = "{} {}".format(kv.get("distro", ""), kv.get("imageversion", "")).strip()
+    if not image:
+        image = (_read("/etc/issue").splitlines() or [""])[0].replace("\\n", "").replace("\\l", "").strip()
+    ip = "—"
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+    disk = "—"
+    for mnt in ("/media/hdd", "/media/usb", "/"):
+        try:
+            if mnt != "/" and not os.path.ismount(mnt):
+                continue
+            st = os.statvfs(mnt)
+            disk = "{:.1f} GB free".format(st.f_bavail * st.f_frsize / 1e9)
+            break
+        except Exception:
+            continue
+    return "\n".join([
+        "Box: " + model,
+        "Image: " + (image or "—")[:22],
+        "Python: " + sys.version.split()[0],
+        "IP: " + ip,
+        "Disk: " + disk,
+        "Favorites {}  ·  History {}".format(len(_favorite_items()), len(_history_items())),
+    ])
+
 
 class NovaPlaySettings(Screen):
-    skin = scale_skin_xml("""
-    <screen name="NovaPlaySettings" position="center,center" size="1920,1080" flags="wfNoBorder">
-        <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
-        <widget name="title" position="60,30" size="900,57" font="Regular;45" foregroundColor="#00E5FF" transparent="1" zPosition="3" />
-        <widget name="owner" position="60,96" size="600,36" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="3" />
-        <widget name="site" position="60,138" size="1800,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="3" />
-        <widget name="body_box" position="60,195" size="1800,720" backgroundColor="#161B22" zPosition="2" />
-        <widget name="body" position="90,218" size="1740,675" font="Regular;28" foregroundColor="#F0F6FC" transparent="1" zPosition="3" />
-        <widget name="hint" position="60,939" size="1800,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_red_label" position="60,987" size="300,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_green_label" position="450,987" size="450,36" font="Regular;24" foregroundColor="#39D98A" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_yellow_label" position="990,987" size="450,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_blue_label" position="1500,987" size="360,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="3" halign="center" />
-    </screen>
-    """)
+    skin = scale_skin_xml(_skin())
 
-    def __init__(self, session, current_site):
+    SECTIONS = (
+        ("playback", "Playback", "play"),
+        ("subtitles", "Subtitles", "cc"),
+        ("network", "Sources & Network", "globe"),
+        ("library", "Library & Display", "star"),
+        ("tools", "Tools", "tools"),
+        ("about", "About", "info"),
+    )
+
+    def __init__(self, session, current_site=None):
         Screen.__init__(self, session)
         self._current_site = current_site
-        self["bg"] = Label("")
-        self["title"] = Label("Settings & About")
-        self["owner"] = Label("")
-        self["site"] = Label("")
-        self["body_box"] = Label("")
-        self["body"] = ScrollLabel("")
-        self["hint"] = Label("OK/Back close  |  Red: Proxy  |  Green: Adult  |  Yellow: TMDb  |  Blue: TorrServer  |  Menu: Tools & diagnostics")
-        self["key_red_label"] = Label("Set Proxy")
-        self["key_green_label"] = Label("Show adult content")
-        self["key_yellow_label"] = Label("Edit TMDb key")
-        self["key_blue_label"] = Label("Edit TorrServer URL")
+        self._sec = 0
+        self._card = 0
+        self._zone = "side"          # "side" | "cards"
+        self._items = []
+
+        self["title"] = Label("Settings")
+        self["subtitle"] = Label("NovaPlay {}  |  by {}".format(_PLUGIN_VERSION, _get_config("owner", _PLUGIN_OWNER)))
+        self["clock_time"] = Label("")
+        self["clock_date"] = Label("")
+        self["sideEdge"] = Label("")
+        self["sysinfo"] = Label("")
+        self["secTitle"] = Label("")
+        self["secCount"] = Label("")
+        self["aboutBox"] = Label("")
+        self["aboutLeft"] = Label("")
+        self["aboutRight"] = Label("")
+        self["key_red"] = Label("Proxy")
+        self["key_green"] = Label("Adult content")
+        self["key_yellow"] = Label("TMDb key")
+        self["key_blue"] = Label("TorrServer")
+        self["hint"] = Label("")
+        for i in range(ROWS):
+            self["rowBg%d" % i] = Label("")
+            self["rowBar%d" % i] = Label("")
+            self["rowIcon%d" % i] = Pixmap()
+            self["rowText%d" % i] = Label(self.SECTIONS[i][1])
+        for i in range(CARDS):
+            for n in ("cEdge", "cBox", "cIconBg", "cTitle", "cValue", "cDesc"):
+                self["%s%d" % (n, i)] = Label("")
+            self["cIcon%d" % i] = Pixmap()
+
         self["actions"] = ActionMap(
             ["OkCancelActions", "DirectionActions", "ColorActions",
-             "InfobarEPGActions", "InfobarMenuActions", "MenuActions",
-             "ButtonSetupActions"], {
-                "ok": self.close,
+             "InfobarEPGActions", "InfobarMenuActions", "MenuActions"], {
+                "ok": self._ok,
                 "cancel": self.close,
-                "up": self["body"].pageUp,
-                "down": self["body"].pageDown,
-                "left": self["body"].pageUp,
-                "right": self["body"].pageDown,
+                "up": lambda: self._move(0, -1),
+                "down": lambda: self._move(0, 1),
+                "left": lambda: self._move(-1, 0),
+                "right": lambda: self._move(1, 0),
                 "red": self._edit_proxy,
                 "green": self._toggleAdult,
                 "yellow": self._edit_tmdb_key,
                 "blue": self._edit_torrserver_url,
                 "showEventInfo": self._clear_tmdb_key,
-                "menu": self._open_tools_menu,
-                "showMenu": self._open_tools_menu,
-                "mainMenu": self._open_tools_menu,
+                "menu": self._jumpTools,
+                "showMenu": self._jumpTools,
+                "mainMenu": self._jumpTools,
             }, -1)
+
+        self._clock = eTimer()
+        self._clock.callback.append(self._tick)
+        self.onLayoutFinish.append(self._start)
+        self.onClose.append(self._clock.stop)
+
+    # ─── lifecycle ──────────────────────────────────────────────────────
+
+    def _start(self):
+        try:
+            self["sysinfo"].setText(_system_lines())
+        except Exception as e:
+            my_log("settings sysinfo: {}".format(e))
+        self._tick()
+        self._clock.start(10000, False)
         self._refresh()
 
-    def _toggleAdult(self):
-        current = _get_config("show_adult", "false")
-        new_val = "true" if current == "false" else "false"
-        _set_config("show_adult", new_val)
-        msg = "Adult content enabled" if new_val == "true" else "Adult content hidden"
-        self.session.open(MessageBox, msg, MessageBox.TYPE_INFO, timeout=3)
-        self._refresh()
+    def _tick(self):
+        t = time.localtime()
+        self["clock_time"].setText("{}:{:02d}".format(t.tm_hour % 12 or 12, t.tm_min))
+        self["clock_date"].setText("{} {} {}".format(_DAYS[t.tm_wday], t.tm_mday, _MONTHS[t.tm_mon - 1]))
+
+    # ─── items per section ──────────────────────────────────────────────
+    # (key, icon, title, value, description)
+
+    def _build(self, sec):
+        if sec == "playback":
+            mq = str(_get_config("max_quality", "auto") or "auto").strip().lower()
+            return [
+                ("maxq", "hd", "Max Quality", {"auto": "Auto"}.get(mq, mq),
+                 "Highest stream quality picked automatically"),
+                ("nxdelay", "next", "Next Episode", "{} seconds".format(_int("next_episode_delay", 10)),
+                 "Countdown before the next episode starts"),
+                ("nxprompt", "ask", "End-of-Movie Menu", "On" if _on("next_episode_prompt") else "Off",
+                 "Near the end, ask: next episode, mark watched or save position"),
+                ("skip", "skip", "Skip Intro", "+{} seconds".format(_int("skip_intro_secs", 90)),
+                 "How far the green key jumps at the start"),
+                ("qpick", "pick", "Remember Quality", "On" if _get_config("quality_auto_pick", False) else "Off",
+                 "Reuse the quality picked last time for a title instead of asking"),
+            ]
+        if sec == "subtitles":
+            return [
+                ("autosub", "cc", "Auto Subtitles", "On" if _on("autosub") else "Off",
+                 "Load a matching subtitle when playback starts"),
+                ("studio", "studio", "Subtitle Studio", "On" if _on("substudio_mode", "false") else "Off",
+                 "Styled subtitles: size, font, colour, outline and position"),
+                ("subsettings", "sliders", "Subtitle Settings", "Open  ›",
+                 "Provider API keys, subtitle folder and cache"),
+            ]
+        if sec == "network":
+            key = (_get_config("tmdb_api_key", "") or "").strip()
+            keytxt = ("Built-in key" if key == _DEFAULT_TMDB_API_KEY
+                      else ("••••" + key[-4:]) if key else "Not set")
+            proxy = (_get_config("browser_proxy", "") or "").strip()
+            ts = (_get_config("torrserver_url", "") or "").strip()
+            return [
+                ("tmdb", "key", "TMDb Key", keytxt,
+                 "Posters, plots and ratings. INFO key: back to the built-in key"),
+                ("proxy", "shield", "Browser Proxy", proxy.replace("http://", "") or "Off",
+                 "Helper for sites behind Cloudflare (http://IP:PORT)"),
+                ("torrserver", "magnet", "TorrServer", ts.replace("http://", "") or "Not set",
+                 "Plays magnet links (http://IP:PORT)"),
+                ("adult", "adult", "Adult Content", "Shown" if _get_config("show_adult", "false") == "true" else "Hidden",
+                 "Show or hide adult sites and categories"),
+                ("transmission", "transmission", "Transmission", self._trState(),
+                 "Starts only for Download to HDD, pauses while you watch"),
+            ]
+        if sec == "library":
+            return [
+                ("layout", "grid", "Poster Layout",
+                 "Grid" if _get_config("layout_style", "carousel") == "grid" else "Carousel",
+                 "Carousel or grid view for site posters"),
+                ("watchedbw", "contrast", "Watched Posters",
+                 "Black & white" if _get_config("watched_poster_bw", False) else "Colour",
+                 "How posters you already watched are shown"),
+                ("downloads", "download", "Downloads", "Open  ›",
+                 "Downloads and recordings in progress"),
+            ]
+        if sec == "tools":
+            return [
+                ("diagnostics", "pulse", "Diagnostics", "Run  ›",
+                 "Check sites, proxy, TMDb and the player"),
+                ("downloads", "download", "Downloads", "Open  ›",
+                 "Downloads and recordings in progress"),
+                ("install", "package", "Install Dependencies", "Run  ›",
+                 "Install missing packages the plugin needs"),
+                ("restart", "restart", "Restart Enigma2", "Restart  ›",
+                 "Restart the box interface"),
+            ]
+        return []
+
+    def _trState(self):
+        try:
+            import novaplay_transmission
+            if not os.path.exists(novaplay_transmission.DAEMON):
+                return "Not installed"
+            return "Running" if novaplay_transmission._running_args() is not None else "Off (on demand)"
+        except Exception:
+            return "—"
+
+    # ─── painting ───────────────────────────────────────────────────────
+
+    def _color(self, name, bg=None, fg=None):
+        inst = self[name].instance
+        if inst is None or parseColor is None:
+            return
+        if bg:
+            inst.setBackgroundColor(parseColor(bg))
+        if fg:
+            inst.setForegroundColor(parseColor(fg))
+        inst.invalidate()
+
+    def _icon(self, name, file):
+        inst = self[name].instance
+        if inst is not None:
+            path = os.path.join(_ICONS, file)
+            if os.path.exists(path):
+                inst.setPixmapFromFile(path)
 
     def _refresh(self):
-        self["owner"].setText("Owner: {}".format(_get_config("owner", _PLUGIN_OWNER)))
-        self["site"].setText("Current source: {}  |  {}".format(_site_label(self._current_site), _site_tagline(self._current_site)))
+        key = self.SECTIONS[self._sec][0]
+        self._items = self._build(key)
+        if self._items:
+            self._card = min(self._card, len(self._items) - 1)
+        side = self._zone == "side"
+        # sidebar
+        self._color("sideEdge", bg=GOLD if side else EDGE)
+        for i, (_k, _t, ic) in enumerate(self.SECTIONS):
+            on = i == self._sec
+            self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
+            self["rowBar%d" % i].show() if on else self["rowBar%d" % i].hide()
+            self._color("rowText%d" % i, fg=WHITE if on else TEXT)
+            self._icon("rowIcon%d" % i, "side_%s_%s.png" % (ic, "on" if on else "off"))
+        # header of the main area
+        self["secTitle"].setText(self.SECTIONS[self._sec][1])
+        about = key == "about"
+        self["secCount"].setText("" if about else "{} items".format(len(self._items)))
+        for n in ("aboutBox", "aboutLeft", "aboutRight"):
+            self[n].show() if about else self[n].hide()
+        if about:
+            self._paintAbout()
+        # cards
+        for i in range(CARDS):
+            names = [n % i for n in ("cEdge%d", "cBox%d", "cIconBg%d", "cIcon%d", "cTitle%d", "cValue%d", "cDesc%d")]
+            if i >= len(self._items):
+                for n in names:
+                    self[n].hide()
+                continue
+            for n in names:
+                self[n].show()
+            _k, ic, title, value, desc = self._items[i]
+            sel = (not side) and i == self._card
+            self._color("cEdge%d" % i, bg=GOLD if sel else EDGE)
+            self["cTitle%d" % i].setText(title)
+            self._color("cTitle%d" % i, fg=GOLD if sel else WHITE)
+            self["cValue%d" % i].setText(str(value))
+            self["cDesc%d" % i].setText(desc)
+            self._icon("cIcon%d" % i, "card_%s.png" % ic)
+        if side:
+            self["hint"].setText("OK  Open    ▲ ▼  Section    EXIT  Close")
+        else:
+            self["hint"].setText("OK  Change    ◀  Sections    EXIT  Close")
+
+    def _paintAbout(self):
         api_key = (_get_config("tmdb_api_key", "") or "").strip()
-        ts_url = (_get_config("torrserver_url", "") or "").strip()
-        proxy = (_get_config("browser_proxy", "") or "").strip()
-        layout = _get_config("layout_style", "carousel")
-        adult = _get_config("show_adult", "false")
-        self["key_green_label"].setText("Disable adult content" if adult == "true" else "Enable adult content")
-        maxq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
-        if maxq not in ("AUTO", "480P", "720P", "1080P"):
-            maxq = "AUTO"
-        try:
-            _nxdelay = int(_get_config("next_episode_delay", "10") or 10)
-        except Exception:
-            _nxdelay = 10
-        body = (
-            "NovaPlay Media Center v{version}\n\n"
-            "Layout: {layout_style}\n"
-            "Adult content: {adult_status}\n"
-            "Max stream quality: {maxq}\n"
-            "Next-episode countdown: {nxdelay} seconds\n\n"
-            "TMDb:\n• Status: {tmdb_status}\n• Key: {tmdb_key}\n\n"
-            "TorrServer:\n• Status: {ts_status}\n• Address: {ts_url}\n\n"
-            "Browser Proxy:\n• Status: {proxy_status}\n• Address: {proxy_addr}\n\n"
-            "Library:\n• Favorites: {fav_count}\n• History: {hist_count}\n\n"
-            "How to use:\n• Green: toggle adult content\n"
-            "• Red: Proxy\n• Yellow: TMDb API Key\n• Blue: TorrServer URL\n"
-            "• Menu: Tools & diagnostics (subtitles, diagnostics, install, restart, downloads)\n"
-            "• Info: delete your key and use the built-in one"
-        ).format(
-            version=_PLUGIN_VERSION,
-            layout_style=layout.upper(),
-            adult_status="On (shown)" if adult == "true" else "Hidden (family safe)",
-            maxq=maxq,
-            nxdelay=_nxdelay,
-            tmdb_status="On" if api_key else "Off",
-            # [FIX] after "clear" (Info) the plugin falls back to its built-in key;
-            # say so, instead of showing a key as if clearing did nothing
-            tmdb_key=("Built-in key (default)" if api_key == _DEFAULT_TMDB_API_KEY
-                      else ("********" + api_key[-4:]) if api_key else "Not set"),
-            ts_status="On" if ts_url else "Off",
-            ts_url=ts_url or "Not set",
-            proxy_status="On" if proxy else "Off",
-            proxy_addr=proxy or "Not set",
-            fav_count=len(_favorite_items()),
-            hist_count=len(_history_items()),
-        )
-        self["body"].setText(body)
+        self["aboutLeft"].setText(
+            "NovaPlay Media Center {}\n\n"
+            "Movies, series and anime from many sites in one place,\n"
+            "with TMDb posters and plots, subtitles and resume.\n\n"
+            "Current source\n  {}\n  {}\n\n"
+            "Update (PuTTY)\n  wget -qO /tmp/install_novaplay.sh https://raw.githubusercontent.com/\n"
+            "  westy4ever/novaplay-modular/main/install_novaplay.sh && sh /tmp/install_novaplay.sh".format(
+                _PLUGIN_VERSION, _site_label(self._current_site) if self._current_site else "—",
+                (_site_tagline(self._current_site) if self._current_site else "")[:60]))
+        self["aboutRight"].setText(
+            "Developer\n  {}\n\n"
+            "GitHub\n  github.com/westy4ever/novaplay-modular\n\n"
+            "TMDb\n  {}\n\n"
+            "Library\n  Favorites: {}\n  History: {}".format(
+                _get_config("owner", _PLUGIN_OWNER),
+                "Built-in key" if api_key == _DEFAULT_TMDB_API_KEY else ("Your key" if api_key else "Off"),
+                len(_favorite_items()), len(_history_items())))
+
+    # ─── navigation ─────────────────────────────────────────────────────
+
+    def _move(self, dx, dy):
+        if self._zone == "side":
+            if dy:
+                self._sec = (self._sec + dy) % ROWS
+                self._card = 0
+            elif dx > 0 and self._items:
+                self._zone = "cards"
+            self._refresh()
+            return
+        n = len(self._items)
+        col, row = self._card % COLS, self._card // COLS
+        if dx < 0 and col == 0:
+            self._zone = "side"
+        elif dx:
+            self._card = max(0, min(n - 1, self._card + dx))
+        elif dy:
+            t = self._card + dy * COLS
+            if 0 <= t < n:
+                self._card = t
+            elif dy > 0 and row < (n - 1) // COLS:
+                self._card = n - 1
+        self._refresh()
+
+    def _jumpTools(self):
+        self._sec = 4
+        self._card = 0
+        self._zone = "cards"
+        self._refresh()
+
+    def _ok(self):
+        if self._zone == "side":
+            if self._items:
+                self._zone = "cards"
+                self._refresh()
+            return
+        if not self._items:
+            return
+        self._action(self._items[self._card][0])
+
+    def _toggle(self, key, default="true"):
+        _set_config(key, "false" if _on(key, default) else "true")
+        self._refresh()
+
+    def _action(self, key):
+        if key == "maxq":
+            self._openMaxQuality()
+        elif key == "nxdelay":
+            self._openNextDelay()
+        elif key == "nxprompt":
+            self._toggle("next_episode_prompt")
+        elif key == "skip":
+            self._choose("Skip Intro", "skip_intro_secs", _int("skip_intro_secs", 90),
+                         [("+{} seconds".format(v), v) for v in (30, 45, 60, 75, 90, 120, 150, 180)])
+        elif key == "qpick":
+            _set_config("quality_auto_pick", not bool(_get_config("quality_auto_pick", False)))
+            self._refresh()
+        elif key == "autosub":
+            self._toggle("autosub")
+        elif key == "studio":
+            self._toggle("substudio_mode", "false")
+        elif key == "subsettings":
+            from novaplay_subtitles import NovaSubtitleSettings
+            self.session.openWithCallback(lambda *a: self._refresh(), NovaSubtitleSettings)
+        elif key == "tmdb":
+            self._edit_tmdb_key()
+        elif key == "proxy":
+            self._edit_proxy()
+        elif key == "torrserver":
+            self._edit_torrserver_url()
+        elif key == "adult":
+            self._toggleAdult()
+        elif key == "transmission":
+            self._transmissionInfo()
+        elif key == "layout":
+            _set_config("layout_style", "carousel" if _get_config("layout_style", "carousel") == "grid" else "grid")
+            self._refresh()
+        elif key == "watchedbw":
+            _set_config("watched_poster_bw", not bool(_get_config("watched_poster_bw", False)))
+            self._refresh()
+        elif key == "downloads":
+            self.session.openWithCallback(lambda *a: self._refresh(), NovaPlayDownloads)
+        elif key == "diagnostics":
+            self.session.open(NovaDiagnosticsScreen)
+        elif key == "install":
+            open_installer_with_restart(self.session)
+        elif key == "restart":
+            open_restart_prompt(self.session)
+
+    def _choose(self, title, cfg_key, current, options):
+        items = [(("● " if v == current else "   ") + lbl, v) for lbl, v in options]
+
+        def _picked(choice):
+            if not choice:
+                return
+            _set_config(cfg_key, str(choice[1]))
+            self._refresh()
+        self.session.openWithCallback(_picked, ChoiceBox, title=title, list=items)
+
+    def _transmissionInfo(self):
+        state = self._trState()
+        self.session.open(MessageBox,
+                          "Transmission: {}\n\nNovaPlay starts it only when you choose \"Download to HDD\", "
+                          "pauses its torrents while you watch and stops it when nothing is left to download.".format(state),
+                          MessageBox.TYPE_INFO, timeout=10)
+
+    # ─── existing actions (colour keys) ─────────────────────────────────
+
+    def _toggleAdult(self):
+        new_val = "true" if _get_config("show_adult", "false") == "false" else "false"
+        _set_config("show_adult", new_val)
+        self.session.open(MessageBox, "Adult content shown" if new_val == "true" else "Adult content hidden",
+                          MessageBox.TYPE_INFO, timeout=3)
+        self._refresh()
 
     def _edit_proxy(self):
-        self.session.openWithCallback(self._on_proxy_entered, VirtualKeyBoard, title="Proxy: http://IP:PORT  (e.g. http://192.168.1.100:5000)", text=_get_config("browser_proxy", ""))
+        self.session.openWithCallback(self._on_proxy_entered, VirtualKeyBoard,
+                                      title="Proxy: http://IP:PORT  (e.g. http://192.168.1.100:5000)",
+                                      text=_get_config("browser_proxy", ""))
+
     def _on_proxy_entered(self, value):
-        if value is None: return
+        if value is None:
+            return
         v = value.strip()
         if v and not (v.startswith("http://") or v.startswith("https://")):
-            self.session.open(MessageBox, "Format: http://IP:PORT\nExample: http://192.168.1.100:5000", MessageBox.TYPE_WARNING, timeout=6)
+            self.session.open(MessageBox, "Format: http://IP:PORT\nExample: http://192.168.1.100:5000",
+                              MessageBox.TYPE_WARNING, timeout=6)
             return
         _set_config("browser_proxy", v)
         try:
             from extractors.base import set_browser_proxy
             set_browser_proxy(v)
-        except Exception: pass
+        except Exception:
+            pass
         self._refresh()
 
     def _edit_tmdb_key(self):
-        self.session.openWithCallback(self._on_tmdb_key_entered, VirtualKeyBoard, title="TMDb API Key (32 characters — from themoviedb.org)", text=_get_config("tmdb_api_key", ""))
+        self.session.openWithCallback(self._on_tmdb_key_entered, VirtualKeyBoard,
+                                      title="TMDb API Key (32 characters — from themoviedb.org)",
+                                      text=_get_config("tmdb_api_key", ""))
+
     def _on_tmdb_key_entered(self, value):
-        if value is None: return
+        if value is None:
+            return
         _set_config("tmdb_api_key", value.strip())
         self._refresh()
 
@@ -162,104 +589,31 @@ class NovaPlaySettings(Screen):
         self._refresh()
 
     def _edit_torrserver_url(self):
-        self.session.openWithCallback(self._on_torrserver_url_entered, VirtualKeyBoard, title="TorrServer: http://IP:PORT  (e.g. http://127.0.0.1:8090)", text=_get_config("torrserver_url", ""))
+        self.session.openWithCallback(self._on_torrserver_url_entered, VirtualKeyBoard,
+                                      title="TorrServer: http://IP:PORT  (e.g. http://127.0.0.1:8090)",
+                                      text=_get_config("torrserver_url", ""))
+
     def _on_torrserver_url_entered(self, value):
-        if value is None: return
+        if value is None:
+            return
         _set_config("torrserver_url", value.strip())
         self._refresh()
 
-    def _open_tools_menu(self):
-        _mq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
-        if _mq not in ("AUTO", "480P", "720P", "1080P"):
-            _mq = "AUTO"
-        try:
-            _nxdelay = int(_get_config("next_episode_delay", "10") or 10)
-        except Exception:
-            _nxdelay = 10
-        choices = [
-            ("🛠️ System Diagnostics", "diagnostics"),
-            ("📥 Downloads Manager", "downloads"),
-            ("📦 Install Missing Dependencies", "install_deps"),
-            ("🎬 Subtitle Settings", "subtitles"),
-            ("🎚️ Max Stream Quality ({})".format(_mq), "maxq"),
-            ("⏭️ Next-Episode Delay ({}s)".format(_nxdelay), "nxdelay"),
-            ("🔄 Restart Enigma2", "restart"),
-        ]
-        self.session.openWithCallback(
-            self._on_tools_choice,
-            ChoiceBox,
-            title="Tools & Diagnostics",
-            list=choices
-        )
-
-    def _on_tools_choice(self, choice):
-        if not choice:
-            return
-        action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
-        if action == "diagnostics":
-            self.session.open(NovaDiagnosticsScreen)
-        elif action == "downloads":
-            self.session.open(NovaPlayDownloads)
-        elif action == "install_deps":
-            open_installer_with_restart(self.session)
-        elif action == "subtitles":
-            from novaplay_subtitles import NovaSubtitleSettings
-            self.session.open(NovaSubtitleSettings)
-        elif action == "maxq":
-            self._openMaxQuality()
-        elif action == "nxdelay":
-            self._openNextDelay()
-        elif action == "restart":
-            open_restart_prompt(self.session)
-
     def _openMaxQuality(self):
         current = str(_get_config("max_quality", "auto") or "auto").strip().lower()
-        options = [
+        self._choose("Max Stream Quality", "max_quality", current, [
             ("Auto (best available)", "auto"),
             ("480p — saves the most data", "480p"),
             ("720p — balanced (recommended)", "720p"),
             ("1080p — best quality", "1080p"),
-        ]
-        items = []
-        for label, value in options:
-            mark = "● " if value == current else "   "
-            items.append(("{}{}".format(mark, label), value))
-
-        def _picked(choice):
-            if not choice:
-                return
-            value = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
-            _set_config("max_quality", str(value))
-            self._refresh()
-
-        self.session.openWithCallback(_picked, ChoiceBox,
-                                      title="Max Stream Quality",
-                                      list=items)
+        ])
 
     def _openNextDelay(self):
-        try:
-            current = int(_get_config("next_episode_delay", "10") or 10)
-        except Exception:
-            current = 10
-        options = [
+        self._choose("Next-Episode Delay", "next_episode_delay", _int("next_episode_delay", 10), [
             ("5 seconds", 5), ("10 seconds (default)", 10), ("15 seconds", 15),
             ("20 seconds", 20), ("30 seconds", 30), ("60 seconds", 60),
-        ]
-        items = []
-        for label, value in options:
-            mark = "● " if value == current else "   "
-            items.append(("{}{}".format(mark, label), value))
+        ])
 
-        def _picked(choice):
-            if not choice:
-                return
-            value = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
-            try:
-                _set_config("next_episode_delay", str(int(value)))
-            except Exception:
-                pass
-            self._refresh()
-
-        self.session.openWithCallback(_picked, ChoiceBox,
-                                      title="Next-Episode Delay",
-                                      list=items)
+    # kept for callers of the old screen
+    def _open_tools_menu(self):
+        self._jumpTools()

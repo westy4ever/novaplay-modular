@@ -2815,7 +2815,22 @@ class NovaPlayHome(Screen):
 
     def _openSettings(self):
         from plugin_screen_settings import NovaPlaySettings
-        self.session.open(NovaPlaySettings, self._site)
+        self.session.openWithCallback(self._onSettingsClosed, NovaPlaySettings, self._site)
+
+    def _onSettingsClosed(self, *args):
+        """Apply a Poster Layout change made in Settings straight away."""
+        try:
+            new = _get_config("layout_style", "carousel") or "carousel"
+            if new == self._layout_style:
+                return
+            if self._display_mode == "poster":
+                # _onGreen toggles from the stored value: hand it the old one
+                _set_config("layout_style", self._layout_style)
+                self._onGreen()
+            else:
+                self._layout_style = new
+        except Exception as e:
+            my_log("settings close: {}".format(e))
 
     def _showLibrary(self, kind):
         if kind == "favorites":
