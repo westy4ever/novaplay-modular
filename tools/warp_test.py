@@ -109,6 +109,37 @@ def route(host):
     return ips
 
 
+# WARP answers on these too; lines that block UDP 2408 often leave others open
+_EP_IPS = ("162.159.192.1", "162.159.193.10", "162.159.195.1", "188.114.97.1")
+_EP_PORTS = (2408, 500, 1701, 4500, 854, 908, 1180, 3138, 7559, 8854)
+
+
+def _handshake_ok():
+    hs = sh("wg show {} latest-handshakes".format(IFACE), check=False)
+    return bool(hs) and not hs.rstrip().endswith("\t0") and hs.split()[-1] != "0"
+
+
+def scan(st, probe_ip):
+    """Try WARP endpoints/ports until a WireGuard handshake succeeds."""
+    tried = 0
+    for ip in (st["endpoint"].rsplit(":", 1)[0],) + _EP_IPS:
+        for port in _EP_PORTS:
+            ep = "{}:{}".format(ip, port)
+            tried += 1
+            sh("wg set {} peer {} endpoint {}".format(IFACE, st["peer_public_key"], ep), check=False)
+            sh("ping -c 1 -W 1 {}".format(probe_ip), check=False)     # pushes a handshake
+            for _ in range(4):
+                time.sleep(1)
+                if _handshake_ok():
+                    print("Handshake OK on {} (after {} tries)".format(ep, tried))
+                    st["endpoint"] = ep
+                    with open(STATE, "w") as f:
+                        json.dump(st, f)
+                    return ep
+            print("  {} -- no answer".format(ep))
+    return None
+
+
 def test(host):
     t = time.time()
     try:
@@ -139,9 +170,14 @@ def main():
     try:
         st = register()
         up(st)
-        route(host)
+        ips = route(host)
         time.sleep(2)
-        test(host)
+        if not test(host):
+            print("Trying other WARP endpoints/ports (about 3 s each) ...")
+            if scan(st, ips[0]):
+                test(host)
+            else:
+                print("RESULT: no WARP endpoint/port answered -- WARP is blocked on this line")
     except Exception as e:
         print("FAILED:", e)
 
