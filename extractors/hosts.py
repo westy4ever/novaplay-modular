@@ -3015,6 +3015,40 @@ _VIDAPI_HDRS = {
 }
 
 
+def _vscdn_pick_link(html, page_url):
+    """vscdn.xyz (StreamWish clone) page: links={"hls2": premilkyway.com/...,
+    "hls3": <x>.site/.../master.txt, "hls4": "/stream/.../master.m3u8"}.
+    The browser played hls4 (on vscdn.xyz itself, which the box reaches);
+    hls2 resolved on the box but never played (2026-10-21). Check them in
+    the order hls4, hls3, hls2 and return the first that serves a playlist."""
+    if not html:
+        return None
+    texts = [html] + _unpack_all(html)
+    links = {}
+    for t in texts:
+        for m in re.finditer(r'"(hls\d)"\s*:\s*"([^"]+)"', t):
+            links.setdefault(m.group(1), m.group(2).replace("\\/", "/"))
+    if not links:
+        return None
+    base = "{0.scheme}://{0.netloc}".format(urlparse(page_url))
+    ua = quote(_VIDAPI_HDRS["User-Agent"], safe="")
+    hdrs = {"User-Agent": _VIDAPI_HDRS["User-Agent"], "Origin": base, "Accept": "*/*",
+            "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"}
+    order = [k for k in ("hls4", "hls3", "hls2") if k in links] + \
+            sorted(k for k in links if k not in ("hls4", "hls3", "hls2"))
+    for k in order:
+        u = urljoin(base + "/", links[k])
+        try:
+            body, _f = fetch(u, referer=base + "/", timeout=10, max_retries=0, extra_headers=hdrs)
+        except Exception:
+            body = None
+        if body and "#EXTM3U" in body:
+            log("resolve_vidapi: vscdn {} serves the playlist".format(k))
+            return u + "|Referer={}/&Origin={}&User-Agent={}".format(base, base, ua)
+        log("resolve_vidapi: vscdn {} gave no playlist ({} bytes)".format(k, len(body or "")))
+    return None
+
+
 def resolve_vidapi(url, referer=None):
     """[2026-10-21] vidapi.xyz/embed/{movie,tv}/<id> (ZetMoon "Zeon"): the page
     keeps its player in <iframe id="iframesrc" data-src=
@@ -3057,7 +3091,8 @@ def resolve_vidapi(url, referer=None):
                                max_retries=0, extra_headers=_VIDAPI_HDRS)
             except Exception:
                 eh = ""
-            r = _streamwish_from_html(eh)
+            r = _vscdn_pick_link(eh, emb)
+            r = r or _streamwish_from_html(eh)
             if r and "|" not in r:
                 r = _correct_stream_url(r) + "|Referer=https://vscdn.xyz/&Origin=https://vscdn.xyz&User-Agent=" + \
                     quote(_VIDAPI_HDRS["User-Agent"], safe="")
