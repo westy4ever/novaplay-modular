@@ -415,14 +415,14 @@ def _mixdrop_wurl(html, referer_base):
         link = m.group(1)
         if link.startswith("//"):
             link = "https:" + link
-        return link + "|Referer={0}/&Origin={0}".format(referer_base)
+        return link + "|Referer={0}/&Origin={0}&User-Agent={1}".format(referer_base, quote(UA, safe=""))
     for txt in _unpack_all(html):
         m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', txt)
         if m:
             link = m.group(1)
             if link.startswith("//"):
                 link = "https:" + link
-            return link + "|Referer={0}/&Origin={0}".format(referer_base)
+            return link + "|Referer={0}/&Origin={0}&User-Agent={1}".format(referer_base, quote(UA, safe=""))
     return None
 
 
@@ -438,7 +438,9 @@ def resolve_mixdrop(url):
     # [2026-10-21] mxcontent.net answered 403 to Referer mixdrop.to for a link
     # issued by another Mixdrop mirror: send the issuing page's own origin
     try:
-        html, final = fetch(url, referer=url)
+        # the video link is checked against the browser that asked for it:
+        # fetch the page and play the video with the same User-Agent
+        html, final = fetch(url, referer=url, extra_headers={"User-Agent": UA})
         if not html:
             return None
         log("Mixdrop fetched {} bytes, MDCore present: {}".format(len(html), "MDCore" in html))
@@ -453,7 +455,7 @@ def resolve_mixdrop(url):
         # on the SAME mirror domain the "/f/" page redirected to).
         iframe_url = _follow_landing_iframe(html, final or url)
         if iframe_url:
-            html2, final2 = fetch(iframe_url, referer=final or url)
+            html2, final2 = fetch(iframe_url, referer=final or url, extra_headers={"User-Agent": UA})
             result = _mixdrop_wurl(html2, _origin(final2 or iframe_url))
             if result:
                 return result
@@ -2249,6 +2251,19 @@ def resolve_byselapuix(url):
                 if result:
                     return result
         return None
+    except Exception:
+        return None
+
+
+def resolve_byse_any(url, referer=None):
+    """[2026-10-21] any other "byse*" vanity domain (TopCinema: byseqekaho.com).
+    Byse mirrors use one of two known backends: the byselapuix landing page
+    (-> n1mwq.org player) or StreamWish's -- try both."""
+    r = resolve_byselapuix(url)
+    if r:
+        return r
+    try:
+        return resolve_streamwish(url)
     except Exception:
         return None
 
@@ -4793,6 +4808,7 @@ HOST_RESOLVERS = {
     # confirmed-dead host in arabseed.py's BLOCKED_HOSTS) -- only this
     # specific domain is mapped here, on direct evidence.
     "byseraguci":      resolve_byselapuix,
+    "byse":            resolve_byse_any,      # other byse* mirrors (shortest key: specific ones win)
     "byseraguci.com":  resolve_byselapuix,
     # [PATCH N1] n1mwq.org itself, for the case a server list or a future
     # mirror hands us the n1mwq.org iframe URL directly rather than a
