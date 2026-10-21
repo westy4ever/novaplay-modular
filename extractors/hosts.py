@@ -911,7 +911,10 @@ def _with_page_referer(stream, page_url):
     if not p.netloc:
         return stream
     origin = "{}://{}".format(p.scheme or "https", p.netloc)
-    return stream + "|Referer={0}/&Origin={0}".format(origin)
+    # the page was fetched with _IFRAME_HDRS; LuluStream's token only works
+    # with the same Accept-Language on the stream request
+    return stream + "|Referer={0}/&Origin={0}&Accept-Language={1}".format(
+        origin, FRAME_ACCEPT_LANGUAGE)
 
 
 def resolve_hanerix_style(url, referer=None):
@@ -4466,14 +4469,18 @@ def _pjs_pick_episode(playlist, season, episode):
     return ""
 
 
+FRAME_ACCEPT_LANGUAGE = "ar,en-US,en;q=0.9"   # = net.fetch's default and the proxy's
 _IFRAME_HDRS = {"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Site": "cross-site", "Upgrade-Insecure-Requests": "1",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                # [2026-10-21] LuluStream (luluvdo) hands out a stream token that
-                # 403s when the embed page was asked for with Arabic first in
-                # Accept-Language (bisected on the box: only that header flips
-                # 200 -> 403); browsers also never send Sec-Fetch-User for frames
-                "Accept-Language": "en-US,en;q=0.9",
+                # [2026-10-21] LuluStream (luluvdo) ties its stream token to the
+                # Accept-Language the player page was asked for with: the CDN
+                # 403s a stream request whose Accept-Language differs (box test:
+                # none/none, en/en, ar/ar -> 200; en/none, none/ar -> 403). Pages
+                # are asked for with FRAME_ACCEPT_LANGUAGE and the stream carries
+                # the same value (_with_page_referer, TopCinema's chain). Browsers
+                # also never send Sec-Fetch-User for frames.
+                "Accept-Language": FRAME_ACCEPT_LANGUAGE,
                 "Sec-Fetch-User": None}
 
 

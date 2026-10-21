@@ -736,7 +736,10 @@ class TopCinemaExtractor(BaseExtractor):
                     # the player only uses methods that send it
                     if chain_domain and "|" not in final_stream and final_stream.startswith("http"):
                         _o = "https://{}".format(chain_domain)
-                        final_stream += "|Referer={0}/&Origin={0}".format(_o)
+                        # + the page's Accept-Language: LuluStream's token is
+                        # tied to it (403 when the stream request differs)
+                        from .hosts import FRAME_ACCEPT_LANGUAGE as _fal
+                        final_stream += "|Referer={0}/&Origin={0}&Accept-Language={1}".format(_o, _fal)
                     variants = _variants_for(final_stream)
                     quality = self._quality_from_url(final_stream)
                     return final_stream, quality, final_referer, variants
