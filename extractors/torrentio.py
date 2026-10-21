@@ -230,9 +230,35 @@ class TorrentioExtractor(BaseExtractor):
                 "seeders": seeds_m.group(1) if seeds_m else "",
                 "size": size_m.group(1) if size_m else "",
             })
-            if len(servers) >= self._max_servers:
-                break
-        return servers
+        return self._balance(servers)
+
+    # [2026-10-21] Torrentio lists 4K first; a popular title has 40+ 4K
+    # torrents, so "first 40" left no 1080p/720p at all. Share the places
+    # between qualities (Torrentio's order kept inside each), then fill up.
+    _PER_QUALITY = (("2160p", 8), ("1080p", 14), ("720p", 10), ("480p", 4), ("", 4))
+
+    def _balance(self, servers):
+        cap = self._max_servers
+
+        def bucket(sv):
+            q = sv.get("quality", "")
+            for key, _n in self._PER_QUALITY:
+                if key and q.startswith(key):
+                    return key
+            return ""
+        quota = dict(self._PER_QUALITY)
+        taken, rest = [], []
+        for sv in servers:
+            b = bucket(sv)
+            if quota.get(b, 0) > 0:
+                quota[b] -= 1
+                taken.append(sv)
+            else:
+                rest.append(sv)
+        taken += rest[:max(0, cap - len(taken))]
+        order = {key: i for i, (key, _n) in enumerate(self._PER_QUALITY)}
+        taken.sort(key=lambda sv: order.get(bucket(sv), 99))    # stable: 4K, 1080p, 720p, ...
+        return taken[:cap]
 
     def get_page(self, url, m_type=None):
         parts = url.split("_")
