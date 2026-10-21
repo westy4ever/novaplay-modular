@@ -395,6 +395,29 @@ def _save_total_duration(url, total):
                 return
 
 
+def _save_last_server(url, name, server_url):
+    """Remember which server a title was last played from (Continue
+    Watching resumes straight from it)."""
+    if not url:
+        return
+    with _STATE_LOCK:
+        state = _load_state()
+        for item in (state.get("history") or []):
+            if item.get("url") == url:
+                if item.get("last_server_url") != server_url or item.get("last_server_name") != name:
+                    item["last_server_url"] = server_url or ""
+                    item["last_server_name"] = name or ""
+                    _save_state(state)
+                return
+
+
+def _last_server(url):
+    for item in (_load_state().get("history") or []):
+        if item.get("url") == url:
+            return item.get("last_server_name") or "", item.get("last_server_url") or ""
+    return "", ""
+
+
 def _remove_library_item(bucket, url):
     """Remove one title from "favorites" or "history"."""
     if not url:

@@ -547,7 +547,8 @@ class NovaPlayHub(Screen):
     def _openItem(self, item):
         from plugin_screen_detail import NovaPlayDetail
         self.session.openWithCallback(self._back, NovaPlayDetail, item=item,
-                                      site=item.get("_site", ""), m_type=item.get("type", "movie"))
+                                      site=item.get("_site", ""), m_type=item.get("type", "movie"),
+                                      resume=True)
 
     def _openSection(self, key):
         if key == "home":

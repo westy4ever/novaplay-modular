@@ -256,7 +256,7 @@ class NovaPlayDetail(Screen):
     _PROG_STEP = 40
 
     def __init__(self, session, item, site="egydead", m_type="movie",
-                 episode_chain=None, episode_index=-1, auto_server_idx=None):
+                 episode_chain=None, episode_index=-1, auto_server_idx=None, resume=False):
         self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH)
         Screen.__init__(self, session)
         self.session = session
@@ -281,6 +281,10 @@ class NovaPlayDetail(Screen):
         self._episode_index = int(episode_index if episode_index is not None else -1)
         self._auto_server_idx = auto_server_idx
         self._last_server_idx = None
+        # [continue] opened from Continue Watching: start the last-used
+        # server and resume without the yes/no question
+        self._resume_direct = bool(resume)
+        self._close_on_return = False
         if self._episode_chain and 0 <= self._episode_index < len(self._episode_chain) - 1:
             self._next_episode = self._episode_chain[self._episode_index + 1]
         else:
@@ -382,6 +386,7 @@ class NovaPlayDetail(Screen):
 
         self.onLayoutFinish.append(self._load)
         self.onExecBegin.append(self._refreshPoster)
+        self.onExecBegin.append(self._maybeCloseAfterResume)
         self.onClose.append(self._onCloseCleanup)
 
     # ── [detail-accent] navigation helpers ─────────────────────────────
@@ -933,6 +938,15 @@ class NovaPlayDetail(Screen):
             except Exception: pass
         self.close()
 
+    def _maybeCloseAfterResume(self):
+        """[continue] the player was opened straight from Continue Watching:
+        when it closes, go back to Home instead of this screen."""
+        if getattr(self, "_close_on_return", False):
+            self._close_on_return = False
+            self._closeLater = eTimer()
+            self._closeLater.callback.append(self.close)
+            self._closeLater.start(10, True)
+
     def _onCloseCleanup(self):
         for t in ("_reveal_timer", "_stagger_timer", "_progress_timer", "_clockTimer"):
             try:
@@ -1422,6 +1436,22 @@ class NovaPlayDetail(Screen):
         if backdrop_url or poster_url:
             threading.Thread(target=self._downloadBackdrop, args=(backdrop_url, poster_url), daemon=True).start()
 
+        if self._resume_direct and self._servers and getattr(self, "_auto_server_idx", None) is None:
+            try:
+                from plugin_state import _last_server
+                _ln, _lu = _last_server(self._item.get("url", ""))
+                _idx = next((i for i, s in enumerate(self._servers) if _lu and s.get("url") == _lu), None)
+                if _idx is None:
+                    _idx = next((i for i, s in enumerate(self._servers) if _ln and s.get("name") == _ln), None)
+                if _idx is not None:
+                    self._auto_server_idx = _idx
+                    self["status"].setText(u"Resuming with {}…".format(self._servers[_idx].get("name", "")))
+                else:
+                    self._resume_direct = False
+                    self["status"].setText(self._status_hint("Choose a server to resume — OK"))
+            except Exception as e:
+                my_log("resume direct: {}".format(e))
+                self._resume_direct = False
         if getattr(self, "_auto_server_idx", None) is not None and self._servers:
             _asi = self._auto_server_idx
             self._auto_server_idx = None
@@ -1975,8 +2005,15 @@ class NovaPlayDetail(Screen):
         except Exception:
             pass
         if not stream_url:
+            self._resume_direct = False      # the remembered server failed: user picks
             self["status"].setText("{} — not available, try another server".format(server["name"]))
             return
+        try:
+            from plugin_state import _save_last_server
+            _save_last_server((getattr(self, "_item", None) or {}).get("url", ""),
+                              server.get("name", ""), server.get("url", ""))
+        except Exception:
+            pass
         my_log("Stream found: {} [{}]".format(stream_url, quality))
         # [server-rank] NOTE: success/failure recording moved to the player
         # screen (__onConfirmed / exhausted in plugin_screen_player.py) --
@@ -2049,7 +2086,17 @@ class NovaPlayDetail(Screen):
 
             _item_url = (getattr(self, "_item", None) or {}).get("url", "")
             _saved_pos = _get_saved_position(_item_url)
-            if _saved_pos > 30:
+            if _saved_pos > 30 and self._resume_direct:
+                self._resume_direct = False
+                self._close_on_return = self._episode_index < 0   # back to Home after watching
+                self["status"].setText("Resuming…")
+                _play(self.session, url, title, resume_pos=_saved_pos, item_url=_item_url,
+                      next_episode=self._next_episode, on_next=self._playNextEpisode,
+                      poster_url=self._osd_poster,
+                      quality_variants=_qv, server_url=server.get("url", ""),
+                      servers=list(self._servers or []), site=self._site,
+                      server_name=server.get("name", ""))
+            elif _saved_pos > 30:
                 if _saved_pos >= 3600:
                     _hours_r = _saved_pos // 3600
                     _mins_r = (_saved_pos % 3600) // 60
