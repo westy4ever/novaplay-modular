@@ -1785,11 +1785,18 @@ def _n1mwq_solve_pow(nonce, difficulty, timeout_ms=20000):
         return None
     if not difficulty or difficulty <= 0:
         return "0"
+    # [2026-10-21] numpy: ~130x faster (the scalar loop below managed only a
+    # few hundred hashes/s; difficulty 16 needs ~65,000 tries)
+    try:
+        from . import byse_pow
+        return byse_pow.solve(nonce, difficulty, timeout_ms=timeout_ms, log=log)
+    except ImportError:
+        log("n1mwq: numpy not installed (opkg install python3-numpy) -- slow PoW solver")
     prefix = (nonce + ":").encode("ascii", errors="ignore")
     start = time.time()
     s = 0
     while True:
-        for _ in range(2048):
+        for _ in range(64):
             data = prefix + str(s).encode("ascii")
             if _n1mwq_leading_zero_bits(_n1mwq_pow_hash(data)) >= difficulty:
                 return str(s)
@@ -1900,7 +1907,8 @@ def resolve_n1mwq(url, referer=None, origin=None, video_id=None):
             difficulty = start.get("pow_difficulty") or 0
             pow_token = start.get("pow_token")
             expires_in = start.get("expires_in") or 20
-            timeout_ms = min(20000, max(4000, (expires_in - 3) * 1000))
+            timeout_ms = max(4000, (expires_in - 2) * 1000)
+            log("n1mwq: captcha difficulty {} (expires in {} s)".format(difficulty, expires_in))
 
             solution = _n1mwq_solve_pow(nonce, difficulty, timeout_ms)
             if solution is None:
