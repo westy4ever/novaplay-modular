@@ -422,6 +422,43 @@ _INFLIGHT_LOCK = threading.Lock()
 _DEAD_PL = {}          # playlist url -> time it answered 403/404/410
 _DEAD_PL_TTL = 300
 
+# [2026-10-21] a CDN host whose origin is down: Cloudflare 520-527 ("origin
+# unreachable/timed out", seen: cdn1004.cdn-tnmr.org 522 on LuluStream) or a
+# 502/504 gateway error. The player asks dead_host() after a failed attempt
+# and skips its remaining ways of playing the same stream instead of spending
+# ~90 s on all of them.
+_DEAD_HOST_CODES = (502, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530)
+_DEAD_HOSTS = {}       # host -> (time, code)
+_DEAD_HOST_TTL = 120
+
+
+def _host_of(url):
+    try:
+        return (urlparse(url).netloc or "").lower()
+    except Exception:
+        return ""
+
+
+def note_dead_host(url, code):
+    try:
+        code = int(code or 0)
+    except (TypeError, ValueError):
+        return
+    if code in _DEAD_HOST_CODES:
+        h = _host_of(url)
+        if h:
+            if h not in _DEAD_HOSTS:
+                _log("Proxy: {} answered HTTP {} (server behind it is down)".format(h, code))
+            _DEAD_HOSTS[h] = (time.time(), code)
+
+
+def dead_host(url):
+    """HTTP code if this url's host recently answered as dead, else 0."""
+    hit = _DEAD_HOSTS.get(_host_of(url))
+    if hit and time.time() - hit[0] < _DEAD_HOST_TTL:
+        return hit[1]
+    return 0
+
 
 _LAST_PL_DONE = [0.0]   # when a playlist download last finished successfully
 
@@ -487,6 +524,7 @@ def fetch_playlist_text(url, headers, xor_key="", timeout=90):
     except Exception as e:
         if getattr(e, "code", None) in (403, 404, 410):
             _DEAD_PL[url] = time.time()
+        note_dead_host(url, getattr(e, "code", None))
         _log("Proxy: playlist download failed: {} ({})".format(e, url[:90]))
         return None
     finally:
@@ -995,6 +1033,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                         stream_url, cffi_headers,
                         timeout=30, stream=True, allow_redirects=True,
                     )
+                    note_dead_host(stream_url, cffi_resp.status_code)
                     m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip()) if range_hdr else None
                     if cffi_resp.status_code == 403 and m:
                         range_start = int(m.group(1))
@@ -1055,6 +1094,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                     else:
                         resp = http_err
                         _bump("upstream_errors")
+                        note_dead_host(stream_url, getattr(http_err, "code", None))
                         _log("Proxy: upstream HTTP {} for {}".format(
                             getattr(http_err, "code", "?"), stream_url[:100]))
                 except Exception as e:

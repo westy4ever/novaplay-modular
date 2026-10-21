@@ -44,7 +44,7 @@ import sys
 import time
 import threading
 
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import quote, unquote, urlparse, parse_qs
 
 from Screens.Screen import Screen
 from novaplay_choice import NovaMessageBox as MessageBox
@@ -300,6 +300,21 @@ def _build_remote_play_candidates(url):
         # sends them on every request, so it goes first here
         candidates = [c for c in candidates if c[3]] + [c for c in candidates if not c[3]]
     return candidates
+
+
+def _upstream_of(svc_url):
+    """The real stream address behind a play candidate (proxy /stream?url=,
+    legacy proxy /<url>|hdrs, or a direct url with |/# headers)."""
+    u = str(svc_url or "")
+    try:
+        if "127.0.0.1:{}".format(_PROXY_PORT) in u:
+            p = urlparse(u)
+            if p.path == "/stream":
+                return (parse_qs(p.query).get("url") or [""])[0].split("|")[0]
+            u = u.split("127.0.0.1:{}/".format(_PROXY_PORT), 1)[1]
+        return u.split("|")[0].split("#")[0]
+    except Exception:
+        return ""
 
 
 def _nav_play_unhooked(nav, sref):
@@ -2125,11 +2140,36 @@ class NovaPlaySimplePlayer(Screen):
             pass
         self.__playNext()
 
+    def _skipDeadHostCandidates(self):
+        """[2026-10-21] after a failed attempt: if the proxy saw this stream's
+        server answer as down (Cloudflare 52x / gateway 502/504), the other
+        ways of playing it would only fail too -- skip them (Street Fighter's
+        LuluStream copy on a dead node spun ~90 s through six methods)."""
+        try:
+            idx = self._candidate_idx
+            if idx < 0 or idx >= len(self.candidates):
+                return
+            up = _upstream_of(self.candidates[idx][1])
+            code = novaplay_proxy.dead_host(up) if up else 0
+            if not code:
+                return
+            host = novaplay_proxy._host_of(up)
+            rest = [c for c in self.candidates[idx + 1:]
+                    if novaplay_proxy._host_of(_upstream_of(c[1])) == host]
+            if rest:
+                my_log("candidates: {} is down (HTTP {}) -- skipping the other {} method(s)".format(
+                    host, code, len(rest)))
+                self.candidates = self.candidates[:idx + 1] + [
+                    c for c in self.candidates[idx + 1:] if c not in rest]
+        except Exception as e:
+            my_log("dead-host check failed (non-fatal): {}".format(e))
+
     def __playNext(self):
         if getattr(self, "_is_advancing", False): return
         self._is_advancing = True
         if not self._play_confirmed:
             self._recordPlayMemory(False)   # the attempt we are leaving didn't play
+            self._skipDeadHostCandidates()
         self._candidate_idx += 1
         if self._candidate_idx >= len(self.candidates):
             if not getattr(self, "_exhausted", False):
