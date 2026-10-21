@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 
-VERSION = "2"
+VERSION = "3"
 PORT = 19891
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TARGETS = ("chrome146", "chrome145", "chrome142", "chrome136", "chrome131",
@@ -36,14 +36,30 @@ def _serve(port):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from curl_cffi import requests as cr
 
-    local = threading.local()
     target = {"i": 0}
+    jar = {"c": None}
+    jar_lock = threading.Lock()
 
     def session():
-        s = getattr(local, "s", None)
-        if s is None:
-            s = local.s = cr.Session()
+        # each request runs in its own thread: give it a fresh Session that
+        # starts from the shared cookies (site sessions, Cloudflare clearance)
+        s = cr.Session()
+        with jar_lock:
+            if jar["c"] is not None:
+                try:
+                    s.cookies.update(jar["c"])
+                except Exception:
+                    pass
         return s
+
+    def keep_cookies(s):
+        with jar_lock:
+            try:
+                if jar["c"] is None:
+                    jar["c"] = cr.Cookies()
+                jar["c"].update(s.cookies)
+            except Exception:
+                pass
 
     def do_request(p):
         method = p.get("method", "GET")
@@ -57,8 +73,11 @@ def _serve(port):
             if imp and imp not in _TARGETS[target["i"]:]:
                 imp = _TARGETS[target["i"]] if target["i"] < len(_TARGETS) else None
             try:
-                return session().request(method, p["url"], impersonate=imp, **kw) if imp \
-                    else session().request(method, p["url"], **kw)
+                ss = session()
+                r = ss.request(method, p["url"], impersonate=imp, **kw) if imp \
+                    else ss.request(method, p["url"], **kw)
+                keep_cookies(ss)
+                return r
             except Exception as e:
                 m = str(e).lower()
                 if imp and "impersonating" in m and "not supported" in m:
@@ -277,9 +296,15 @@ class _Client(object):
                 timeout=30, allow_redirects=True, stream=False, **_ignored):
         if not _ensure():
             raise RuntimeError("cffi helper not available")
+        headers = dict(headers or {})
         if isinstance(data, dict):
+            # curl_cffi labels a dict body as a form by itself; once it is text
+            # here, the label has to be added (TopCinema's Server.php got an
+            # unlabelled body inside Enigma2 and answered 149 bytes)
             from urllib.parse import urlencode
             data = urlencode(data)
+            if not any(k.lower() == "content-type" for k in headers):
+                headers["Content-Type"] = "application/x-www-form-urlencoded"
         if isinstance(data, str):
             data = data.encode("utf-8")
         payload = {"method": method, "url": url, "headers": dict(headers or {}),
