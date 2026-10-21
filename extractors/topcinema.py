@@ -730,6 +730,13 @@ class TopCinemaExtractor(BaseExtractor):
                 if final_stream:
                     final_referer = (get_referer(final_stream, default_self=False)
                                      or ("https://{}/".format(chain_domain) if chain_domain else self._get_base()))
+                    # [2026-10-21] the player page found by the chain is the Referer
+                    # these CDNs require (VideoTube: 403 without it, and a refused
+                    # header-less request hung Enigma2): carry it on the stream so
+                    # the player only uses methods that send it
+                    if chain_domain and "|" not in final_stream and final_stream.startswith("http"):
+                        _o = "https://{}".format(chain_domain)
+                        final_stream += "|Referer={0}/&Origin={0}".format(_o)
                     variants = _variants_for(final_stream)
                     quality = self._quality_from_url(final_stream)
                     return final_stream, quality, final_referer, variants

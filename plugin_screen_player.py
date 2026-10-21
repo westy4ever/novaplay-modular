@@ -295,6 +295,10 @@ def _build_remote_play_candidates(url):
             my_log("candidates: stream needs its headers -- skipping {} header-less method(s)".format(
                 len(candidates) - len(kept)))
             candidates = kept
+        # the box's players send the headers for the playlist but not reliably
+        # for every piece (VideoTube: "4097 + headers HLS" timed out); the proxy
+        # sends them on every request, so it goes first here
+        candidates = [c for c in candidates if c[3]] + [c for c in candidates if not c[3]]
     return candidates
 
 
@@ -1651,7 +1655,9 @@ class NovaPlaySimplePlayer(Screen):
                 # only the "+ headers" ones move up; the proxy keeps its place
                 hdr = [c for c in cands if "headers" in str(c[2]) and "proxy" not in str(c[2])]
                 rest = [c for c in cands if c not in hdr]
-                if hdr and cands[0] not in hdr:
+                # only when header-less methods are in the list (a strict stream
+                # has none left and keeps the proxy first)
+                if hdr and cands[0] not in hdr and any(_plain(c[2]) for c in cands):
                     cands[:] = hdr + rest
                     my_log("candidates: methods with headers first -> {}".format(
                         ", ".join(str(c[2]) for c in cands[:3])))
