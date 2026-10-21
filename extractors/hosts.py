@@ -3001,6 +3001,20 @@ def _streamwish_from_html(html):
     return find_m3u8(html) or find_mp4(html)
 
 
+# [2026-10-21] vidapi.xyz's Apache 403s NOVA's default Chrome/120 request but
+# answered the box's own curl (Chrome/155 UA) with 200 -- send what the
+# browser sent (recording 2026-10-21, iframe navigation from onlyflix.to).
+_VIDAPI_HDRS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+              "image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "cross-site", "Upgrade-Insecure-Requests": "1",
+}
+
+
 def resolve_vidapi(url, referer=None):
     """[2026-10-21] vidapi.xyz/embed/{movie,tv}/<id> (ZetMoon "Zeon"): the page
     keeps its player in <iframe id="iframesrc" data-src=
@@ -3019,7 +3033,7 @@ def resolve_vidapi(url, referer=None):
         for r in refs:
             try:
                 html, _f = fetch(url, referer=r, timeout=12, max_retries=0,
-                                 extra_headers=_IFRAME_HDRS)
+                                 extra_headers=_VIDAPI_HDRS)
             except Exception:
                 html = ""
             if html and "swish" in html:
