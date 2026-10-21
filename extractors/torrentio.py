@@ -265,7 +265,16 @@ class TorrentioExtractor(BaseExtractor):
                 taken.append(sv)
             else:
                 rest.append(sv)
-        taken += rest[:max(0, cap - len(taken))]
+        # leftover places: round-robin across qualities (1080p first), not
+        # list order -- list order would hand them all to 4K again
+        groups = {}
+        for sv in rest:
+            groups.setdefault(bucket(sv), []).append(sv)
+        fill_order = ["1080p", "720p", "2160p", "480p", ""]
+        while len(taken) < cap and any(groups.get(k) for k in fill_order):
+            for k in fill_order:
+                if groups.get(k) and len(taken) < cap:
+                    taken.append(groups[k].pop(0))
         order = {key: i for i, (key, _n) in enumerate(self._PER_QUALITY)}
         taken.sort(key=lambda sv: order.get(bucket(sv), 99))    # stable: 4K, 1080p, 720p, ...
         return taken[:cap]

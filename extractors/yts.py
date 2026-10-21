@@ -88,18 +88,32 @@ class YTSExtractor(BaseExtractor):
         name = re.sub(r'[\r\n\t]+', ' ', name)
         return re.sub(r'\s+', ' ', name).strip()
 
-    def _build_magnet(self, info_hash, name, file_idx=None):
-        clean_name = self._clean_magnet_name(name)
-        xt = 'urn:btih:%s' % info_hash
-        params = []
-        if clean_name:
-            params.append(('dn', clean_name))
-        if file_idx is not None:
-            params.append(('ix', str(file_idx)))
-        params.append(('tr', 'udp://tracker.opentrackr.org:1337/announce'))
-        params.append(('tr', 'udp://tracker.openbittorrent.com:6969/announce'))
-        qs = urllib.parse.urlencode(params) if params else ''
-        return 'magnet:?xt=%s%s%s' % (xt, '&' if qs else '', qs)
+    def _build_magnet(self, info_hash, name, file_idx=None, trackers=None):
+        # [2026-10-21] one magnet builder for both sources (torrentio.py):
+        # the torrent's own trackers + 5 public ones
+        return self._torrentio()._build_magnet(info_hash, name, file_idx, trackers)
+
+    def _torrentio(self, cap=40):
+        from .torrentio import TorrentioExtractor
+        t = getattr(self, "_torrentio_x", None)
+        if t is None:
+            t = self._torrentio_x = TorrentioExtractor()
+        t._max_servers = cap
+        return t
+
+    def _more_trackers(self, magnet):
+        """en.yts.lu magnets: add the public trackers when they carry few."""
+        if magnet.count("&tr=") >= 3:
+            return magnet
+        have = set(urllib.parse.unquote(x) for x in re.findall(r'[?&]tr=([^&]+)', magnet))
+        from .torrentio import TorrentioExtractor
+        extra = [t for t in TorrentioExtractor._DEFAULT_TRACKERS if t not in have]
+        return magnet + "".join("&tr=" + urllib.parse.quote(t, safe="") for t in extra)
+
+    def _finish_torrents(self, servers, cap=50):
+        """Share the places between qualities (torrentio.py's rule) so a
+        title with many 4K torrents still lists 1080p / 720p."""
+        return self._torrentio(cap)._balance(servers)
 
     def _extract_quality(self, title):
         t = (title or "").upper()
@@ -146,28 +160,9 @@ class YTSExtractor(BaseExtractor):
             data = fetch_json(url) or {}
         except Exception:
             return []
-        servers, seen = [], set()
-        for s in data.get("streams", []) or []:
-            h = str(s.get("infoHash") or "")
-            if not h or len(h) not in (32, 40) or h.lower() in seen:
-                continue
-            seen.add(h.lower())
-            title = str(s.get("title") or s.get("name") or "Torrent")
-            magnet = self._build_magnet(h, title, s.get("fileIdx"))
-            # [PATCH 34c] sync with torrentio's PATCH 30d — seeders/size
-            # from the title (👤 N / N GB) → StreamList columns
-            seeds_m = re.search(r'👤\s*(\d+)', title)
-            size_m = re.search(r'(\d+(?:[.,]\d+)?\s*(?:GB|MB))', title, re.I)
-            servers.append({
-                "name": title,
-                "url": magnet,
-                "quality": self._extract_quality(title),
-                "seeders": seeds_m.group(1) if seeds_m else "",
-                "size": size_m.group(1) if size_m else "",
-            })
-            if len(servers) >= max_n:
-                break
-        return servers
+        # [2026-10-21] torrentio.py's parser: own trackers, file-name dn,
+        # season-pack rows named after the episode file, quality from "name"
+        return self._torrentio(max_n)._parse_streams(data)
 
     # ═══ en.yts.lu's own torrent-search API (live-capture discovery) ═══
     # [PATCH live-capture] the site itself calls an undocumented endpoint,
@@ -262,7 +257,7 @@ class YTSExtractor(BaseExtractor):
             name = str(h.get("title") or "Torrent")
             servers.append({
                 "name": name,
-                "url": magnet,
+                "url": self._more_trackers(magnet),
                 "quality": self._extract_quality(name),
                 "seeders": str(h.get("seeds")) if h.get("seeds") is not None else "",
                 "size": self._format_size(h.get("bytes")),
@@ -592,6 +587,8 @@ class YTSExtractor(BaseExtractor):
                         seen.add(h)
                     servers.append(s)
 
+            servers = self._finish_torrents(servers)
+
             # Embed fallbacks (work without TorrServer)
             servers += [
                 {"name": "Server 1 (2Embed.cc)", "url": "https://www.2embed.cc/embed/{}".format(tmdb_id), "quality": "HD"},
@@ -635,6 +632,8 @@ class YTSExtractor(BaseExtractor):
                     if h:
                         seen.add(h)
                     servers.append(s)
+
+            servers = self._finish_torrents(servers)
 
             # Embed fallbacks
             servers += [

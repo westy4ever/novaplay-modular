@@ -923,7 +923,8 @@ class NovaPlayDetail(Screen):
         srv = list(self._servers or [])
         self._tor_all = None
         self._tor_filter = "All"
-        if len(srv) >= 2 and all(str(x.get("url", "")).startswith("magnet:") for x in srv):
+        # any list with 2+ torrents (YTS adds embed servers after its torrents)
+        if sum(1 for x in srv if str(x.get("url", "")).startswith("magnet:")) >= 2:
             self._tor_all = srv
         try:
             self["key_yellow"].setText(self._yellowLabel())
@@ -932,9 +933,11 @@ class NovaPlayDetail(Screen):
 
     def _torCounts(self):
         c = {b: 0 for b in self._TOR_BUCKETS}
-        for x in self._tor_all or []:
+        mags = [x for x in (self._tor_all or []) if str(x.get("url", "")).startswith("magnet:")]
+        for x in mags:
             c[self._torBucket(x)] += 1
-        c["All"] = len(self._tor_all or [])
+        c["All"] = len(mags)
+        c["_other"] = len(self._tor_all or []) - len(mags)
         return c
 
     def _yellowLabel(self):
@@ -948,8 +951,9 @@ class NovaPlayDetail(Screen):
             tabs = u"   ".join((u"[{}]" if b == self._tor_filter else u"{}").format(
                 u"{} {}".format(b, c[b]) if b != "All" else u"All")
                 for b in self._TOR_BUCKETS if b == "All" or c[b])
+            other = u"   + {} other".format(c["_other"]) if (c["_other"] and self._tor_filter == "All") else u""
             self["section"].setText(_single_line_text(
-                u"🧲 Torrents {}   {}".format(c["All"], tabs), width=90))
+                u"🧲 Torrents {}   {}{}".format(c["All"], tabs, other), width=90))
         else:
             self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
 
@@ -969,7 +973,9 @@ class NovaPlayDetail(Screen):
         i = order.index(self._tor_filter) if self._tor_filter in order else 0
         self._tor_filter = order[(i + d) % len(order)]
         self._servers = [x for x in self._tor_all
-                         if self._tor_filter == "All" or self._torBucket(x) == self._tor_filter]
+                         if self._tor_filter == "All" or (
+                             str(x.get("url", "")).startswith("magnet:")
+                             and self._torBucket(x) == self._tor_filter)]
         self["key_yellow"].setText(self._yellowLabel())
         self._setServerSection()
         self._setMenu([self._format_server_item(x) for x in self._servers])
