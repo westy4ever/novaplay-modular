@@ -44,7 +44,7 @@ _CHALLENGE_MARKERS = ('cf-browser-verification', 'just a moment',
                       'checking your browser', 'turnstile',
                       'cf-chl', 'cf_chl_')
 _DEFAULT_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-               'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+               'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36')
 
 
 def _domain_key(url):

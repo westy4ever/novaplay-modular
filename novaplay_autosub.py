@@ -26,7 +26,7 @@ import urllib.request
 import urllib.parse
 
 _API = "https://api.subsource.net/api/v1"
-_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
 _SUB_DIR = "/tmp/novaplay_autosub"
 _TIMEOUT = 15
 _REFERER = "https://subsource.net/"

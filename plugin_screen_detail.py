@@ -1951,7 +1951,7 @@ class NovaPlayDetail(Screen):
             base, frag = (url.split("#", 1) + [""])[:2]
             if ".m3u8" not in base.lower():
                 return url
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"}
             if frag:
                 for p in frag.split("&"):
                     if "=" in p:
@@ -2055,7 +2055,7 @@ class NovaPlayDetail(Screen):
                 self["status"].setText("The link is a player page, not a video file — try another server")
                 return
 
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"}
             if final_ref:
                 headers["Referer"] = final_ref
             if old_params:

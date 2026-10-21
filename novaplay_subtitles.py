@@ -170,7 +170,7 @@ except Exception:
     _BASE_FETCH = None
 
 PLUGIN_DIR = os.path.dirname(__file__)
-SAFE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+SAFE_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
 _OS_UA = "NovaPlayE2/4.0"
 
 SUBTITLE_EXT_RE = re.compile(r"\.(srt|sub|txt|ass|ssa)$", re.I)
