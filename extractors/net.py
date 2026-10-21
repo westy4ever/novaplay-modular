@@ -775,11 +775,11 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                     def _do_cffi_request(imp):
                         if _pd is not None:
                             if imp:
-                                return cffi_client.post(url, data=_pd, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout)
-                            return cffi_client.post(url, data=_pd, headers=cf_headers, timeout=_cffi_timeout)
+                                return cffi_client.post(url, data=_pd, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout, verify=False)
+                            return cffi_client.post(url, data=_pd, headers=cf_headers, timeout=_cffi_timeout, verify=False)
                         if imp:
-                            return cffi_client.get(url, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout)
-                        return cffi_client.get(url, headers=cf_headers, timeout=_cffi_timeout)
+                            return cffi_client.get(url, headers=cf_headers, impersonate=imp, timeout=_cffi_timeout, verify=False)
+                        return cffi_client.get(url, headers=cf_headers, timeout=_cffi_timeout, verify=False)
 
                     try:
                         r = _do_cffi_request(_imp)

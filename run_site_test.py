@@ -228,7 +228,8 @@ def check_stream(stream_url, referer=None):
     def get(u, nbytes):
         h = dict(headers)
         h["Range"] = "bytes=0-{}".format(nbytes - 1)
-        resp = urlopen(Request(u, headers=h), timeout=STREAM_TIMEOUT)
+        import ssl as _ssl     # like NovaPlay: hosts with incomplete certificate chains play
+        resp = urlopen(Request(u, headers=h), timeout=STREAM_TIMEOUT, context=_ssl._create_unverified_context())
         try:
             return resp.getcode(), resp.headers.get("Content-Type", ""), resp.read(nbytes), resp.geturl()
         finally:

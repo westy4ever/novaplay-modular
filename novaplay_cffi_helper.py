@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 
-VERSION = "1"
+VERSION = "2"
 PORT = 19891
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TARGETS = ("chrome146", "chrome145", "chrome142", "chrome136", "chrome131",
@@ -48,7 +48,8 @@ def _serve(port):
     def do_request(p):
         method = p.get("method", "GET")
         kw = dict(headers=p.get("headers") or {}, timeout=p.get("timeout") or 30,
-                  allow_redirects=p.get("allow_redirects", True), stream=bool(p.get("stream")))
+                  allow_redirects=p.get("allow_redirects", True), stream=bool(p.get("stream")),
+                  verify=bool(p.get("verify", False)))
         if p.get("data_b64") is not None:
             kw["data"] = base64.b64decode(p["data_b64"])
         imp = p.get("impersonate")
@@ -284,6 +285,7 @@ class _Client(object):
         payload = {"method": method, "url": url, "headers": dict(headers or {}),
                    "impersonate": impersonate, "timeout": timeout,
                    "allow_redirects": allow_redirects, "stream": bool(stream),
+                   "verify": bool(_ignored.get("verify", False)),
                    "data_b64": base64.b64encode(data).decode() if data is not None else None}
         import http.client
         conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=(timeout or 30) + 15)

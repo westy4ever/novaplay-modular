@@ -263,7 +263,7 @@ def _plain_segment_mode(text, base_url, headers):
         h = dict(headers)
         h["Range"] = "bytes=0-1023"
         h["Accept-Encoding"] = "identity"
-        head = _urlreq.urlopen(_urlreq.Request(seg, headers=h), timeout=20).read(1024)
+        head = _np_urlopen(_urlreq.Request(seg, headers=h), timeout=20).read(1024)
         if head[4:8] in (b"ftyp", b"styp", b"moof", b"moov"):
             mode = "mp4" if remux_available() else None
         elif head[:1] == b"\x47" and (len(head) < 189 or head[188:189] == b"\x47"):
@@ -310,7 +310,7 @@ def _fetch_bytes(url, headers, timeout=30):
     h = dict(headers)
     h.pop("Range", None)
     h["Accept-Encoding"] = "identity"
-    resp = _urlreq.urlopen(_urlreq.Request(url, headers=h), timeout=timeout)
+    resp = _np_urlopen(_urlreq.Request(url, headers=h), timeout=timeout)
     return resp.read()
 
 
@@ -466,7 +466,7 @@ def fetch_playlist_text(url, headers, xor_key="", timeout=90):
         h.setdefault("Accept", "*/*")
         h["Accept-Encoding"] = "identity"
         t0 = time.time()
-        resp = _urlreq.urlopen(_urlreq.Request(fetch_url, headers=h), timeout=timeout)
+        resp = _np_urlopen(_urlreq.Request(fetch_url, headers=h), timeout=timeout)
         raw = resp.read(_SNIFF_MAX)
         base = url if xor_key else (resp.geturl() or url)
         if xor_key:
@@ -587,7 +587,21 @@ _cffi_target_idx = [0]
 _cffi_target_lock = threading.Lock()
 
 
+# [2026-10-21] video hosts with an incomplete certificate chain (downet.net,
+# Akwam's servers: "unable to get local issuer certificate") play in browsers,
+# which fetch the missing certificate themselves. Like extractors/net.py, the
+# proxy doesn't verify certificates.
+import ssl as _ssl
+_NP_SSL = _ssl._create_unverified_context()
+
+
+def _np_urlopen(req, timeout=None, **kw):
+    kw.setdefault("context", _NP_SSL)
+    return _urlreq.urlopen(req, timeout=timeout, **kw)
+
+
 def _cffi_get(url, headers, **kw):
+    kw.setdefault("verify", False)
     # [2026-10-21] inside Enigma2 impersonation fails in-process (system
     # libcurl loaded first) -- use NovaPlay's curl_cffi helper process
     try:
@@ -677,7 +691,7 @@ def get_cached_stream(embed_url):
         req = _urlreq.Request(target, headers={"User-Agent": SAFE_UA,
                                                "Referer": referer or target})
         req.get_method = lambda: "HEAD"
-        resp = _urlreq.urlopen(req, timeout=8)
+        resp = _np_urlopen(req, timeout=8)
         try:
             code = resp.getcode() or 200
         finally:
@@ -1012,7 +1026,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
 
             if resp is None:
                 try:
-                    resp = _urlreq.urlopen(upstream, timeout=30)
+                    resp = _np_urlopen(upstream, timeout=30)
                 except urllib.error.HTTPError as http_err:
                     # [PATCH 105] some CDNs 403 any Range request while a plain GET works fine
                     # (confirmed on mxcontent.net). Retry once without Range and emulate the
@@ -1026,7 +1040,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                         _log("Proxy: {} 403'd a Range request, retrying without Range ({})".format(
                             stream_url[:90], range_hdr))
                         try:
-                            resp = _urlreq.urlopen(_urlreq.Request(stream_url, headers=retry_headers), timeout=30)
+                            resp = _np_urlopen(_urlreq.Request(stream_url, headers=retry_headers), timeout=30)
                             emulated_range = True
                         except urllib.error.HTTPError as http_err2:
                             resp = http_err2
