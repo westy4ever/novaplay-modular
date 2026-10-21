@@ -655,6 +655,9 @@ def _library_search_suggestions(query="", current_site="", limit=8):
     return [row[3] for row in rows[:limit]]
 
 
+_CONTINUE_MAX_AGE = 15 * 86400
+
+
 def _continue_items(limit=7):
     rows = []
     try:
@@ -666,6 +669,10 @@ def _continue_items(limit=7):
         if pos <= 30 or not item.get("url"):
             continue
         if is_watched(item.get("url")):      # finished (90%+): not "in progress"
+            continue
+        # untouched for 15 days: drops out of Continue Watching (stays in History)
+        _last = max(int(item.get("_pos_ts") or 0), int(item.get("_ts") or 0), int(item.get("_saved_at") or 0))
+        if _last and time.time() - _last > _CONTINUE_MAX_AGE:
             continue
         if not (item.get("poster") or item.get("title")):
             continue
