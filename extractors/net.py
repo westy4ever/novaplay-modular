@@ -699,6 +699,8 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
 
                     if extra_headers:
                         cf_headers.update(extra_headers)
+                    # a None value in extra_headers removes that default header
+                    cf_headers = {k: v for k, v in cf_headers.items() if v is not None}
 
                     log("curl_cffi fetch: {} (attempt {})".format(url, attempt + 1))
                     # [FIX] confirmed directly: egybestvid.com's embed host
@@ -916,6 +918,8 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                 })
             if extra_headers:
                 headers.update(extra_headers)
+            # a None value in extra_headers removes that default header
+            headers = {k: v for k, v in headers.items() if v is not None}
 
             data = post_data
             if data and isinstance(data, dict):

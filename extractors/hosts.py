@@ -4468,7 +4468,13 @@ def _pjs_pick_episode(playlist, season, episode):
 
 _IFRAME_HDRS = {"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Site": "cross-site", "Upgrade-Insecure-Requests": "1",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                # [2026-10-21] LuluStream (luluvdo) hands out a stream token that
+                # 403s when the embed page was asked for with Arabic first in
+                # Accept-Language (bisected on the box: only that header flips
+                # 200 -> 403); browsers also never send Sec-Fetch-User for frames
+                "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-User": None}
 
 
 _cdnm_dead = {}
