@@ -223,10 +223,10 @@ def _build_remote_play_candidates(url):
             pass
 
     if is_hls:
-        add_candidate(4097, plain_url, "4097 مباشر HLS")
+        add_candidate(4097, plain_url, "4097 direct HLS")
         add_candidate(4097, url, "4097 + headers HLS")
-        add_candidate(8193, plain_url, "8193 مباشر")
-        add_candidate(5001, plain_url, "5001 مباشر")
+        add_candidate(8193, plain_url, "8193 direct")
+        add_candidate(5001, plain_url, "5001 direct")
         if has_exteplayer:
             add_candidate(5002, plain_url, "5002 exteplayer3")
             add_candidate(5002, url, "5002 exteplayer3 + headers")
@@ -236,24 +236,24 @@ def _build_remote_play_candidates(url):
             if has_exteplayer:
                 add_candidate(5002, proxied, "5002 exteplayer3 + proxy", True)
         if legacy_proxied:
-            add_candidate(4097, legacy_proxied, "4097 + proxy قديم", True)
+            add_candidate(4097, legacy_proxied, "4097 + legacy proxy", True)
     elif is_mkv and has_exteplayer:
         add_candidate(5002, url, "5002 exteplayer3 + headers")
         add_candidate(5002, plain_url, "5002 exteplayer3")
-        add_candidate(5001, plain_url, "5001 مباشر")
-        add_candidate(4097, plain_url, "4097 مباشر")
-        add_candidate(8193, plain_url, "8193 مباشر")
+        add_candidate(5001, plain_url, "5001 direct")
+        add_candidate(4097, plain_url, "4097 direct")
+        add_candidate(8193, plain_url, "8193 direct")
         add_candidate(4097, url, "4097 + headers")
         if proxied:
             add_candidate(5002, proxied, "5002 exteplayer3 + proxy", True)
             add_candidate(5001, proxied, "5001 + proxy", True)
             add_candidate(4097, proxied, "4097 + proxy", True)
         if legacy_proxied:
-            add_candidate(4097, legacy_proxied, "4097 + proxy قديم", True)
+            add_candidate(4097, legacy_proxied, "4097 + legacy proxy", True)
     else:
-        add_candidate(5001, plain_url, "5001 مباشر")
-        add_candidate(4097, plain_url, "4097 مباشر")
-        add_candidate(8193, plain_url, "8193 مباشر")
+        add_candidate(5001, plain_url, "5001 direct")
+        add_candidate(4097, plain_url, "4097 direct")
+        add_candidate(8193, plain_url, "8193 direct")
         add_candidate(4097, url, "4097 + headers")
         if has_exteplayer:
             add_candidate(5002, plain_url, "5002 exteplayer3")
@@ -264,7 +264,7 @@ def _build_remote_play_candidates(url):
             if has_exteplayer:
                 add_candidate(5002, proxied, "5002 exteplayer3 + proxy", True)
         if legacy_proxied:
-            add_candidate(4097, legacy_proxied, "4097 + proxy قديم", True)
+            add_candidate(4097, legacy_proxied, "4097 + legacy proxy", True)
 
     return candidates
 
@@ -443,10 +443,10 @@ class NovaPlaySimplePlayer(Screen):
     _STUDIO_SLOTS_X = (60, 425, 790, 1155, 1520)
     # [studio-ui] settings grouped into 4 tabs (1-4 switch tabs)
     _STUDIO_GROUPS = (
-        (u"TEXT · النص", ("size", "font", "color", "spacing", "autowrap")),
-        (u"LOOK · الشكل", ("outline", "ocolor", "bg", "bg_alpha")),
-        (u"POSITION · الموضع", ("offset_y", "align", "cuepos")),
-        (u"SYNC · المزامنة", ("delay", "pickline", "presets", "reset", "remove")),
+        (u"TEXT", ("size", "font", "color", "spacing", "autowrap")),
+        (u"LOOK", ("outline", "ocolor", "bg", "bg_alpha")),
+        (u"POSITION", ("offset_y", "align", "cuepos")),
+        (u"SYNC", ("delay", "pickline", "presets", "reset", "remove")),
     )
     _STUDIO_HINTS = {
         "size": u"▲ bigger   ▼ smaller",
@@ -503,7 +503,7 @@ class NovaPlaySimplePlayer(Screen):
                  is_preview=False, servers=None, site="", server_name=""):
         Screen.__init__(self, session)
         self["overlay_bg"]   = Label("")
-        self["status"]       = Label("جاري التشغيل...")
+        self["status"]       = Label("Playing...")
         self["osd_shadow"]   = Label("")
         self["osd_titlebar"] = Label("")
         self["osd_title"]    = Label("")
@@ -530,10 +530,10 @@ class NovaPlaySimplePlayer(Screen):
         self["seekFrame"]    = Label("")
         self["seekMarker"]   = Label("")
         self["progBack"]     = Label("")
-        self["keyRed"]       = Label(u"سيرفر تالي ⏭")
-        self["keyGreen"]     = Label(u"تخطي المقدمة")
-        self["keyYellow"]    = Label(u"جودة · سيرفر")
-        self["keyBlue"]      = Label(u"صوت · ترجمة")
+        self["keyRed"]       = Label(u"Next server ⏭")
+        self["keyGreen"]     = Label(u"Skip intro")
+        self["keyYellow"]    = Label(u"Quality · Server")
+        self["keyBlue"]      = Label(u"Audio · Subs")
         self["osd_subdetail"] = Label("")
         self["osd_episode"]  = Label("")
         self["osd_jump"]     = Label("")
@@ -1141,8 +1141,8 @@ class NovaPlaySimplePlayer(Screen):
             return
         self._skip_hint_shown = True
         try:
-            cur = self["status"].getText() or "جاري التشغيل..."
-            self["status"].setText(u"{}   —   MENU = تخطي".format(cur))
+            cur = self["status"].getText() or "Playing..."
+            self["status"].setText(u"{}   —   MENU = skip".format(cur))
             self.__showOSD(True)
         except Exception:
             pass
@@ -1451,7 +1451,7 @@ class NovaPlaySimplePlayer(Screen):
             except Exception:
                 pass
             # [POLISH v1] the colour keys are shown as chips now
-            self["osd_keys"].setText("OK=إيقاف   0-9=قفز   ‹›±10ث   Stop=خروج")
+            self["osd_keys"].setText("OK=pause   0-9=jump   ‹›±10s   Stop=exit")
         except Exception as e:
             my_log("updateOSD error: {}".format(e))
 
@@ -1495,10 +1495,10 @@ class NovaPlaySimplePlayer(Screen):
             secs = 90
         ph = self._greenPhase()
         if ph == "next":
-            return u"الحلقة التالية ⏭"
+            return u"Next episode ⏭"
         if ph == "intro":
-            return u"تخطي المقدمة"
-        return u"تقديم +{}ث".format(secs)
+            return u"Skip intro"
+        return u"Skip +{}s".format(secs)
 
     def __greenKey(self):
         if getattr(self, "_studioOverlayActive", False):
@@ -1663,9 +1663,9 @@ class NovaPlaySimplePlayer(Screen):
             q_items.append((str(l), is_cur))
             self._panel_q.append((l, u))
         if not marked:
-            q_items.insert(0, (cur_lbl or u"الحالية", True))
+            q_items.insert(0, (cur_lbl or u"current", True))
             self._panel_q.insert(0, None)
-        s_items = [(str(sv.get("name") or u"سيرفر"), (sv.get("url") == self._server_url))
+        s_items = [(str(sv.get("name") or u"Server"), (sv.get("url") == self._server_url))
                    for sv in self._servers]
         sp_items = [(lbl, v == self._speed) for lbl, v in self._SPEEDS]
         from plugin_player_panel import NovaPlayerPanel
@@ -1706,11 +1706,11 @@ class NovaPlaySimplePlayer(Screen):
             novaplay_tracker.set_play_speed(v)
             self._speed = v
             self._paused = False
-            self["status"].setText(u"⏩ السرعة {}x".format(v) if v != 1 else u"Playing")
+            self["status"].setText(u"⏩ Speed {}x".format(v) if v != 1 else u"Playing")
             my_log("speed: {}x".format(v))
         except Exception as e:
             my_log("speed {}x not supported: {}".format(v, e))
-            self["status"].setText(u"السرعة {}x غير مدعومة في هذا المشغل".format(v))
+            self["status"].setText(u"Speed {}x is not supported by this player".format(v))
         self.__showOSD(True)
 
     def __nextServer(self):
@@ -1721,7 +1721,7 @@ class NovaPlaySimplePlayer(Screen):
             return
         n = len(self._servers)
         if n < 2:
-            self["status"].setText(u"لا يوجد سيرفر آخر")
+            self["status"].setText(u"No other server")
             self.__showOSD(True)
             return
         i = next((k for k, sv in enumerate(self._servers) if sv.get("url") == self._server_url), -1)
@@ -1750,9 +1750,9 @@ class NovaPlaySimplePlayer(Screen):
             pos = self._paused_elapsed if self._paused else current_play_secs()
         except Exception:
             pos = 0
-        name = server.get("name") or u"سيرفر"
+        name = server.get("name") or u"Server"
         my_log("server switch: {} → {} (resume at {}s)".format(self._server_name or "?", name, int(pos)))
-        self["status"].setText(u"🔄 جاري تجهيز {}…".format(name))
+        self["status"].setText(u"🔄 Preparing {}…".format(name))
         self.__showOSD(False)
         site = self._site
 
@@ -1768,10 +1768,10 @@ class NovaPlaySimplePlayer(Screen):
     def __onServerResolved(self, server, pos, res):
         if getattr(self, "_closed_flag", False):
             return
-        name = server.get("name") or u"سيرفر"
+        name = server.get("name") or u"Server"
         if not res or not res[0]:
             my_log("server switch: {} found no stream".format(name))
-            self["status"].setText(u"✗ {} لا يعمل — جرب سيرفر آخر".format(name))
+            self["status"].setText(u"✗ {} does not work — try another server".format(name))
             self.__showOSD(True)
             try:
                 from plugin_server_rank import record_host_result
@@ -1794,14 +1794,14 @@ class NovaPlaySimplePlayer(Screen):
             pass
         self._switch_kind = "server"
         self.__qualitySwitch(lbl or str(qual or "AUTO"), url, keep_headers=False, resume=pos,
-                             status=u"🔄 السيرفر: {}".format(name))
+                             status=u"🔄 Server: {}".format(name))
 
     def __qualityMenu(self):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
             return
         variants = self._qualityUsable()
         if not variants:
-            self["status"].setText("🎛 لا توجد جودات أخرى")
+            self["status"].setText("🎛 No other qualities")
             self.__showOSD(True)
             self._hide_timer.start(2500, True)
             return
@@ -1815,11 +1815,11 @@ class NovaPlaySimplePlayer(Screen):
             mark = u"●" if url == self._quality_current_url else u"○"
             items.append(("{} {}".format(mark, label), (label, url)))
         try:
-            items.append(("{} الحالية".format(u"●"), None))
+            items.append(("{} current".format(u"●"), None))
         except Exception:
             pass
         self.session.openWithCallback(self.__onQualityPicked, ChoiceBox,
-                                      "الجودة — Quality", items)
+                                      "Quality", items)
 
     def __onQualityPicked(self, choice):
         if not choice:
@@ -1882,7 +1882,7 @@ class NovaPlaySimplePlayer(Screen):
             self.__playNext()
 
         try:
-            self["status"].setText(status or u"🎛 تبديل الجودة: {}".format(label))
+            self["status"].setText(status or u"🎛 Switching quality: {}".format(label))
         except Exception:
             pass
         # [CHANGE] no full-screen cyan wipe any more (it flashed over the picture
@@ -1909,7 +1909,7 @@ class NovaPlaySimplePlayer(Screen):
             self._stall_count = 0
             self._stall_fail_count = 0
             try:
-                self["status"].setText(u"🎛 الرجوع للجودة السابقة…")
+                self["status"].setText(u"🎛 Going back to the previous quality…")
                 self.__showOSD(True)
             except Exception:
                 pass
@@ -1996,7 +1996,7 @@ class NovaPlaySimplePlayer(Screen):
         my_log("Stall watchdog: frozen ~{}s — kicking pipeline (attempt {})".format(
             self._stall_recover_target, self._stall_fail_count))
         try:
-            self["status"].setText("⏳ استعادة التشغيل…")
+            self["status"].setText("⏳ Restoring playback…")
             self.__showOSD(True)
         except Exception:
             pass
@@ -2013,7 +2013,7 @@ class NovaPlaySimplePlayer(Screen):
             if t > 0 and self.__stallKick(t):
                 my_log("Stall watchdog: playback restored at {}s".format(t))
                 try:
-                    self["status"].setText("تمت الاستعادة")
+                    self["status"].setText("Restored")
                     self.__showOSD(True)
                 except Exception:
                     pass
@@ -2040,7 +2040,7 @@ class NovaPlaySimplePlayer(Screen):
         self._resume_pos = frozen
         self._autosub_gen = getattr(self, "_autosub_gen", 0) + 1
         try:
-            self["status"].setText("🔄 تبديل السيرفر…")
+            self["status"].setText("🔄 Switching server…")
             self.__showOSD(True)
         except Exception:
             pass
@@ -2062,7 +2062,7 @@ class NovaPlaySimplePlayer(Screen):
                 except Exception as e:
                     my_log("server-rank record (exhausted) failed (non-fatal): {}".format(e))
                 self._disarmSkipHint()
-                self["status"].setText("تعذر تشغيل الرابط على كل المحاولات")
+                self["status"].setText("Could not play the link after all attempts")
                 def _fail_callback(ans):
                     if ans:
                         self._exhausted = False
@@ -2084,16 +2084,16 @@ class NovaPlaySimplePlayer(Screen):
                     if _tgt and _tgt not in self._quality_dead_urls:
                         self._quality_dead_urls.add(_tgt)
                         my_log("quality: variant marked dead: {}…".format(_tgt[:70]))
-                    _msg = (u"السيرفر الجديد لم يعمل\nالرجوع للسيرفر السابق؟"
+                    _msg = (u"The new server did not play\nGo back to the previous server?"
                             if getattr(self, "_switch_kind", "") == "server" else
-                            u"الجودة الجديدة غير متاحة (انتهت صلاحية الرابط)\nالرجوع للجودة السابقة؟")
+                            u"The new quality is not available (link expired)\nGo back to the previous quality?")
                     self.session.openWithCallback(
                         self._onQualityRetry, MessageBox, _msg,
                         MessageBox.TYPE_YESNO, timeout=10, default=True)
                 else:
                     self.session.openWithCallback(
                         _fail_callback, MessageBox,
-                        u"تعذر تشغيل الرابط على كل المحاولات\n\nحاول مرة أخرى؟",
+                        u"Could not play the link after all attempts\n\nTry again?",
                         MessageBox.TYPE_YESNO, timeout=8, default=True)
             self._is_advancing = False
             return
@@ -2112,7 +2112,7 @@ class NovaPlaySimplePlayer(Screen):
         else:
             self.sref.setName(self.title.encode("utf-8", "ignore"))
 
-        self["status"].setText("جاري التشغيل... {}".format(label))
+        self["status"].setText("Playing... {}".format(label))
         self.__showOSD(False)
         my_log("Play attempt: {}".format(label))
         try:
@@ -2308,10 +2308,10 @@ class NovaPlaySimplePlayer(Screen):
         except Exception:
             self["autoNextPoster"].hide()
         self["autoNextTitle"].setText(_single_line_text(
-            (nxt or {}).get("title") or "", width=30, fallback="الحلقة التالية"))
-        self["autoNextEpisode"].setText("الحلقة التالية")
-        self["autoNextText"].setText("التشغيل تلقائياً بعد %d ثوانٍ" % _delay)
-        self["autoNextHelp"].setText("OK = تشغيل الآن    EXIT = إلغاء")
+            (nxt or {}).get("title") or "", width=30, fallback="Next episode"))
+        self["autoNextEpisode"].setText("Next episode")
+        self["autoNextText"].setText("Playing automatically in %d seconds" % _delay)
+        self["autoNextHelp"].setText("OK = play now    EXIT = cancel")
         try:
             self["autoNextProgress"].setRange((0, _delay))
             self["autoNextProgress"].setValue(_delay)
@@ -2366,7 +2366,7 @@ class NovaPlaySimplePlayer(Screen):
             self.__nextAnswer(True, self._autonext_nxt)
             return
         try:
-            self["autoNextText"].setText("التشغيل تلقائياً بعد %d ثوانٍ" % self._autonext_secs)
+            self["autoNextText"].setText("Playing automatically in %d seconds" % self._autonext_secs)
             self["autoNextProgress"].setValue(self._autonext_secs)
             if self._autonext_secs <= 3:
                 _c = "#FF6B6B" if (self._autonext_secs % 2) else "#E8E8E8"
@@ -2434,13 +2434,13 @@ class NovaPlaySimplePlayer(Screen):
                         and float(elapsed) / float(total) >= 0.80):
             items = []
             if self._next_episode:
-                items.append((u"▶ الحلقة التالية — Next episode", "next"))
-            items.append((u"✓ وضع علامة مشاهدة وإنهاء", "mark"))
-            items.append((u"↵ حفظ الموقع والخروج", "save"))
-            items.append((u"✕ إلغاء", "cancel"))
+                items.append((u"▶ Next episode", "next"))
+            items.append((u"✓ Mark as watched and exit", "mark"))
+            items.append((u"↵ Save position and exit", "save"))
+            items.append((u"✕ Cancel", "cancel"))
             self.session.openWithCallback(
                 self._onExitChoice, ChoiceBox,
-                title=u"قرب النهاية — ماذا تريد؟",
+                title=u"Near the end — what now?",
                 list=items)
             return
         self.__onExit()
@@ -2668,7 +2668,7 @@ class NovaPlaySimplePlayer(Screen):
             cur = current_play_secs()
             my_log("seekPct: key={}%, total={}s, current={}s".format(pct, total, cur))
             if not total:
-                self["status"].setText("مدة غير معروفة بعد…")
+                self["status"].setText("Duration not known yet…")
                 self.__showOSD(True)
                 return
             self.__seek(int(total * pct / 100) - cur)
@@ -2703,8 +2703,8 @@ class NovaPlaySimplePlayer(Screen):
             self.session.nav.stopService()
         except: pass
         self._candidate_idx = -1
-        self["status"].setText(u"إعادة التشغيل + استئناف من {}:{:02d}...".format(
-            self._resume_pos // 60, self._resume_pos % 60) if self._resume_pos > 30 else u"إعادة التشغيل...")
+        self["status"].setText(u"Restarting + resuming from {}:{:02d}...".format(
+            self._resume_pos // 60, self._resume_pos % 60) if self._resume_pos > 30 else u"Restarting...")
         self.__showOSD(True)
         try:
             if getattr(self, "_restart_timer", None):
@@ -2947,7 +2947,7 @@ class NovaPlaySimplePlayer(Screen):
         try:
             service = self.session.nav.getCurrentService()
             info = service.info() if service else None
-            lines = [u"معلومات البث — Stream info"]
+            lines = [u"Stream info"]
             if info is not None and iServiceInformation is not None:
                 try:
                     x = info.getInfo(iServiceInformation.sWidth)
@@ -2980,7 +2980,7 @@ class NovaPlaySimplePlayer(Screen):
 
     def __sleepMenu(self):
         entries = [("Off", 0), ("15 min", 15), ("30 min", 30), ("60 min", 60), ("90 min", 90)]
-        self.session.openWithCallback(self.__sleepPicked, ChoiceBox, "Sleep timer — مؤقت النوم", entries)
+        self.session.openWithCallback(self.__sleepPicked, ChoiceBox, "Sleep timer", entries)
 
     def __sleepPicked(self, choice):
         if not choice:
@@ -3021,7 +3021,7 @@ class NovaPlaySimplePlayer(Screen):
             if free_mb < 500:
                 self.session.open(
                     MessageBox,
-                    u"مساحة القرص غير كافية للتسجيل\nالمتاح: {} MB (الحد الأدنى 500 MB)".format(free_mb),
+                    u"Not enough disk space to record\nFree: {} MB (minimum 500 MB)".format(free_mb),
                     MessageBox.TYPE_WARNING, timeout=6)
                 self.__showOSD(True)
                 return
@@ -3134,7 +3134,7 @@ class NovaPlaySimplePlayer(Screen):
             adjust_sync(self.session, -SYNC_STEP_MS)
             state = get_subtitle_state()
             off = int(state.get("offset_ms") or 0)
-            self["status"].setText("ترجمة: %+d ms" % off)
+            self["status"].setText("Subtitles: %+d ms" % off)
             self._showSyncToast("%+d ms" % off)
         except Exception as e:
             my_log("subtitle delay error: {}".format(e))
@@ -3237,7 +3237,7 @@ class NovaPlaySimplePlayer(Screen):
         rows = [(u"Next-ep prompt: {}".format("ON" if self._next_prompt_enabled else "OFF"),
                  self._next_prompt_enabled, True)]
         rows += [(u"Skip intro {}s".format(v), skip == v, True) for v in self._SKIP_STEPS]
-        rows += [(u"Chapters — فصول", False), (u"Help — المساعدة", False), (u"Self-test", False)]
+        rows += [(u"Chapters", False), (u"Help", False), (u"Self-test", False)]
         return rows
 
     def _menuLive(self, col, idx):
@@ -3345,15 +3345,15 @@ class NovaPlaySimplePlayer(Screen):
             return
         total = self._total_secs
         if not total or total <= 60:
-            self["status"].setText(u"مدة غير معروفة بعد — لا توجد نقاط قفز")
+            self["status"].setText(u"Duration not known yet — no jump points")
             self.__showOSD(True)
             return
         marks = [
-            (u"Start — البداية", 0),
-            (u"25% — الربع الأول", total * 0.25),
-            (u"Halfway — المنتصف", total * 0.5),
-            (u"75% — الربع الثالث", total * 0.75),
-            (u"End — النهاية", max(0, total - 10)),
+            (u"Start", 0),
+            (u"25%", total * 0.25),
+            (u"Halfway", total * 0.5),
+            (u"75%", total * 0.75),
+            (u"End", max(0, total - 10)),
         ]
         items = [(u"{}   {}".format(name, self._fmtChapterTime(t)), int(t))
                  for name, t in marks]
@@ -3362,10 +3362,10 @@ class NovaPlaySimplePlayer(Screen):
         except Exception:
             saved = 0
         if saved and saved > 30:
-            items.append((u"↺ Resume point — نقطة الاستئناف   {}".format(
+            items.append((u"↺ Resume point   {}".format(
                 self._fmtChapterTime(saved)), int(saved)))
         self.session.openWithCallback(self._onChapterChosen, ChoiceBox,
-                                      title=u"القفز إلى — Jump to", list=items)
+                                      title=u"Jump to", list=items)
 
     def _onChapterChosen(self, choice):
         if not choice:
@@ -3386,31 +3386,31 @@ class NovaPlaySimplePlayer(Screen):
         if getattr(self, "_studioOverlayActive", False) or getattr(self, "_autonext_active", False):
             return
         lines = [
-            u"مفاتيح التشغيل — Player Controls",
+            u"Player Controls",
             u"",
-            u"التشغيل — Playback",
-            u"OK            تشغيل/إيقاف مؤقت — Play / Pause",
-            u"STOP          خروج مباشر للتلفاز — Exit straight to TV",
-            u"EXIT/CANCEL   خروج — قرب النهاية: التالي/علّم/احفظ/إلغاء",
+            u"Playback",
+            u"OK            Play / Pause",
+            u"STOP          Exit straight to TV",
+            u"EXIT/CANCEL   Exit — near the end: next / mark / save / cancel",
             u"",
-            u"التقديم — Seeking",
-            u"LEFT / RIGHT     تقديم/تأخير (استمر للتسريع 10s→30s→60s)",
-            u"UP / DOWN        تقديم/تأخير 60 ثانية",
-            u"FF / REW         تقديم/تأخير (نفس تسريع الاستمرار)",
-            u"0-9              قفز إلى 0%/10%/20%/…/90% من المدة (0 = من البداية)",
+            u"Seeking",
+            u"LEFT / RIGHT     Seek (hold to speed up 10s→30s→60s)",
+            u"UP / DOWN        Seek 60 seconds",
+            u"FF / REW         Seek (same hold speed-up)",
+            u"0-9              Jump to 0%/10%/20%/…/90% of the runtime (0 = start)",
             u"",
-            u"المسارات والترجمة — Tracks & Subtitles",
-            u"BLUE / SUBTITLE  الصوت / الترجمة / المزيد — Audio, subtitles panel",
-            u"AUDIO            اختيار المسار الصوتي — Audio track selection",
+            u"Tracks & Subtitles",
+            u"BLUE / SUBTITLE  Audio, subtitles, more panel",
+            u"AUDIO            Audio track selection",
             u"",
-            u"الجودة والمعلومات — Quality & Info",
-            u"RED           السيرفر التالي — Next server",
-            u"GREEN         تخطي المقدمة / الحلقة التالية — Skip intro / next episode",
-            u"YELLOW        الجودة / السيرفر / السرعة — Quality, server, speed panel",
-            u"INFO          معلومات البث — Stream info",
+            u"Quality & Info",
+            u"RED           Next server",
+            u"GREEN         Skip intro / next episode",
+            u"YELLOW        Quality, server, speed panel",
+            u"INFO          Stream info",
             u"",
-            u"MENU          الصورة (Full/14:9/4:3) · مؤقت النوم والتسجيل ·",
-            u"              الإعدادات (الحلقة التالية، مدة تخطي المقدمة، فصول، مساعدة)",
+            u"MENU          Picture (brightness / contrast / colour) · Sleep timer & recording ·",
+            u"              Settings (next episode, skip-intro length, chapters, help)",
         ]
         self.session.open(MessageBox, u"\n".join(lines), MessageBox.TYPE_INFO)
 
@@ -3485,13 +3485,13 @@ class NovaPlaySimplePlayer(Screen):
         ok = sum(1 for _, r in results if r == "OK")
         for name, r in results:
             my_log("[SelfTest] {:22s} {}".format(name, r))
-        self["status"].setText(u"الفحص الذاتي: {}/{} — Self-test".format(ok, len(results)))
+        self["status"].setText(u"Self-test: {}/{}".format(ok, len(results)))
         self.__showOSD(True)
         # Bilingual header, same precedent as __streamInfo: an Arabic
         # header over technical/diagnostic lines left in English, since
         # the check names themselves (service-reachable, osd-widgets-
         # attached, …) are debug labels, not end-user copy.
-        lines = [u"الفحص الذاتي — Self-test: {}/{} passed".format(ok, len(results)), u""]
+        lines = [u"Self-test: {}/{} passed".format(ok, len(results)), u""]
         for name, r in results:
             mark = u"✓" if r == "OK" else u"✗"
             lines.append(u"{} {}".format(mark, name) if r == "OK"
@@ -3620,14 +3620,14 @@ class NovaPlaySimplePlayer(Screen):
         st = get_subtitle_state() or {}
         path = st.get("path") or ""
         rows, acts = [], []
-        rows.append((u"Off — بدون ترجمة", not path)); acts.append(("off", None))
+        rows.append((u"Off — no subtitles", not path)); acts.append(("off", None))
         if path:
             rows.append((os.path.basename(st.get("_orig_path") or path)[:40], True)); acts.append(("cur", None))
         res = getattr(self, "_vidy_results", None)
         if res is None:
             rows.append((u"⏳ Movy subtitles…", False)); acts.append(("wait", None))
         elif not res:
-            rows.append((u"Movy: " + (getattr(self, "_vidy_error", "") or u"لا توجد ترجمة")[:34], False))
+            rows.append((u"Movy: " + (getattr(self, "_vidy_error", "") or u"No subtitles")[:34], False))
             acts.append(("wait", None))
         else:
             for r in res[:60]:
@@ -3669,7 +3669,7 @@ class NovaPlaySimplePlayer(Screen):
         audio = self._audioTrackItems()
         self._audio_count = len(audio)
         if not audio:
-            audio = [(u"— " + u"مسار واحد", True)]
+            audio = [(u"— " + u"single track", True)]
         subs = self._subsItems()
         more = self._moreItems()
         self.__hideOSD()
@@ -3794,16 +3794,16 @@ class NovaPlaySimplePlayer(Screen):
         except Exception:
             _skip_s = 90
         items = [
-            ("Skip intro +%ds — تخطي المقدمة" % _skip_s, "skipintro"),
-            ("Auto subtitles — ترجمة تلقائية (%s)" % ("ON" if autosub_on else "OFF"), "autosub_toggle"),
-            ("Audio tracks — الصوت", "audio"),
-            ("Quality — الجودة", "quality"),
-            ("Subtitle Studio — تنسيق الترجمة (%s)" % ("ON" if studio_on else "OFF"), "studio_toggle"),
+            ("Skip intro +%ds" % _skip_s, "skipintro"),
+            ("Auto subtitles (%s)" % ("ON" if autosub_on else "OFF"), "autosub_toggle"),
+            ("Audio tracks", "audio"),
+            ("Quality", "quality"),
+            ("Subtitle Studio (%s)" % ("ON" if studio_on else "OFF"), "studio_toggle"),
         ]
         if studio_on:
-            items.append(("Studio settings — إعدادات التنسيق", "studio_open"))
+            items.append(("Studio settings", "studio_open"))
         items.append(("Browse local subtitles", "browse"))
-        items.append(("Search online (Movy — عربي/English, no key)", "vidy"))
+        items.append(("Search online (Movy — Arabic/English, no key)", "vidy"))
         items.append(("Search online (SubSource)", "subsource"))
         items.append(("Search online (OpenSubtitles)", "opensubtitles"))
         state = get_subtitle_state()
@@ -3882,30 +3882,30 @@ class NovaPlaySimplePlayer(Screen):
     def _studioItemsList(self):
         from novaplay_substudio import STUDIO
         s = STUDIO.style
-        align_lbl = ["Top — أعلى", "Bottom — أسفل", "Center — وسط"][s["align"]]
+        align_lbl = ["Top", "Bottom", "Center"][s["align"]]
         font_lbl = os.path.basename(s.get("font_path") or "") or s.get("font_name") or "Default"
         try:
             _delay_val = int(get_subtitle_state().get("offset_ms") or 0)
         except Exception:
             _delay_val = int(STUDIO.get_offset() or 0)
         return [
-            ("Delay — التأخير", "%+d ms" % _delay_val, "delay", 250),
-            ("Size — الحجم", "%d px" % s["size"], "size", 2),
-            ("Font — الخط", font_lbl + "  ›", "font", 1),
-            ("Color — اللون", ["White","Yellow","Gold","Cyan","Red","Green"][s["color_idx"] % 6], "color", 1),
-            ("Outline — الحدود", "On" if s["outline"] else "Off", "outline", 1),
-            ("Outline color — لون الحدود", ["White","Yellow","Gold","Cyan","Red","Green"][s["outline_color_idx"] % 6], "ocolor", 1),
-            ("Background — الخلفية", "On" if s["bg"] else "Off", "bg", 1),
-            ("Opacity — العتامة", "%d%%" % int(round((255 - int(s["bg_alpha"])) * 100 / 255.0)), "bg_alpha", 16),
-            ("Position — الموضع", "%+d px" % int(s["offset_y"]), "offset_y", 10),
-            ("Align — المحاذاة", align_lbl, "align", 1),
-            ("Spacing — التباعد", str(s["spacing"]), "spacing", 2),
-            ("Auto-wrap — التفاف تلقائي", "On" if s.get("auto_wrap", True) else "Off", "autowrap", 1),
-            ("Cue position — موضع الملف", "On" if s.get("use_cue_pos", True) else "Off", "cuepos", 1),
-            ("Presets — قوالب", "A / B / C  ›", "presets", 0),
-            ("Pick line to sync — مزامنة بالسطر", "OK  ›", "pickline", 0),
-            ("Reset — افتراضي", "OK  ›", "reset", 0),
-            ("Remove — إيقاف", "OK  ›", "remove", 0),
+            ("Delay", "%+d ms" % _delay_val, "delay", 250),
+            ("Size", "%d px" % s["size"], "size", 2),
+            ("Font", font_lbl + "  ›", "font", 1),
+            ("Color", ["White","Yellow","Gold","Cyan","Red","Green"][s["color_idx"] % 6], "color", 1),
+            ("Outline", "On" if s["outline"] else "Off", "outline", 1),
+            ("Outline color", ["White","Yellow","Gold","Cyan","Red","Green"][s["outline_color_idx"] % 6], "ocolor", 1),
+            ("Background", "On" if s["bg"] else "Off", "bg", 1),
+            ("Opacity", "%d%%" % int(round((255 - int(s["bg_alpha"])) * 100 / 255.0)), "bg_alpha", 16),
+            ("Position", "%+d px" % int(s["offset_y"]), "offset_y", 10),
+            ("Align", align_lbl, "align", 1),
+            ("Spacing", str(s["spacing"]), "spacing", 2),
+            ("Auto-wrap", "On" if s.get("auto_wrap", True) else "Off", "autowrap", 1),
+            ("Cue position", "On" if s.get("use_cue_pos", True) else "Off", "cuepos", 1),
+            ("Presets", "A / B / C  ›", "presets", 0),
+            ("Pick line to sync", "OK  ›", "pickline", 0),
+            ("Reset", "OK  ›", "reset", 0),
+            ("Remove", "OK  ›", "remove", 0),
         ]
 
     def _showStudioOverlay(self):
@@ -4175,7 +4175,7 @@ class NovaPlaySimplePlayer(Screen):
             entries.append((lines_preview[:60], i))
         self.session.openWithCallback(
             self._onStudioPickLine, ChoiceBox,
-            "اختر السطر المطابق لما يظهر الآن", entries)
+            "Pick the line being spoken now", entries)
 
     def _onStudioPickLine(self, choice):
         from novaplay_substudio import STUDIO
@@ -4224,7 +4224,7 @@ class NovaPlaySimplePlayer(Screen):
             elif key == "ocolor":
                 choices = [("White", 0), ("Yellow", 1), ("Gold", 2), ("Cyan", 3), ("Red", 4), ("Green", 5)]
             elif key == "align":
-                choices = [("Top — أعلى", 0), ("Bottom — أسفل", 1), ("Center — وسط", 2)]
+                choices = [("Top", 0), ("Bottom", 1), ("Center", 2)]
             self._studioChoiceKey = key
             self._hideStudioOverlay()
             self.session.openWithCallback(self._onStudioChoice, ChoiceBox,
@@ -4277,11 +4277,11 @@ class NovaPlaySimplePlayer(Screen):
     def _studioPresetMenu(self):
         items = []
         for slot in ("A", "B", "C"):
-            items.append(("Load %s — تحميل" % slot, "load_" + slot))
-            items.append(("Save %s — حفظ" % slot, "save_" + slot))
+            items.append(("Load %s" % slot, "load_" + slot))
+            items.append(("Save %s" % slot, "save_" + slot))
         self._hideStudioOverlay()
         self.session.openWithCallback(self._onStudioPreset, ChoiceBox,
-                                      "Style Presets — القوالب", items)
+                                      "Style Presets", items)
 
     def _onStudioPreset(self, choice):
         from novaplay_substudio import STUDIO
@@ -4324,7 +4324,7 @@ class NovaPlaySimplePlayer(Screen):
                 self2["list"] = FileList(start_dir, showDirectories=True,
                                          showFiles=True,
                                          matchingPattern=r"^.*\.(ttf|otf|ttc)$")
-                self2["hint"] = Label("OK اختيار  |  EXIT رجوع  |  YELLOW الخط الافتراضي")
+                self2["hint"] = Label("OK select  |  EXIT back  |  YELLOW default font")
                 self2["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"], {
                     "ok": self2._ok,
                     "cancel": lambda: self2.close("__keep__"),

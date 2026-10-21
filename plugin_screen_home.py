@@ -319,7 +319,7 @@ class NovaPlayHome(Screen):
         self._current_backdrop_path = ""
         self["title_bar"]  = Label("")
         self["title_text"] = Label("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
-        self["status"]     = Label("جاري التحميل…")
+        self["status"]     = Label("Loading…")
         self["clock_time"]   = Label("")
         self["clock_period"] = Label("")
         self["clock_sep"]    = Label("")
@@ -329,10 +329,10 @@ class NovaPlayHome(Screen):
         self["info_meta"]  = Label("")
         self["info_plot"]  = Label("")
         self["btn_bar"]    = Label("")
-        self["key_red"]    = Label("خروج")
-        self["key_green"]  = Label("المفضلة")
-        self["key_yellow"] = Label("بحث")
-        self["key_blue"]   = Label("الإعدادات")
+        self["key_red"]    = Label("Exit")
+        self["key_green"]  = Label("Favorites")
+        self["key_yellow"] = Label("Search")
+        self["key_blue"]   = Label("Settings")
 
         # [pop-out] cyan glow ring behind the selected home tile
         self["homeSel"] = Label("")
@@ -650,10 +650,10 @@ class NovaPlayHome(Screen):
             return
         if self._focus_zone == "row":
             self._navHintDir = "down"
-            self["navHint"].setText(u"▼   اضغط للأسفل لعرض المواقع")
+            self["navHint"].setText(u"▼   Press down to show the sites")
         else:
             self._navHintDir = "up"
-            self["navHint"].setText(u"▲   اضغط للأعلى لاستئناف المشاهدة")
+            self["navHint"].setText(u"▲   Press up to resume watching")
         try:
             self["navHint"].show()
         except Exception:
@@ -995,10 +995,10 @@ class NovaPlayHome(Screen):
         for i in range(HOME_GRID_ROWS):
             for _c in range(HOME_GRID_COLS):
                 self["pic_%d_%d" % (i, _c)].show()
-        self["key_red"].setText("خروج")
-        self["key_green"].setText("المفضلة")
-        self["key_yellow"].setText("بحث")
-        self["key_blue"].setText("الإعدادات")
+        self["key_red"].setText("Exit")
+        self["key_green"].setText("Favorites")
+        self["key_yellow"].setText("Search")
+        self["key_blue"].setText("Settings")
         self._paintContinueRow()
         self._zone_p = 1.0
         self._zone_target = 1.0
@@ -1068,7 +1068,7 @@ class NovaPlayHome(Screen):
             self["info_meta"].hide()
             self["info_plot"].hide()
             self._current_backdrop_path = ""
-            self["key_green"].setText("تبديل العرض (Carousel)")
+            self["key_green"].setText("Switch view (Carousel)")
         else:
             self["content_title"].show()
             self["info_meta"].show()
@@ -1077,10 +1077,10 @@ class NovaPlayHome(Screen):
                 self["cposter%d" % i].show()
             self._applyCarouselGeometry()
             self._syncCarouselFocusVisible()
-            self["key_green"].setText("تبديل العرض (Grid)")
-        self["key_red"].setText("الصفحة السابقة")
-        self["key_yellow"].setText("بحث")
-        self["key_blue"].setText("الصفحة التالية")
+            self["key_green"].setText("Switch view (Grid)")
+        self["key_red"].setText("Previous page")
+        self["key_yellow"].setText("Search")
+        self["key_blue"].setText("Next page")
         self["grid_status_left"].show()
         self["grid_status_right"].show()
         self._artworkPollTimer.start(1000, False)
@@ -1195,7 +1195,7 @@ class NovaPlayHome(Screen):
             self["clabel%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
-            self["cposter%d" % widget_id].setText("الصفحة التالية")
+            self["cposter%d" % widget_id].setText("Next page")
             return
         if item.get("_is_prev_page"):
             self["cposterImg%d" % widget_id].hide()
@@ -1204,7 +1204,7 @@ class NovaPlayHome(Screen):
             self["clabel%d" % widget_id].hide()
             self["cfavMark%d" % widget_id].hide()
             self["cresumeMark%d" % widget_id].hide()
-            self["cposter%d" % widget_id].setText("الصفحة السابقة")
+            self["cposter%d" % widget_id].setText("Previous page")
             return
         self["cposter%d" % widget_id].setText("")
         # [tmdb-poster-fallback] no real (portrait) poster yet -- kick off
@@ -1297,13 +1297,13 @@ class NovaPlayHome(Screen):
             pass
         saved_pos = _get_saved_position(item.get("url", ""))
         if _watched:
-            self["cresumeMark%d" % widget_id].setText(u"✓ شاهدته")
+            self["cresumeMark%d" % widget_id].setText(u"✓ Watched")
             self["cresumeMark%d" % widget_id].show()
         elif saved_pos > 30:
             mm, ss = divmod(saved_pos, 60)
             hh, mm = divmod(mm, 60)
             tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
-            self["cresumeMark%d" % widget_id].setText("متابعة " + tstr)
+            self["cresumeMark%d" % widget_id].setText("Resume " + tstr)
             self["cresumeMark%d" % widget_id].show()
         else:
             self["cresumeMark%d" % widget_id].hide()
@@ -1382,7 +1382,7 @@ class NovaPlayHome(Screen):
         start = (page - 1) * per_page + 1
         end = min(start + per_page - 1, total)
         self["grid_status_left"].setText("Shows {}-{} / {}".format(start, end, total))
-        self["grid_status_right"].setText("Page {} / {}  •  1–9 للتنقل".format(page, total_pages))
+        self["grid_status_right"].setText("Page {} / {}  •  1–9 to jump".format(page, total_pages))
 
     def _updatePosterPixmaps(self, pop_p=1.0):
         try:
@@ -1475,7 +1475,7 @@ class NovaPlayHome(Screen):
                     url = item["thumbnail"]
                     path = plugin_imagecache.getCachedImage(url, target_size=(POSTER_W, POSTER_H))
                 # [CHANGE 2026-10-17] watched posters keep their colours by default (the
-                # "✓ شاهدته" badge still marks them); the old black & white, darkened
+                # "✓ Watched" badge still marks them); the old black & white, darkened
                 # poster is opt-in via the config key "watched_poster_bw".
                 if path and item.get("url") and _get_config("watched_poster_bw", False):
                     try:
@@ -1595,7 +1595,7 @@ class NovaPlayHome(Screen):
                         pass
                     _compact_chip = True
                 elif _watched and _in_grid:
-                    badge.setText(u"✓ شاهدته")
+                    badge.setText(u"✓ Watched")
                     try:
                         _inst = badge.instance
                         if _inst is not None:
@@ -1607,7 +1607,7 @@ class NovaPlayHome(Screen):
                     mm, ss = divmod(saved_pos, 60)
                     hh, mm = divmod(mm, 60)
                     tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
-                    badge.setText("متابعة " + tstr)
+                    badge.setText("Resume " + tstr)
                     try:
                         _inst = badge.instance
                         if _inst is not None:
@@ -1988,10 +1988,10 @@ class NovaPlayHome(Screen):
 
                 _type = item.get("type", "")
                 if _type == "episode":
-                    typetag.setText("حلقة")
+                    typetag.setText("Episode")
                     typetag.show()
                 elif _type in ("series", "show"):
-                    typetag.setText("مسلسل")
+                    typetag.setText("Series")
                     typetag.show()
                 else:
                     typetag.hide()
@@ -2012,13 +2012,13 @@ class NovaPlayHome(Screen):
                 except Exception: pass
             self._updateContinueLabel()
         else:
-            self["cont_title"].setText("لا يوجد محتوى قيد المشاهدة — ابدأ من الشبكة أدناه")
+            self["cont_title"].setText("Nothing in progress — start from the grid below")
             self["cont_title"].show()
             self._resetContinueZoom()
 
     def _updateContinueLabel(self):
         if not (0 <= self._cont_index < len(self._cont_items)):
-            self["cont_title"].setText("متابعة المشاهدة")
+            self["cont_title"].setText("Continue Watching")
             return
         item = self._cont_items[self._cont_index]
         pos = _get_saved_position(item.get("url", ""))
@@ -2027,9 +2027,9 @@ class NovaPlayHome(Screen):
         tstr = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
         title = _single_line_text(item.get("title", ""), width=40, fallback="")
         if title:
-            self["cont_title"].setText("متابعة المشاهدة  •  {}  •  {}".format(title, tstr))
+            self["cont_title"].setText("Continue Watching  •  {}  •  {}".format(title, tstr))
         else:
-            self["cont_title"].setText("متابعة المشاهدة")
+            self["cont_title"].setText("Continue Watching")
 
     # [pop-anim] p in [0,1] interpolates the zoomed card from base size to +8%.
     # Called with zoom_index=None to reset every slot to base.
@@ -2251,8 +2251,8 @@ class NovaPlayHome(Screen):
                 self._paintContinueRow()
             self.session.openWithCallback(
                 _confirm, MessageBox,
-                u"إزالة من متابعة المشاهدة؟\n{}".format(
-                    _single_line_text(title, width=40, fallback="عنصر")),
+                u"Remove from Continue Watching?\n{}".format(
+                    _single_line_text(title, width=40, fallback="Item")),
                 MessageBox.TYPE_YESNO, timeout=8, default=False)
             return
 
@@ -2267,11 +2267,11 @@ class NovaPlayHome(Screen):
             label = item.get("title", site_key)
 
             _opts = [
-                ("فتح الموقع",        "open"),
-                ("إعادة تسمية",       "rename"),
-                ("اختبار الاتصال",    "ping"),
-                ("تفعيل البروكسي",    "proxy"),
-                ("مسح من الشبكة",    "hide"),
+                ("Open site",        "open"),
+                ("Rename",       "rename"),
+                ("Test connection",    "ping"),
+                ("Enable proxy",    "proxy"),
+                ("Remove from grid",    "hide"),
             ]
 
             def _choice(ans, _sk=site_key, _lbl=label):
@@ -2293,7 +2293,7 @@ class NovaPlayHome(Screen):
                 elif _key == "proxy":
                     try:
                         _set_config("use_proxy_for_" + _sk, "true")
-                        self._setStatus("فُعّل البروكسي لـ {}".format(_lbl))
+                        self._setStatus("Proxy enabled for {}".format(_lbl))
                     except Exception:
                         pass
                 elif _key == "hide":
@@ -2305,7 +2305,7 @@ class NovaPlayHome(Screen):
 
             self.session.openWithCallback(
                 _choice, ChoiceBox,
-                title=u"{} — ماذا تريد؟".format(label),
+                title=u"{} — what do you want?".format(label),
                 list=_opts)
             return
 
@@ -2320,11 +2320,11 @@ class NovaPlayHome(Screen):
             rep_key, members = self._picker_rep, self._picker_members
             idx = members.index(site_key) if site_key in members else -1
 
-            _opts = [("إعادة تسمية", "rename")]
+            _opts = [("Rename", "rename")]
             if idx > 0:
-                _opts.append(("نقل للأعلى", "up"))
+                _opts.append(("Move up", "up"))
             if 0 <= idx < len(members) - 1:
-                _opts.append(("نقل للأسفل", "down"))
+                _opts.append(("Move down", "down"))
 
             def _choice(ans, _sk=site_key, _lbl=label, _rep=rep_key, _idx=idx):
                 if ans is None:
@@ -2346,12 +2346,12 @@ class NovaPlayHome(Screen):
 
             self.session.openWithCallback(
                 _choice, ChoiceBox,
-                title=u"{} — ماذا تريد؟".format(label),
+                title=u"{} — what do you want?".format(label),
                 list=_opts)
             return
 
     def _quickPingSite(self, site_key, label):
-        self._setStatus("جاري اختبار {}…".format(label))
+        self._setStatus("Testing {}…".format(label))
 
         def _worker():
             try:
@@ -2366,7 +2366,7 @@ class NovaPlayHome(Screen):
                 callInMainThread(self._setStatus, "{}: OK".format(label))
             except Exception as e:
                 plugin_health.record(site_key, "down", str(e))
-                callInMainThread(self._setStatus, "{}: فشل".format(label), True)
+                callInMainThread(self._setStatus, "{}: failed".format(label), True)
         threading.Thread(target=_worker, daemon=True).start()
 
     def _pageJump(self, page_num):
@@ -2389,7 +2389,7 @@ class NovaPlayHome(Screen):
             grid._redraw()
             grid._notify()
             self._updateGridFooter()
-            self._setStatus("صفحة {} / {}".format(target + 1, grid.totalPages))
+            self._setStatus("Page {} / {}".format(target + 1, grid.totalPages))
         except Exception as e:
             my_log("pageJump error: {}".format(e))
 
@@ -2641,10 +2641,10 @@ class NovaPlayHome(Screen):
             except Exception:
                 pass
             self._list_return_index = None
-            self._setStatus("{} عنصر".format(len(items)))
-            self["key_red"].setText("رجوع")
+            self._setStatus("{} items".format(len(items)))
+            self["key_red"].setText("Back")
             self["key_green"].setText("")
-            self["key_yellow"].setText("بحث")
+            self["key_yellow"].setText("Search")
             self["key_blue"].setText("")
             self._updateGridFooter()
 
@@ -2693,8 +2693,8 @@ class NovaPlayHome(Screen):
             })
         self._source = "site_pick"
         self._setList(items)
-        self["title_text"].setText("اختر الموقع")
-        self._setStatus("اختر أحد المواقع")
+        self["title_text"].setText("Choose a site")
+        self._setStatus("Pick one of the sites")
         if focus_site and focus_site in members:
             try:
                 idx = members.index(focus_site)
@@ -2727,7 +2727,7 @@ class NovaPlayHome(Screen):
                 on_done()
         self.session.openWithCallback(
             _on_typed, VirtualKeyBoard,
-            title=u"اسم العرض لـ {}".format(current_label),
+            title=u"Display name for {}".format(current_label),
             text=current_label)
 
     def _showSiteCategories(self):
@@ -2735,14 +2735,14 @@ class NovaPlayHome(Screen):
         if cached is not None:
             self._source = "categories"
             self._setList(cached)
-            self["title_text"].setText("تصنيفات {}".format(_site_label(self._site)))
-            self._setStatus("اختر القسم")
+            self["title_text"].setText("{} categories".format(_site_label(self._site)))
+            self._setStatus("Choose a section")
             return
         try:
             extractor = _get_extractor(self._site)
             get_categories = getattr(extractor, "get_categories", None)
             if not get_categories:
-                cats = [{"title": "لا توجد أقسام", "type": "error"}]
+                cats = [{"title": "No sections", "type": "error"}]
             else:
                 if self._site in ["egydead", "egydead_coupons"]:
                     movie_cats = get_categories("movie")
@@ -2756,13 +2756,13 @@ class NovaPlayHome(Screen):
                     cats = [_site_search_item(self._site)] + (get_categories() or [])
             plugin_health.record(self._site, "ok")
         except Exception as e:
-            cats = [{"title": "فشل جلب الأقسام", "type": "error"}]
+            cats = [{"title": "Could not load the sections", "type": "error"}]
             plugin_health.record(self._site, "blocked" if get_curl_failed_needs_proxy() else "down", str(e))
         self._cats_cache[self._site] = cats
         self._source = "categories"
         self._setList(cats)
-        self["title_text"].setText("تصنيفات {}".format(_site_label(self._site)))
-        self._setStatus("اختر القسم")
+        self["title_text"].setText("{} categories".format(_site_label(self._site)))
+        self._setStatus("Choose a section")
 
     def _loadCategory(self, url, name, is_new=False):
         self._source = "category"
@@ -2777,7 +2777,7 @@ class NovaPlayHome(Screen):
                 self._page_history.append(key)
                 if self._site not in ["egydead", "egydead_coupons", "fasel", "faselhdx"]:
                     self._page += 1
-        self._setStatus("جاري تحميل {}…".format(name))
+        self._setStatus("Loading {}…".format(name))
         threading.Thread(target=self._bgLoadCategory, args=(url,), daemon=True).start()
 
     def _bgLoadCategory(self, url):
@@ -2794,12 +2794,12 @@ class NovaPlayHome(Screen):
             callInMainThread(self._onCategoryLoaded, items)
         except Exception as e:
             plugin_health.record(self._site, "down", str(e))
-            callInMainThread(self._setStatus, "فشل: {}".format(str(e)[:60]), True)
+            callInMainThread(self._setStatus, "Failed: {}".format(str(e)[:60]), True)
             callInMainThread(self._shakeList)          # [catlist-effects]
 
     def _onCategoryLoaded(self, items):
         if not items:
-            self._setStatus("لا توجد نتائج")
+            self._setStatus("No results")
             return
         next_page_item = next((i for i in items if i.get("_action") == "category" and i.get("url")), None)
         self._next_page_url = next_page_item["url"] if next_page_item else None
@@ -2824,7 +2824,7 @@ class NovaPlayHome(Screen):
             items = _history_items()
         self._source = "library"
         self._setList(items)
-        self["title_text"].setText("المفضلة" if kind == "favorites" else "السجل")
+        self["title_text"].setText("Favorites" if kind == "favorites" else "History")
         self._setStatus("")
 
     def _onSearch(self, forced_scope=None):
@@ -2841,7 +2841,7 @@ class NovaPlayHome(Screen):
         if not query:
             return
         self._last_query = query
-        self._setStatus("بحث عن: {}…".format(query))
+        self._setStatus("Searching for: {}…".format(query))
         threading.Thread(target=self._bgSearch, args=(query, scope or "all"), daemon=True).start()
 
     def _bgSearch(self, query, scope="all"):
@@ -2872,7 +2872,7 @@ class NovaPlayHome(Screen):
 
     def _onSearchResults(self, items, query):
         if not items:
-            self._setStatus("لا توجد نتائج")
+            self._setStatus("No results")
             return
         self._source = "search"
         self._setList(_rank_search_items(items, query))
@@ -2901,7 +2901,7 @@ class NovaPlayHome(Screen):
             self._page = prev_page
             if self._layout_style == "carousel":
                 self._focus_end = True
-            self._setStatus("جاري تحميل {}…".format(cat_name))
+            self._setStatus("Loading {}…".format(cat_name))
             threading.Thread(target=self._bgLoadCategory, args=(prev_url,), daemon=True).start()
 
     def _onGreen(self):

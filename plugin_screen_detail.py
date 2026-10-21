@@ -334,19 +334,19 @@ class NovaPlayDetail(Screen):
         self["meta"]   = Label("")
         self["source"] = Label("")
         self["proxy_warning"] = Label("")
-        self["plot_title"] = Label("القصة")
+        self["plot_title"] = Label("Plot")
         self["plot"]   = Label("")
-        self["section"] = Label("جاري التحضير...")
+        self["section"] = Label("Preparing...")
         self["menu"]   = StreamList()
         self["menuAccent"]   = Label("")
         self["menuProgress"] = Label("")
         self["menuAccent"].hide()
         self["menuProgress"].hide()
-        self["key_red"] = Label("المفضلة")
-        self["key_yellow"] = Label("تحديث TMDb")
-        self["key_blue"] = Label("تحميل")
+        self["key_red"] = Label("Favorites")
+        self["key_yellow"] = Label("Update TMDb")
+        self["key_blue"] = Label("Download")
         self["key_green"] = Label("")
-        self["status"] = Label("جاري تحميل التفاصيل...")
+        self["status"] = Label("Loading details...")
 
         self._downloads = []
         self._active_download_task = None
@@ -851,7 +851,7 @@ class NovaPlayDetail(Screen):
             get_page = getattr(extractor, "get_page", None)
             if not get_page:
                 if not getattr(self, "_closed", False):
-                    callInMainThread(self["status"].setText, u"لا توجد بيانات")
+                    callInMainThread(self["status"].setText, u"No data")
                 return
             if site in ["egydead", "egydead_coupons", "akwam", "akwams", "wecima"]:
                 data = get_page(url, m_type=m_type)
@@ -875,11 +875,11 @@ class NovaPlayDetail(Screen):
                 if fallback and (fallback.get("plot") or fallback.get("poster")):
                     callInMainThread(self._onLoaded, fallback)
                 else:
-                    callInMainThread(self["status"].setText, u"فشل التحميل — {}".format(str(e)[:40]))
+                    callInMainThread(self["status"].setText, u"Loading failed — {}".format(str(e)[:40]))
             except Exception as e2:
                 my_log("TMDb fallback failed: {}".format(e2))
                 if not getattr(self, "_closed", False):
-                    callInMainThread(self["status"].setText, u"فشل التحميل — {}".format(str(e)[:40]))
+                    callInMainThread(self["status"].setText, u"Loading failed — {}".format(str(e)[:40]))
         finally:
             _wt.cancel()
 
@@ -889,9 +889,9 @@ class NovaPlayDetail(Screen):
             return
         self._quality_choices = []
         try:
-            self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
+            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
             self._setMenu([self._format_server_item(s) for s in self._servers])
-            self["status"].setText(self._status_hint("اختار سيرفر — OK"))
+            self["status"].setText(self._status_hint("Choose a server — OK"))
             if server is not None and server in self._servers:
                 self["menu"].instance.moveSelectionTo(self._servers.index(server))
                 self._updateMenuAccent()
@@ -901,10 +901,10 @@ class NovaPlayDetail(Screen):
     def _onCancel(self):
         if self._quality_choices:
             self._quality_choices = []
-            self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
+            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
             self._setMenu(items)
-            self["status"].setText(self._status_hint("اختار سيرفر — OK"))
+            self["status"].setText(self._status_hint("Choose a server — OK"))
             return
         self._closed = True
         self._proxy_warning_shown = False
@@ -1174,14 +1174,14 @@ class NovaPlayDetail(Screen):
     def _onLoaded(self, data):
         if getattr(self, "_closed", False): return
         if not data:
-            self["status"].setText("تعذر تحميل الصفحة")
+            self["status"].setText("Could not load the page")
             return
 
         self._data = data
         self._quality_choices = []
         current_title = _strip_arabic_from_english_title(data.get("title") or self._item.get("title", ""))
         self._raw_title = re.sub(r"\s+", " ", current_title).strip()
-        self["title"].setText(_wrap_ui_text(current_title, width=30, max_lines=2, fallback="بدون عنوان"))
+        self["title"].setText(_wrap_ui_text(current_title, width=30, max_lines=2, fallback="Untitled"))
 
         # [detail-tmdb-meta] real TMDb page shows one line right under the
         # title: certification badge + release date + genres + runtime
@@ -1240,7 +1240,7 @@ class NovaPlayDetail(Screen):
             meta = []
             if data.get("year"):    meta.append(data["year"])
             if data.get("rating"):  meta.append("{}/10".format(data["rating"]))
-            if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "عنصر"))
+            if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "Item"))
             if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
             if data.get("genres"):  meta.append(data["genres"])
             self["meta"].setText(_wrap_ui_text("   ".join(meta), width=58, max_lines=2))
@@ -1254,34 +1254,34 @@ class NovaPlayDetail(Screen):
             or has_episodes
         )
         if has_episodes:
-            _nav_label = "المواسم" if all(e.get("type") in ("series", "season") for e in _nav_items) else "الحلقات"
+            _nav_label = "Seasons" if all(e.get("type") in ("series", "season") for e in _nav_items) else "Episodes"
             counts.append("{}: {}".format(_nav_label, len(_nav_items)))
         else:
-            counts.append("السيرفرات: {}".format(len([s for s in data.get("servers", []) if s.get("url")])))
+            counts.append("Servers: {}".format(len([s for s in data.get("servers", []) if s.get("url")])))
         if data.get("year"):
-            counts.append("السنة: {}".format(data.get("year")))
+            counts.append("Year: {}".format(data.get("year")))
         if data.get("country"):                                       # [PATCH 111]
-            counts.append("البلد: {}".format(data.get("country")))
+            counts.append("Country: {}".format(data.get("country")))
         if data.get("runtime"):
-            counts.append("المدة: {}".format(data.get("runtime")))
+            counts.append("Runtime: {}".format(data.get("runtime")))
         if data.get("channel"):
-            counts.append("القناة: {}".format(data.get("channel")))
-        self["source"].setText(_wrap_ui_text("المصدر: {}  |  {}".format(_site_label(self._site), "  |  ".join(counts)), width=58, max_lines=2))
+            counts.append("Channel: {}".format(data.get("channel")))
+        self["source"].setText(_wrap_ui_text("Source: {}  |  {}".format(_site_label(self._site), "  |  ".join(counts)), width=58, max_lines=2))
         if has_episodes:
-            plot_label = "قصة المسلسل"
+            plot_label = "Series plot"
         elif has_servers:
-            plot_label = "قصة الفيلم"
+            plot_label = "Movie plot"
         elif is_series_item:
-            plot_label = "قصة المسلسل"
+            plot_label = "Series plot"
         else:
-            plot_label = "قصة الفيلم"
+            plot_label = "Movie plot"
         if current_title:
             plot_label = "{}: {}".format(plot_label, current_title[:32])
-        self["plot_title"].setText(_single_line_text(plot_label, width=46, fallback="القصة"))
+        self["plot_title"].setText(_single_line_text(plot_label, width=46, fallback="Plot"))
         self._layoutHeader()
 
         plot_text, plot_source = _pick_plot_text_with_source(data, self._item)
-        plot_text = re.sub(r"^\[.*?\]\s*|^المصدر:\s*.*?\|\s*", "", plot_text)
+        plot_text = re.sub(r"^\[.*?\]\s*|^(?:المصدر|Source):\s*.*?\|\s*", "", plot_text)
         _MID_SITES = ("EgyDead", "Wecima", "Akoam", "ArabSeed", "TopCinema", "TopCinemaa", "FaselHD", "Shaheed", "Shaheed4u")
         for _ms in _MID_SITES:
             plot_text = re.sub(r"\s*[|\-]\s*" + re.escape(_ms) + r"[^\u0600-\u06ff\n]{0,25}", " ", plot_text, flags=re.I)
@@ -1317,36 +1317,36 @@ class NovaPlayDetail(Screen):
 
         # [detail-stagger] menu population is now progressive
         if episode_has_servers:
-            self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
+            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
             self._setMenuStaggered(items)
-            self["status"].setText(self._status_hint("اختار سيرفر — OK"))
+            self["status"].setText(self._status_hint("Choose a server — OK"))
         elif self._episodes:
             _all_seasons = all(e.get("type") in ("series", "season") for e in self._episodes)
-            _list_label = "المواسم المتاحة" if _all_seasons else "الحلقات المتاحة"
-            _pick_hint = "اختار الموسم المطلوب" if _all_seasons else "اختار الحلقة المطلوبة"
-            _ok_hint = "اختار موسم — OK" if _all_seasons else "اختار حلقة — OK"
+            _list_label = "Available seasons" if _all_seasons else "Available episodes"
+            _pick_hint = "Choose a season" if _all_seasons else "Choose an episode"
+            _ok_hint = "Choose a season — OK" if _all_seasons else "Choose an episode — OK"
             self["section"].setText(_single_line_text("{}: {}  |  {}".format(_list_label, len(self._episodes), _pick_hint), width=90))
             items = [self._format_episode_item(ep) for ep in self._episodes]
             self._setMenuStaggered(items)
             self["status"].setText(self._status_hint(_ok_hint))
         elif self._servers:
-            self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
+            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
             items = [self._format_server_item(s) for s in self._servers]
             self._setMenuStaggered(items)
-            self["status"].setText(self._status_hint("اختار سيرفر — OK"))
+            self["status"].setText(self._status_hint("Choose a server — OK"))
         elif is_series_item:
-            self["section"].setText("الحلقات المتاحة: 0")
-            self._setMenu([("لا توجد حلقات متاحة", "", "", "")])
-            self["status"].setText("لا توجد حلقات")
+            self["section"].setText("Available episodes: 0")
+            self._setMenu([("No episodes available", "", "", "")])
+            self["status"].setText("No episodes")
         else:
-            self["section"].setText("السيرفرات المتاحة: 0")
-            self._setMenu([("لا توجد سيرفرات متاحة", "", "", "")])
-            self["status"].setText("لا توجد سيرفرات")
+            self["section"].setText("Available servers: 0")
+            self._setMenu([("No servers available", "", "", "")])
+            self["status"].setText("No servers")
 
         self._downloads = data.get("downloads") or []
         if self._downloads:
-            self["key_blue"].setText("تحميل ({})".format(len(self._downloads)))
+            self["key_blue"].setText("Download ({})".format(len(self._downloads)))
         else:
             self["key_blue"].setText("")
 
@@ -1358,7 +1358,7 @@ class NovaPlayDetail(Screen):
         self._tmdb_id = (data.get("_tmdb") or {}).get("tmdb_id")
         self._tmdb_kind = (data.get("_tmdb") or {}).get("tmdb_kind")
         if self._tmdb_id:
-            self["key_green"].setText("تريلر")
+            self["key_green"].setText("Trailer")
         else:
             self["key_green"].setText("")
 
@@ -1409,8 +1409,8 @@ class NovaPlayDetail(Screen):
                     pass
 
     def _status_hint(self, prefix):
-        fav_state = "محفوظ" if _is_favorite(self._item.get("url")) else "غير محفوظ"
-        tmdb_state = "TMDb مفعل" if _tmdb_enabled() else "TMDb غير مفعل"
+        fav_state = "Saved" if _is_favorite(self._item.get("url")) else "Not saved"
+        tmdb_state = "TMDb On" if _tmdb_enabled() else "TMDb Off"
         return "{}  |  {}  |  {}".format(prefix, fav_state, tmdb_state)
 
     def _refreshPoster(self):
@@ -1483,15 +1483,15 @@ class NovaPlayDetail(Screen):
             {"type": (base or {}).get("type", self._item.get("type", self._m_type))}
         )
         added = _toggle_favorite_entry(entry)
-        self["status"].setText("تمت الإضافة إلى المفضلة" if added else "تم الحذف من المفضلة")
+        self["status"].setText("Added to favorites" if added else "Removed from favorites")
         if self._data:
             self._onLoaded(self._data)
 
     def _refreshTMDb(self):
         if not _tmdb_enabled():
-            self["status"].setText("أضف TMDb API Key من الإعدادات أولاً")
+            self["status"].setText("Add a TMDb API key in Settings first")
             return
-        self["status"].setText("جاري تحديث البيانات من TMDb...")
+        self["status"].setText("Updating from TMDb...")
         threading.Thread(target=self._bgRefreshTMDb, daemon=True).start()
 
     def _bgRefreshTMDb(self):
@@ -1500,7 +1500,7 @@ class NovaPlayDetail(Screen):
             callInMainThread(self._onLoaded, merged)
         except Exception as e:
             my_log("TMDb refresh failed: {}".format(e))
-            callInMainThread(self["status"].setText, "فشل تحديث TMDb")
+            callInMainThread(self["status"].setText, "TMDb update failed")
 
     def _bgExtract(self, server, token=None):
         try:
@@ -1563,15 +1563,15 @@ class NovaPlayDetail(Screen):
                     # shown yet"; worst case is one extra popup, never a crash.
                     if not getattr(self, "_proxy_warning_shown", False):
                         self._proxy_warning_shown = True
-                        msg = "⚠️ curl_cffi فشل في تجاوز Cloudflare.\n"
-                        msg += "الرجاء تفعيل الـ Proxy من الإعدادات (أزرق ← أحمر)."
+                        msg = "⚠️ curl_cffi could not get past Cloudflare.\n"
+                        msg += "Please enable the Proxy in Settings (Blue → Red)."
                         callInMainThread(self._showProxyWarningPopup, msg)
                     try:
-                        callInMainThread(self["proxy_warning"].setText, "⚠️ تفعيل Proxy")
+                        callInMainThread(self["proxy_warning"].setText, "⚠️ Enable Proxy")
                     except Exception as e:
                         my_log("proxy_warning widget update failed: {}".format(e))
                     try:
-                        callInMainThread(self["status"].setText, "⚠️ Proxy مطلوب — راجع الإعدادات")
+                        callInMainThread(self["status"].setText, "⚠️ Proxy needed — see Settings")
                     except Exception as e:
                         my_log("status widget update failed: {}".format(e))
                 else:
@@ -1583,7 +1583,7 @@ class NovaPlayDetail(Screen):
                     # Matches the same try/except pattern already used two
                     # branches above for "proxy_warning"/"status".
                     try:
-                        callInMainThread(self["status"].setText, "فشل استخراج الرابط — جرب سيرفر تاني")
+                        callInMainThread(self["status"].setText, "Could not get the link — try another server")
                     except Exception as e:
                         my_log("status widget update failed: {}".format(e))
         except Exception as e:
@@ -1593,7 +1593,7 @@ class NovaPlayDetail(Screen):
                 # [FIX] same unguarded self["status"] access as above --
                 # same fix.
                 try:
-                    callInMainThread(self["status"].setText, "خطأ في النظام: {}".format(str(e)[:30]))
+                    callInMainThread(self["status"].setText, "System error: {}".format(str(e)[:30]))
                 except Exception as e2:
                     my_log("status widget update failed in error handler: {}".format(e2))
         finally:
@@ -1749,7 +1749,7 @@ class NovaPlayDetail(Screen):
             my_log("quality pref check failed: {}".format(e))
 
         choices = [{
-            "label": qual or "افتراضي",
+            "label": qual or "Default",
             "url": url,
             "final_ref": final_ref,
             "server": server,
@@ -1800,10 +1800,10 @@ class NovaPlayDetail(Screen):
                 badge = "🟣"
             quality_labels.append(("{}. {} {}".format(i + 1, badge, label), "", ""))
 
-        self["section"].setText(_single_line_text("الجودات المتاحة: {}  |  اختر الجودة المطلوبة".format(len(choices)), width=90))
+        self["section"].setText(_single_line_text("Available qualities: {}  |  pick a quality".format(len(choices)), width=90))
         # [detail-stagger] quality menu pops in one row at a time
         self._setMenuStaggered(quality_labels)
-        self["status"].setText(self._status_hint("اختار جودة — OK"))
+        self["status"].setText(self._status_hint("Choose a quality — OK"))
         # [panel] the same choice as a Movy-style panel: Quality | Server.
         # EXIT closes it and leaves the list above on screen.
         try:
@@ -1876,7 +1876,7 @@ class NovaPlayDetail(Screen):
             self._extracting = True
             self._extract_token += 1
             token = self._extract_token
-        self["status"].setText("جاري تشغيل الحلقة التالية...")
+        self["status"].setText("Playing the next episode...")
         self["status"].show()
         self._startProgress()          # [detail-progress]
         threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
@@ -1947,7 +1947,7 @@ class NovaPlayDetail(Screen):
         except Exception:
             pass
         if not stream_url:
-            self["status"].setText("{} — غير متاح، جرب سيرفر آخر".format(server["name"]))
+            self["status"].setText("{} — not available, try another server".format(server["name"]))
             return
         my_log("Stream found: {} [{}]".format(stream_url, quality))
         # [server-rank] NOTE: success/failure recording moved to the player
@@ -1987,7 +1987,7 @@ class NovaPlayDetail(Screen):
                 "/embed-", "/embed/", "/e/", "/watch/"
             ))
             if is_embed_page and not is_media_url:
-                self["status"].setText("الرابط صفحة تشغيل وليس ملف فيديو — جرب سيرفر آخر")
+                self["status"].setText("The link is a player page, not a video file — try another server")
                 return
 
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
@@ -2043,7 +2043,7 @@ class NovaPlayDetail(Screen):
                           next_episode=_ne, on_next=_cb, poster_url=_po,
                           quality_variants=_qv, server_url=_su,
                           servers=_svs, site=_site, server_name=_sn)
-                self["status"].setText("جاري فتح المشغل...")
+                self["status"].setText("Opening the player...")
                 self.session.openWithCallback(_on_resume, MessageBox, resume_text, MessageBox.TYPE_YESNO, timeout=8, default=True)
             else:
                 self["status"].setText("Opening player...")
@@ -2062,7 +2062,7 @@ class NovaPlayDetail(Screen):
                 self["status"].hide()
         except Exception as e:
             my_log("Error opening player: {}".format(e))
-            self["status"].setText("خطأ في المشغل: {}".format(str(e)[:60]))
+            self["status"].setText("Player error: {}".format(str(e)[:60]))
 
     def _playTrailer(self):
         """
@@ -2077,12 +2077,12 @@ class NovaPlayDetail(Screen):
         if getattr(self, "_closed", False):
             return
         if not getattr(self, "_tmdb_id", None):
-            self["status"].setText("لا يوجد تريلر متاح لهذا العنصر")
+            self["status"].setText("No trailer available for this title")
             return
         if getattr(self, "_trailer_busy", False):
             return
         self._trailer_busy = True
-        self["status"].setText("جاري تجهيز التريلر...")
+        self["status"].setText("Preparing the trailer...")
         self["status"].show()
         self._startProgress()          # [detail-progress]
         threading.Thread(target=self._bgResolveTrailer, daemon=True).start()
@@ -2094,14 +2094,14 @@ class NovaPlayDetail(Screen):
             if getattr(self, "_closed", False):
                 return
             if not key:
-                callInMainThread(self._onTrailerFailed, "لا يوجد تريلر على YouTube لهذا العنصر")
+                callInMainThread(self._onTrailerFailed, "No trailer on YouTube for this title")
                 return
 
             youtube_url = "https://www.youtube.com/watch?v={}".format(key)
             try:
                 import yt_dlp
             except ImportError:
-                callInMainThread(self._onTrailerFailed, "yt-dlp غير مثبت على الجهاز")
+                callInMainThread(self._onTrailerFailed, "yt-dlp is not installed on the box")
                 return
 
             # [FIX] confirmed directly on a real device, across two
@@ -2125,7 +2125,7 @@ class NovaPlayDetail(Screen):
             local_path = os.path.join(trailer_dir, "{}.mp4".format(cache_key))
 
             if not os.path.exists(local_path):
-                callInMainThread(self["status"].setText, "جاري تحميل التريلر...")
+                callInMainThread(self["status"].setText, "Downloading the trailer...")
                 ydl_opts = {
                     "quiet": True,
                     "no_warnings": True,
@@ -2158,7 +2158,7 @@ class NovaPlayDetail(Screen):
                 # still possible -- e.g. a region-restricted or removed
                 # video). Distinct message from the generic failure below
                 # so it's clear this isn't a transient error.
-                callInMainThread(self._onTrailerFailed, "تعذر تحميل التريلر لهذا العنصر")
+                callInMainThread(self._onTrailerFailed, "Could not download the trailer for this title")
                 return
 
             trailer_title = "{} - Trailer".format(self._raw_title or self._item.get("title", ""))
@@ -2166,7 +2166,7 @@ class NovaPlayDetail(Screen):
         except Exception as e:
             my_log("_bgResolveTrailer error: {}".format(e))
             if not getattr(self, "_closed", False):
-                callInMainThread(self._onTrailerFailed, "خطأ أثناء تجهيز التريلر")
+                callInMainThread(self._onTrailerFailed, "Error while preparing the trailer")
         finally:
             self._trailer_busy = False
 
@@ -2174,7 +2174,7 @@ class NovaPlayDetail(Screen):
         self._stopProgress()           # [detail-progress]
         if getattr(self, "_closed", False):
             return
-        self["status"].setText("جاري فتح التريلر...")
+        self["status"].setText("Opening the trailer...")
         try:
             # [FIX] switched to the app's own NovaPlaySimplePlayer
             # instead of either _play() or the stock Screens.InfoBar.MoviePlayer
@@ -2194,7 +2194,7 @@ class NovaPlayDetail(Screen):
             # restore and nothing to save/resume on close, so closing this
             # screen (by EOF or by exit) just reveals the detail screen
             # underneath, same as any other screen on the stack.
-            candidates = [(4097, local_path, u"تريلر محلي", False)]
+            candidates = [(4097, local_path, u"local trailer", False)]
             self.session.open(NovaPlaySimplePlayer, trailer_title, candidates,
                                previous_service=None, resume_pos=0, item_url="",
                                next_episode=None, on_next=None,
@@ -2207,7 +2207,7 @@ class NovaPlayDetail(Screen):
                 pass
         except Exception as e:
             my_log("_onTrailerResolved: open player failed: {}".format(e))
-            self["status"].setText("خطأ في فتح التريلر: {}".format(str(e)[:60]))
+            self["status"].setText("Error opening the trailer: {}".format(str(e)[:60]))
 
     def _onTrailerFailed(self, message):
         self._stopProgress()           # [detail-progress]
@@ -2218,27 +2218,27 @@ class NovaPlayDetail(Screen):
     def _openDownloads(self):
         if self._active_download_task and self._active_download_task.status == "downloading":
             pct = self._active_download_task.progress_pct()
-            msg = "جاري التحميل: {:.0f}%\nإلغاء؟".format(pct) if pct else "جاري التحميل...\nإلغاء؟"
+            msg = "Downloading: {:.0f}%\nCancel?".format(pct) if pct else "Downloading...\nCancel?"
             self.session.openWithCallback(self._onCancelDownloadPrompt, MessageBox,
                                         msg, MessageBox.TYPE_YESNO, timeout=8, default=False)
             return
         if not self._downloads:
-            self["status"].setText("لا توجد روابط تحميل متاحة لهذا العنصر")
+            self["status"].setText("No download links for this title")
             return
         entries = []
         for d in self._downloads:
-            label = d.get("resolution") or "جودة غير معروفة"
+            label = d.get("resolution") or "Unknown quality"
             extra = " | ".join([x for x in (d.get("size"), d.get("quality")) if x])
             if extra:
                 label = "{} ({})".format(label, extra)
             entries.append((label, d))
         self.session.openWithCallback(self._onDownloadChoiceMade, ChoiceBox,
-                                    title="اختر الجودة للتحميل", list=entries)
+                                    title="Choose a quality to download", list=entries)
 
     def _onCancelDownloadPrompt(self, confirmed):
         if confirmed and self._active_download_task:
             self._active_download_task.cancel()
-            self["status"].setText("تم إلغاء التحميل")
+            self["status"].setText("Download cancelled")
 
     def _onDownloadChoiceMade(self, choice):
         if not choice:
@@ -2249,8 +2249,8 @@ class NovaPlayDetail(Screen):
         self.session.openWithCallback(
             lambda c: self._onDownloadActionChosen(c, entry),
             ChoiceBox,
-            title="شاهد أم حمّل؟",
-            list=[("▶ شاهد الآن", "watch"), ("⬇ حمّل على القرص", "download")]
+            title="Watch or download?",
+            list=[("▶ Watch now", "watch"), ("⬇ Download to disk", "download")]
         )
 
     def _onDownloadActionChosen(self, choice, entry):
@@ -2258,12 +2258,12 @@ class NovaPlayDetail(Screen):
             return
         action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
         if action == "watch":
-            self["status"].setText("جاري تجهيز الرابط للمشاهدة...")
+            self["status"].setText("Preparing the link to watch...")
             self["status"].show()
             self._startProgress()          # [detail-progress]
             threading.Thread(target=self._bgResolveAndWatch, args=(entry,), daemon=True).start()
         elif action == "download":
-            self["status"].setText("جاري تجهيز رابط التحميل...")
+            self["status"].setText("Preparing the download link...")
             self._startProgress()          # [detail-progress]
             threading.Thread(target=self._bgResolveAndDownload, args=(entry,), daemon=True).start()
 
@@ -2292,11 +2292,11 @@ class NovaPlayDetail(Screen):
 
             if not resolved_url:
                 callInMainThread(self._stopProgress)      # [detail-progress]
-                callInMainThread(self["status"].setText, "تعذر تجهيز الرابط للمشاهدة - جرب جودة أخرى")
+                callInMainThread(self["status"].setText, "Could not prepare the link — try another quality")
                 return
 
             label = entry.get("resolution") or entry.get("quality") or "HD"
-            server = {"name": entry.get("resolution") or "رابط تحميل",
+            server = {"name": entry.get("resolution") or "Download link",
                       "url": entry["url"],
                       "type": "embed",
                       "quality": label}
@@ -2304,7 +2304,7 @@ class NovaPlayDetail(Screen):
         except Exception as e:
             my_log("resolve-and-watch error: {}".format(e))
             callInMainThread(self._stopProgress)          # [detail-progress]
-            callInMainThread(self["status"].setText, "فشل تجهيز الرابط للمشاهدة")
+            callInMainThread(self["status"].setText, "Could not prepare the link to watch")
 
     def _bgResolveAndDownload(self, entry):
         try:
@@ -2328,7 +2328,7 @@ class NovaPlayDetail(Screen):
 
             if not resolved_url:
                 callInMainThread(self._stopProgress)      # [detail-progress]
-                callInMainThread(self["status"].setText, "تعذر تجهيز رابط التحميل - جرب جودة أخرى")
+                callInMainThread(self["status"].setText, "Could not prepare the download link — try another quality")
                 return
 
             title_hint = getattr(self, "_raw_title", None) or self._item.get("title", "video")
@@ -2341,8 +2341,8 @@ class NovaPlayDetail(Screen):
                 while not progress_timer_stop.is_set():
                     if task.status == "downloading":
                         pct = task.progress_pct()
-                        msg = ("جاري التحميل: {:.0f}%".format(pct) if pct
-                            else "جاري التحميل: {:.1f} MB".format(task.bytes_done / 1048576.0))
+                        msg = ("Downloading: {:.0f}%".format(pct) if pct
+                            else "Downloading: {:.1f} MB".format(task.bytes_done / 1048576.0))
                         callInMainThread(self["status"].setText, msg)
                     elif task.status in ("done", "error", "cancelled"):
                         break
@@ -2354,18 +2354,18 @@ class NovaPlayDetail(Screen):
                 callInMainThread(self._stopProgress)      # [detail-progress]
                 dest = download_manager(task, title_hint=title_hint)
                 progress_timer_stop.set()
-                callInMainThread(self["status"].setText, "تم الحفظ: {}".format(os.path.basename(dest)))
+                callInMainThread(self["status"].setText, "Saved: {}".format(os.path.basename(dest)))
             except Exception as e:
                 progress_timer_stop.set()
                 callInMainThread(self._stopProgress)      # [detail-progress]
                 if task.status == "cancelled":
                     return
                 my_log("Download failed: {}".format(e))
-                callInMainThread(self["status"].setText, "فشل التحميل: {}".format(str(e)[:40]))
+                callInMainThread(self["status"].setText, "Download failed: {}".format(str(e)[:40]))
         except Exception as e:
             my_log("Download setup error: {}".format(e))
             callInMainThread(self._stopProgress)          # [detail-progress]
-            callInMainThread(self["status"].setText, "خطأ في التحميل: {}".format(str(e)[:40]))
+            callInMainThread(self["status"].setText, "Download error: {}".format(str(e)[:40]))
         finally:
             self._active_download_task = None
 

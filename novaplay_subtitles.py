@@ -1893,7 +1893,7 @@ class NovaOnlineSubsScreen(Screen):
         self["list"].setList([l for l, _ in pairs])
         ar = sum(1 for i in self.results if str(i.get("language", "")).lower() in ("arabic", "ar", "ara", "العربية"))
         en = sum(1 for i in self.results if str(i.get("language", "")).lower() in ("english", "en", "eng"))
-        self["header"].setText("%s: %d subs — عربي %d / English %d (اسحب للأسفل)" % (
+        self["header"].setText("%s: %d subs — Arabic %d / English %d (scroll down)" % (
             _PROVIDERS[self.provider]["name"], len(pairs), ar, en))
         
     def _onDownloadDone(self, ok, error, path):
@@ -2042,7 +2042,7 @@ class NovaFolderBrowser(Screen):
             start = "/"
         self["path"] = Label(start)
         self["list"] = self._makeFileList(start)
-        self["hint"] = Label("OK فتح  |  GREEN اختيار  |  RED الجذر  |  YELLOW /media  |  EXIT رجوع")
+        self["hint"] = Label("OK open  |  GREEN choose  |  RED root  |  YELLOW /media  |  EXIT back")
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"], {
             "ok": self._ok, "cancel": self.close,
             "green": self._select, "red": lambda: self._go("/"),
@@ -2134,7 +2134,7 @@ class NovaSubtitleSettings(Screen):
     def __init__(self, session):
         Screen.__init__(self, session)
         self.skinName = ["NovaSubtitleSettings"]
-        self["header"] = Label("Subtitle Settings — الإعدادات")
+        self["header"] = Label("Subtitle Settings")
         self["body"] = ScrollLabel("")
         self["key_red"] = Label("API Keys")
         self["key_green"] = Label("Subtitle Folder")

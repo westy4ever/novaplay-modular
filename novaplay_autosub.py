@@ -324,7 +324,7 @@ def _apply(screen, gen, path, item_url, lang):
                 remember_subtitle(item_url, path, 0)
             _dbg("autosub: applied [{}] {}".format(lang, path))
             try:
-                screen._autoSubNotify("CC ✓ ترجمة تلقائية")
+                screen._autoSubNotify("CC ✓ Auto subtitles")
             except Exception:
                 pass
         except Exception as e:

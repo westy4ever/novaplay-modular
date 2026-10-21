@@ -29,17 +29,17 @@ import plugin_downloads
 
 
 _STATUS_LABELS = {
-    "queued":      "⏳ في الانتظار",
-    "downloading": "⬇ جاري التحميل",
-    "done":        "✅ تم",
-    "error":       "❌ فشل",
-    "cancelled":   "⛔ أُلغي",
+    "queued":      "⏳ Queued",
+    "downloading": "⬇ Downloading",
+    "done":        "✅ Done",
+    "error":       "❌ Failed",
+    "cancelled":   "⛔ Cancelled",
 }
 
 
 class NovaPlayDownloads(Screen):
     skin = scale_skin_xml("""
-    <screen name="NovaPlayDownloads" position="center,center" size="1700,940" title="Downloads — التنزيلات" flags="wfNoBorder">
+    <screen name="NovaPlayDownloads" position="center,center" size="1700,940" title="Downloads" flags="wfNoBorder">
         <eLabel position="0,0" size="1700,940" backgroundColor="#0D1117" zPosition="0" />
         <eLabel position="0,0" size="1700,90" backgroundColor="#161B22" zPosition="1" />
         <widget name="header" position="50,20" size="1600,50" font="Regular;38" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
@@ -53,12 +53,12 @@ class NovaPlayDownloads(Screen):
     def __init__(self, session):
         Screen.__init__(self, session)
         self.skinName = ["NovaPlayDownloads"]
-        self["header"] = Label("التنزيلات")
+        self["header"] = Label("Downloads")
         self["footer"] = Label("")
         self["list"] = MenuList([])
-        self["key_red"] = Label("إلغاء التنزيل")
-        self["key_blue"] = Label("مسح المكتمل")
-        self["key_exit"] = Label("EXIT إغلاق")
+        self["key_red"] = Label("Cancel download")
+        self["key_blue"] = Label("Clear finished")
+        self["key_exit"] = Label("EXIT close")
         self._tasks = []
         self._row_map = []
         self._last_rows = None                     # [FIX-DL]
@@ -90,18 +90,18 @@ class NovaPlayDownloads(Screen):
             rows.append(label)
             self._row_map.append(t)
         if not rows:
-            rows = ["لا توجد تنزيلات في هذه الجلسة"]
+            rows = ["No downloads in this session"]
         self._set_rows(rows)
         active = sum(1 for t in self._tasks if t.status in ("queued", "downloading"))
         done = sum(1 for t in self._tasks if t.status == "done")
         failed = sum(1 for t in self._tasks if t.status == "error")
-        self["header"].setText("التنزيلات: {} نشط  |  {} مكتمل  |  {} فشل".format(active, done, failed))
+        self["header"].setText("Downloads: {} active  |  {} done  |  {} failed".format(active, done, failed))
         if time.time() >= self._flash_until:
-            self["footer"].setText("المجلد: {}".format(plugin_downloads.download_dir()))
+            self["footer"].setText("Folder: {}".format(plugin_downloads.download_dir()))
 
     def _format_task(self, t):
         status = _STATUS_LABELS.get(t.status, t.status)
-        title = (t.title or "بدون عنوان")[:60]
+        title = (t.title or "Untitled")[:60]
         if t.status == "downloading":
             pct = t.progress_pct()
             if pct > 0:
@@ -180,15 +180,15 @@ class NovaPlayDownloads(Screen):
         if t.status in ("queued", "downloading"):
             self.session.openWithCallback(
                 lambda ans: self._confirm_cancel(ans, t),
-                MessageBox, "إلغاء التحميل:\n{}".format(self._title(t)[:60]),
+                MessageBox, "Cancel download:\n{}".format(self._title(t)[:60]),
                 MessageBox.TYPE_YESNO, timeout=8, default=False)
             return
         if t.status == "done" and t.dest_path and os.path.exists(t.dest_path):
             parent = os.path.dirname(t.dest_path)
             entries = [
-                ("▶ شغّل الملف", "play"),
-                ("📂 افتح المجلد", "open"),
-                ("🗑 احذف الملف", "delete"),
+                ("▶ Play file", "play"),
+                ("📂 Open folder", "open"),
+                ("🗑 Delete file", "delete"),
             ]
             self.session.openWithCallback(
                 lambda c: self._onFileAction(c, t),
@@ -198,20 +198,20 @@ class NovaPlayDownloads(Screen):
         if t.status == "error" and t.error:                                  # [FIX-DL]
             self.session.open(MessageBox, t.error[:300], MessageBox.TYPE_ERROR, timeout=10)
         elif t.status == "done":
-            self._say(u"الملف غير موجود")
+            self._say(u"File not found")
 
     def _confirm_cancel(self, ans, t):
         if ans:
             try:
                 t.cancel()
-                self._say("تم إرسال طلب الإلغاء: {}".format(self._title(t)[:40]))
+                self._say("Cancel requested: {}".format(self._title(t)[:40]))
             except Exception:
                 pass
 
     def _onCancelActive(self):
         t = self._selected_task()
         if not t or t.status not in ("queued", "downloading"):
-            self._say("لا يوجد تحميل نشط مختار")
+            self._say("No active download selected")
             return
         self._confirm_cancel(True, t)
 
@@ -219,9 +219,9 @@ class NovaPlayDownloads(Screen):
         try:
             plugin_downloads.clear_finished_tasks()
             self._refresh()
-            self._say("تم مسح المدخلات المنتهية")
+            self._say("Finished entries cleared")
         except Exception as e:
-            self._say("فشل المسح: {}".format(str(e)[:40]))
+            self._say("Clear failed: {}".format(str(e)[:40]))
 
     def _onFileAction(self, choice, t):
         if not choice:
@@ -234,7 +234,7 @@ class NovaPlayDownloads(Screen):
         elif action == "delete":
             self.session.openWithCallback(
                 lambda ans: self._delete_file(ans, t),
-                MessageBox, "حذف الملف؟\n{}".format(os.path.basename(t.dest_path)),
+                MessageBox, "Delete file?\n{}".format(os.path.basename(t.dest_path)),
                 MessageBox.TYPE_YESNO, timeout=8, default=False)
 
     def _delete_file(self, ans, t):
@@ -243,7 +243,7 @@ class NovaPlayDownloads(Screen):
         try:
             if os.path.exists(t.dest_path):
                 os.remove(t.dest_path)
-            self._say("تم الحذف: {}".format(os.path.basename(t.dest_path)))
+            self._say("Deleted: {}".format(os.path.basename(t.dest_path)))
             self._refresh()
         except Exception as e:
-            self._say("فشل الحذف: {}".format(str(e)[:40]))
+            self._say("Delete failed: {}".format(str(e)[:40]))

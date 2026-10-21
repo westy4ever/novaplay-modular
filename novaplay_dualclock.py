@@ -3,7 +3,7 @@
 
 Layout produced:
     Friday, September 18, 2026
-    الجمعة ٦ ربيع الآخر، ١٤٤٨ هـ
+    6 Rabi' al-Akhir 1448 AH
 
 Self-contained: no pip deps, works on any Python 2.7 / 3.x image.
 Hijri uses the tabular Islamic calendar (Kuwaiti algorithm).
@@ -11,23 +11,12 @@ Hijri uses the tabular Islamic calendar (Kuwaiti algorithm).
 
 import datetime
 
-_HIJRI_MONTHS_AR = (
-    "محرم", "صفر", "ربيع الأول", "ربيع الآخر", "جمادى الأولى",
-    "جمادى الآخرة", "رجب", "شعبان", "رمضان", "شوال",
-    "ذو القعدة", "ذو الحجة",
+_HIJRI_MONTHS = (
+    "Muharram", "Safar", "Rabi' al-Awwal", "Rabi' al-Akhir", "Jumada al-Ula",
+    "Jumada al-Akhirah", "Rajab", "Sha'ban", "Ramadan", "Shawwal",
+    "Dhu al-Qadah", "Dhu al-Hijjah",
 )
 
-# Python weekday() : Monday=0 … Sunday=6
-_WEEKDAYS_AR = (
-    "الاثنين", "الثلاثاء", "الأربعاء", "الخميس",
-    "الجمعة", "السبت", "الأحد",
-)
-
-_ARABIC_DIGITS = u"٠١٢٣٤٥٦٧٨٩"
-
-
-def _arabic_numerals(n):
-    return u"".join(_ARABIC_DIGITS[int(d)] for d in str(int(n)))
 
 
 def gregorian_to_hijri(gy, gm, gd):
@@ -70,11 +59,10 @@ def _hijri_offset():
 
 
 def format_dual_dates(now=None, hijri_offset=None):
-    """Return (gregorian_en, hijri_ar, time_12h, period).
+    """Return (gregorian_en, hijri_en, time_12h, period).
 
     [FIX-DC] Names and AM/PM come from fixed tables, not strftime(), so they do not
-    change with the box locale. The Arabic weekday stays the real weekday; only the
-    Hijri day/month/year use the optional offset.
+    change with the box locale. The Hijri day/month/year use the optional offset.
     """
     now = now or datetime.datetime.now()
     off = _hijri_offset() if hijri_offset is None else int(hijri_offset)
@@ -83,11 +71,7 @@ def format_dual_dates(now=None, hijri_offset=None):
 
     hdate = now + datetime.timedelta(days=off)
     hy, hm, hd = gregorian_to_hijri(hdate.year, hdate.month, hdate.day)
-    hijri = u"{} {} {}\u060c {} \u0647\u0640".format(
-        _WEEKDAYS_AR[now.weekday()],
-        _arabic_numerals(hd),
-        _HIJRI_MONTHS_AR[hm - 1],
-        _arabic_numerals(hy))
+    hijri = u"{} {} {} AH".format(hd, _HIJRI_MONTHS[hm - 1], hy)
 
     t = u"{}:{:02d}".format(now.hour % 12 or 12, now.minute)
     period = u"AM" if now.hour < 12 else u"PM"

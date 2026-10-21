@@ -581,9 +581,9 @@ class PosterCardGrid(_BaseCardGrid):
 
             title = item.get("title", "")
             if item.get("_is_next_page"):
-                caption = "الصفحة التالية"
+                caption = "Next page"
             elif item.get("_is_prev_page"):
-                caption = "الصفحة السابقة"
+                caption = "Previous page"
             else:
                 caption = title
 

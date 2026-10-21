@@ -225,7 +225,7 @@ def download_direct(task, dest_path):
                         if head.startswith(b"#extm3u"):
                             raise _LooksLikeHls()
                         if "text/html" in ctype or head.startswith(b"<!doctype") or head.startswith(b"<html"):
-                            raise Exception("الرابط أعاد صفحة HTML وليس ملف فيديو — انتهت صلاحية الرابط، أعد المحاولة")
+                            raise Exception("The link returned an HTML page, not a video file — it has expired, try again")
                     f.write(chunk)
                     task.bytes_done += len(chunk)
         except Exception:
@@ -299,7 +299,7 @@ def download_hls(task, dest_path):
     # sliding window — "downloading" it saves a truncated recording
     # and reports success.
     if "#EXT-X-ENDLIST" not in body:
-        raise Exception("بث مباشر (Live) — لا يمكن تحميله كملف")
+        raise Exception("Live stream — cannot be downloaded as a file")
 
     # fMP4 init segment (must be written before the media segments)
     map_uri = ""

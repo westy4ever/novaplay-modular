@@ -52,22 +52,22 @@ class NovaPlaySearch(Screen):
         self._query = query or ""
         self._scope = default_scope or "all"
         self["bg"] = Label("")
-        self["title"] = Label("بحث احترافي")
-        self["subtitle"] = Label("اكتب الاسم واختر النطاق للبحث في المصدر الحالي أو كل المصادر.")
+        self["title"] = Label("Search")
+        self["subtitle"] = Label("Type a name and choose the scope: the current source or all sources.")
         self["query_box"] = Label("")
-        self["query_label"] = Label("نص البحث")
+        self["query_label"] = Label("Search text")
         self["query"] = Label("")
         self["scope_box"] = Label("")
-        self["scope_label"] = Label("النطاق")
+        self["scope_label"] = Label("Scope")
         self["scope"] = Label("")
         self["suggestions_box"] = Label("")
-        self["suggestions_title"] = Label("اقتراحات سريعة")
+        self["suggestions_title"] = Label("Quick suggestions")
         self["suggestions"] = MenuList([])
-        self["hint"] = Label("OK يفتح الاقتراح  |  أعلى/أسفل للتنقل  |  أحمر: مسح  |  أصفر: اكتب  |  أزرق: نطاق")
-        self["key_red"] = Label("مسح")
-        self["key_green"] = Label("ابحث الآن")
-        self["key_yellow"] = Label("اكتب")
-        self["key_blue"] = Label("تبديل النطاق")
+        self["hint"] = Label("OK opens suggestion  |  Up/Down move  |  Red: clear  |  Yellow: type  |  Blue: scope")
+        self["key_red"] = Label("Clear")
+        self["key_green"] = Label("Search now")
+        self["key_yellow"] = Label("Type")
+        self["key_blue"] = Label("Switch scope")
         self._suggestions = []
         self._suggestion_ticket = 0
 
@@ -90,24 +90,24 @@ class NovaPlaySearch(Screen):
         self._refresh()
 
     def _refresh(self):
-        preview = self._query or "اكتب اسم فيلم أو مسلسل أو ممثل"
+        preview = self._query or "Type a movie, series or actor name"
         self["query"].setText(_wrap_ui_text(preview, width=42, max_lines=2))
         self["scope"].setText(_search_scope_label(self._scope if self._scope else "all"))
         self._refresh_suggestion_list()
 
     def _refresh_suggestion_list(self):
         if not self._suggestions:
-            self["suggestions_title"].setText("اقتراحات سريعة")
-            self["suggestions"].setList(["لا توجد اقتراحات حالياً"])
+            self["suggestions_title"].setText("Quick suggestions")
+            self["suggestions"].setList(["No suggestions yet"])
             return
-        self["suggestions_title"].setText("اقتراحات سريعة: {}".format(len(self._suggestions)))
+        self["suggestions_title"].setText("Quick suggestions: {}".format(len(self._suggestions)))
         rows = []
         for item in self._suggestions:
             meta = []
             if item.get("source"): meta.append(item.get("source"))
             if item.get("kind"): meta.append(item.get("kind"))
             if item.get("year"): meta.append(item.get("year"))
-            label = _single_line_text(item.get("title", ""), width=34, fallback="اقتراح")
+            label = _single_line_text(item.get("title", ""), width=34, fallback="Suggestion")
             meta_text = " | ".join([x for x in meta if x])
             if meta_text:
                 label = "{} [{}]".format(label, meta_text)
@@ -148,7 +148,7 @@ class NovaPlaySearch(Screen):
         self._refresh()
 
     def _edit_query(self):
-        self.session.openWithCallback(self._onKeyboard, VirtualKeyBoard, title="ابحث عن فيلم أو مسلسل", text=self._query)
+        self.session.openWithCallback(self._onKeyboard, VirtualKeyBoard, title="Search for a movie or series", text=self._query)
 
     def _onKeyboard(self, result):
         if result is None: return

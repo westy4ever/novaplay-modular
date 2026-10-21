@@ -62,11 +62,11 @@ def _site_tagline(site):
 
 def _site_search_item(site):
     return {
-        "title": "بحث داخل {}".format(_site_label(site)),
+        "title": "Search in {}".format(_site_label(site)),
         "_action": "search_site",
         "_site": site,
         "type": "tool",
-        "plot": "ابحث داخل {} فقط بدون خلط النتائج مع باقي المصادر.".format(_site_label(site)),
+        "plot": "Search {} only, without mixing in results from other sources.".format(_site_label(site)),
     }
 
 
@@ -164,10 +164,10 @@ def _search_scope_label(scope):
         # is unavailable for any reason.
         try:
             from extractors import get_site_names
-            return "كل المصادر ({})".format(len(get_site_names()))
+            return "All sources ({})".format(len(get_site_names()))
         except Exception:
-            return "كل المصادر"
-    return "المصدر الحالي: {}".format(_site_label(scope))
+            return "All sources"
+    return "Current source: {}".format(_site_label(scope))
 
 
 # ─── Search result / list ranking ────────────────────────────────────────────
@@ -349,13 +349,13 @@ def _decorate_item_title(item, site=None):
         return title
 
     if item_type == "movie":
-        prefix = "[فيلم]"
+        prefix = "[Movie]"
     elif item_type == "series":
-        prefix = "[مسلسل]"
+        prefix = "[Series]"
     elif item_type == "season":
-        prefix = "[موسم]"
+        prefix = "[Season]"
     elif item_type == "episode":
-        prefix = "[حلقة]"
+        prefix = "[Episode]"
     elif item_type == "category":
         return title
     else:
@@ -385,7 +385,7 @@ def _split_episode_label(title):
 
 def _display_plot_text(value):
     text = re.sub(r"\s+", " ", value or "").strip()
-    return text or "القصة غير متوفرة حالياً لهذا العنصر."
+    return text or "No plot available for this title."
 
 
 def _pick_plot_text_with_source(*sources):
@@ -403,12 +403,12 @@ def _pick_plot_text_with_source(*sources):
             candidates = [("value", source)]
         for label, candidate in candidates:
             text = _display_plot_text(candidate)
-            if text == "القصة غير متوفرة حالياً لهذا العنصر.":
+            if text == "No plot available for this title.":
                 continue
             if len(text) > len(best):
                 best = text
                 best_source = label
-    return best or "القصة غير متوفرة حالياً لهذا العنصر.", best_source or "none"
+    return best or "No plot available for this title.", best_source or "none"
 
 
 def _pick_plot_text(*sources):

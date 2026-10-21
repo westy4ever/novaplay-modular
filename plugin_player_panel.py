@@ -33,18 +33,18 @@ _RH = 50         # row height
 # picture. Every colour here uses the panel's own alpha (1A).
 _FOCUS = "#1A00707F"     # focused column highlight (dark cyan)
 _IDLE = "#1A2D333B"      # remembered row in the other columns (dark grey)
-_HELP = u"◀ ▶ عمود    ▲ ▼ اختيار    OK تطبيق    EXIT إغلاق"
+_HELP = u"◀ ▶ column    ▲ ▼ choose    OK apply    EXIT close"
 
 _PLAYER_COLS = (
     # key, x, width, title
-    ("quality", 300, 330, u"QUALITY — الجودة"),
-    ("server", 650, 640, u"SERVER — السيرفر"),
-    ("speed", 1310, 310, u"SPEED — السرعة"),
+    ("quality", 300, 330, u"QUALITY"),
+    ("server", 650, 640, u"SERVER"),
+    ("speed", 1310, 310, u"SPEED"),
 )
 _SUBS_COLS = (
-    ("audio", 300, 330, u"AUDIO — الصوت"),
-    ("subs", 650, 640, u"SUBTITLES — الترجمة"),
-    ("more", 1310, 310, u"MORE — المزيد"),
+    ("audio", 300, 330, u"AUDIO"),
+    ("subs", 650, 640, u"SUBTITLES"),
+    ("more", 1310, 310, u"MORE"),
 )
 
 
@@ -240,8 +240,8 @@ class NovaSubsPanel(_ColumnPanel):
 
 
 _QUALITY_COLS = (
-    ("quality", 360, 420, u"QUALITY — الجودة"),
-    ("server", 820, 740, u"SERVER — السيرفر"),
+    ("quality", 360, 420, u"QUALITY"),
+    ("server", 820, 740, u"SERVER"),
 )
 
 
@@ -257,9 +257,9 @@ class NovaQualityPanel(_ColumnPanel):
 
 
 _MENU_COLS = (
-    ("picture", 300, 300, u"PICTURE — الصورة"),
-    ("timer", 630, 480, u"TIMER · REC — مؤقت وتسجيل"),
-    ("settings", 1140, 480, u"SETTINGS — إعدادات"),
+    ("picture", 300, 300, u"PICTURE"),
+    ("timer", 630, 480, u"TIMER · REC"),
+    ("settings", 1140, 480, u"SETTINGS"),
 )
 
 

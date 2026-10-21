@@ -46,16 +46,16 @@ class NovaPlaySettings(Screen):
         Screen.__init__(self, session)
         self._current_site = current_site
         self["bg"] = Label("")
-        self["title"] = Label("الإعدادات وحول النسخة")
+        self["title"] = Label("Settings & About")
         self["owner"] = Label("")
         self["site"] = Label("")
         self["body_box"] = Label("")
         self["body"] = ScrollLabel("")
-        self["hint"] = Label("OK/Back للإغلاق  |  أحمر: Proxy  |  أخضر: الكبار  |  أصفر: TMDb  |  أزرق: TorrServer  |  Menu: الأدوات والتشخيص")
-        self["key_red_label"] = Label("تعيين Proxy")
-        self["key_green_label"] = Label("عرض محتوى الكبار")
-        self["key_yellow_label"] = Label("تعديل مفتاح TMDb")
-        self["key_blue_label"] = Label("تعديل TorrServer URL")
+        self["hint"] = Label("OK/Back close  |  Red: Proxy  |  Green: Adult  |  Yellow: TMDb  |  Blue: TorrServer  |  Menu: Tools & diagnostics")
+        self["key_red_label"] = Label("Set Proxy")
+        self["key_green_label"] = Label("Show adult content")
+        self["key_yellow_label"] = Label("Edit TMDb key")
+        self["key_blue_label"] = Label("Edit TorrServer URL")
         self["actions"] = ActionMap(
             ["OkCancelActions", "DirectionActions", "ColorActions",
              "InfobarEPGActions", "InfobarMenuActions", "MenuActions",
@@ -81,19 +81,19 @@ class NovaPlaySettings(Screen):
         current = _get_config("show_adult", "false")
         new_val = "true" if current == "false" else "false"
         _set_config("show_adult", new_val)
-        msg = "تم تفعيل محتوى الكبار" if new_val == "true" else "تم إخفاء محتوى الكبار"
+        msg = "Adult content enabled" if new_val == "true" else "Adult content hidden"
         self.session.open(MessageBox, msg, MessageBox.TYPE_INFO, timeout=3)
         self._refresh()
 
     def _refresh(self):
-        self["owner"].setText("المالك: {}".format(_get_config("owner", _PLUGIN_OWNER)))
-        self["site"].setText("المصدر الحالي: {}  |  {}".format(_site_label(self._current_site), _site_tagline(self._current_site)))
+        self["owner"].setText("Owner: {}".format(_get_config("owner", _PLUGIN_OWNER)))
+        self["site"].setText("Current source: {}  |  {}".format(_site_label(self._current_site), _site_tagline(self._current_site)))
         api_key = (_get_config("tmdb_api_key", "") or "").strip()
         ts_url = (_get_config("torrserver_url", "") or "").strip()
         proxy = (_get_config("browser_proxy", "") or "").strip()
         layout = _get_config("layout_style", "carousel")
         adult = _get_config("show_adult", "false")
-        self["key_green_label"].setText("تعطيل محتوى الكبار" if adult == "true" else "تفعيل محتوى الكبار")
+        self["key_green_label"].setText("Disable adult content" if adult == "true" else "Enable adult content")
         maxq = str(_get_config("max_quality", "auto") or "auto").strip().upper()
         if maxq not in ("AUTO", "480P", "720P", "1080P"):
             maxq = "AUTO"
@@ -103,45 +103,45 @@ class NovaPlaySettings(Screen):
             _nxdelay = 10
         body = (
             "NovaPlay Media Center v{version}\n\n"
-            "واجهة العرض: {layout_style}\n"
-            "محتوى الكبار: {adult_status}\n"
-            "جودة البث القصوى: {maxq}\n"
-            "مدة العد التنازلي للحلقة التالية: {nxdelay} ثانية\n\n"
-            "TMDb:\n• الحالة: {tmdb_status}\n• المفتاح: {tmdb_key}\n\n"
-            "TorrServer:\n• الحالة: {ts_status}\n• العنوان: {ts_url}\n\n"
-            "Browser Proxy:\n• الحالة: {proxy_status}\n• العنوان: {proxy_addr}\n\n"
-            "المكتبة:\n• المفضلة: {fav_count}\n• السجل: {hist_count}\n\n"
-            "طريقة الاستخدام:\n• أخضر: تبديل عرض محتوى الكبار\n"
-            "• أحمر: Proxy\n• أصفر: TMDb API Key\n• أزرق: TorrServer URL\n"
-            "• Menu: الأدوات والتشخيص (ترجمة، تشخيص، تثبيت، إعادة تشغيل، التنزيلات)\n"
-            "• Info: حذف مفتاحك والعودة للمفتاح المدمج"
+            "Layout: {layout_style}\n"
+            "Adult content: {adult_status}\n"
+            "Max stream quality: {maxq}\n"
+            "Next-episode countdown: {nxdelay} seconds\n\n"
+            "TMDb:\n• Status: {tmdb_status}\n• Key: {tmdb_key}\n\n"
+            "TorrServer:\n• Status: {ts_status}\n• Address: {ts_url}\n\n"
+            "Browser Proxy:\n• Status: {proxy_status}\n• Address: {proxy_addr}\n\n"
+            "Library:\n• Favorites: {fav_count}\n• History: {hist_count}\n\n"
+            "How to use:\n• Green: toggle adult content\n"
+            "• Red: Proxy\n• Yellow: TMDb API Key\n• Blue: TorrServer URL\n"
+            "• Menu: Tools & diagnostics (subtitles, diagnostics, install, restart, downloads)\n"
+            "• Info: delete your key and use the built-in one"
         ).format(
             version=_PLUGIN_VERSION,
             layout_style=layout.upper(),
-            adult_status="مفعل (ظهر)" if adult == "true" else "مخفي (آمن للعائلة)",
+            adult_status="On (shown)" if adult == "true" else "Hidden (family safe)",
             maxq=maxq,
             nxdelay=_nxdelay,
-            tmdb_status="مفعل" if api_key else "غير مفعل",
+            tmdb_status="On" if api_key else "Off",
             # [FIX] after "clear" (Info) the plugin falls back to its built-in key;
             # say so, instead of showing a key as if clearing did nothing
-            tmdb_key=("المفتاح المدمج (الافتراضي)" if api_key == _DEFAULT_TMDB_API_KEY
-                      else ("********" + api_key[-4:]) if api_key else "غير مضبوط"),
-            ts_status="مفعل" if ts_url else "غير مفعل",
-            ts_url=ts_url or "غير مضبوط",
-            proxy_status="مفعل" if proxy else "غير مفعل",
-            proxy_addr=proxy or "غير مضبوط",
+            tmdb_key=("Built-in key (default)" if api_key == _DEFAULT_TMDB_API_KEY
+                      else ("********" + api_key[-4:]) if api_key else "Not set"),
+            ts_status="On" if ts_url else "Off",
+            ts_url=ts_url or "Not set",
+            proxy_status="On" if proxy else "Off",
+            proxy_addr=proxy or "Not set",
             fav_count=len(_favorite_items()),
             hist_count=len(_history_items()),
         )
         self["body"].setText(body)
 
     def _edit_proxy(self):
-        self.session.openWithCallback(self._on_proxy_entered, VirtualKeyBoard, title="Proxy: http://IP:PORT  (مثال: http://192.168.1.100:5000)", text=_get_config("browser_proxy", ""))
+        self.session.openWithCallback(self._on_proxy_entered, VirtualKeyBoard, title="Proxy: http://IP:PORT  (e.g. http://192.168.1.100:5000)", text=_get_config("browser_proxy", ""))
     def _on_proxy_entered(self, value):
         if value is None: return
         v = value.strip()
         if v and not (v.startswith("http://") or v.startswith("https://")):
-            self.session.open(MessageBox, "الصيغة: http://IP:PORT\nمثال: http://192.168.1.100:5000", MessageBox.TYPE_WARNING, timeout=6)
+            self.session.open(MessageBox, "Format: http://IP:PORT\nExample: http://192.168.1.100:5000", MessageBox.TYPE_WARNING, timeout=6)
             return
         _set_config("browser_proxy", v)
         try:
@@ -151,7 +151,7 @@ class NovaPlaySettings(Screen):
         self._refresh()
 
     def _edit_tmdb_key(self):
-        self.session.openWithCallback(self._on_tmdb_key_entered, VirtualKeyBoard, title="TMDb API Key (32 حرف — من themoviedb.org)", text=_get_config("tmdb_api_key", ""))
+        self.session.openWithCallback(self._on_tmdb_key_entered, VirtualKeyBoard, title="TMDb API Key (32 characters — from themoviedb.org)", text=_get_config("tmdb_api_key", ""))
     def _on_tmdb_key_entered(self, value):
         if value is None: return
         _set_config("tmdb_api_key", value.strip())
@@ -162,7 +162,7 @@ class NovaPlaySettings(Screen):
         self._refresh()
 
     def _edit_torrserver_url(self):
-        self.session.openWithCallback(self._on_torrserver_url_entered, VirtualKeyBoard, title="TorrServer: http://IP:PORT  (مثال: http://127.0.0.1:8090)", text=_get_config("torrserver_url", ""))
+        self.session.openWithCallback(self._on_torrserver_url_entered, VirtualKeyBoard, title="TorrServer: http://IP:PORT  (e.g. http://127.0.0.1:8090)", text=_get_config("torrserver_url", ""))
     def _on_torrserver_url_entered(self, value):
         if value is None: return
         _set_config("torrserver_url", value.strip())
@@ -178,11 +178,11 @@ class NovaPlaySettings(Screen):
             _nxdelay = 10
         choices = [
             ("🛠️ System Diagnostics", "diagnostics"),
-            ("📥 Downloads Manager — التنزيلات", "downloads"),
+            ("📥 Downloads Manager", "downloads"),
             ("📦 Install Missing Dependencies", "install_deps"),
-            ("🎬 Subtitle Settings — ترجمة", "subtitles"),
-            ("🎚️ Max Stream Quality — الجودة القصوى ({})".format(_mq), "maxq"),
-            ("⏭️ Next-Episode Delay — العد التنازلي ({}ث)".format(_nxdelay), "nxdelay"),
+            ("🎬 Subtitle Settings", "subtitles"),
+            ("🎚️ Max Stream Quality ({})".format(_mq), "maxq"),
+            ("⏭️ Next-Episode Delay ({}s)".format(_nxdelay), "nxdelay"),
             ("🔄 Restart Enigma2", "restart"),
         ]
         self.session.openWithCallback(
@@ -215,10 +215,10 @@ class NovaPlaySettings(Screen):
     def _openMaxQuality(self):
         current = str(_get_config("max_quality", "auto") or "auto").strip().lower()
         options = [
-            ("Auto — تلقائي (أعلى جودة متاحة)", "auto"),
-            ("480p — توفير أكبر للبيانات", "480p"),
-            ("720p — توازن (موصى به)", "720p"),
-            ("1080p — أعلى جودة", "1080p"),
+            ("Auto (best available)", "auto"),
+            ("480p — saves the most data", "480p"),
+            ("720p — balanced (recommended)", "720p"),
+            ("1080p — best quality", "1080p"),
         ]
         items = []
         for label, value in options:
@@ -233,7 +233,7 @@ class NovaPlaySettings(Screen):
             self._refresh()
 
         self.session.openWithCallback(_picked, ChoiceBox,
-                                      title="Max Stream Quality — الجودة القصوى",
+                                      title="Max Stream Quality",
                                       list=items)
 
     def _openNextDelay(self):
@@ -242,8 +242,8 @@ class NovaPlaySettings(Screen):
         except Exception:
             current = 10
         options = [
-            ("5 ثوانٍ", 5), ("10 ثوانٍ (افتراضي)", 10), ("15 ثانية", 15),
-            ("20 ثانية", 20), ("30 ثانية", 30), ("60 ثانية", 60),
+            ("5 seconds", 5), ("10 seconds (default)", 10), ("15 seconds", 15),
+            ("20 seconds", 20), ("30 seconds", 30), ("60 seconds", 60),
         ]
         items = []
         for label, value in options:
@@ -261,5 +261,5 @@ class NovaPlaySettings(Screen):
             self._refresh()
 
         self.session.openWithCallback(_picked, ChoiceBox,
-                                      title="Next-Episode Delay — العد التنازلي",
+                                      title="Next-Episode Delay",
                                       list=items)

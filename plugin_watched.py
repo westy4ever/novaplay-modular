@@ -6,7 +6,7 @@ ambiguous (never started vs. finished). This module keeps a small JSON
 list of watched URLs in the plugin config (one key, capped at 500):
 
     ✓  finished (marked at natural EOF by the player)
-    ◐  in progress = the home screen's existing "متابعة" resume bar
+    ◐  in progress = the home screen's existing "Resume" bar
     ''  nothing
 
 v2: 2s TTL cache — a grid repaint calls is_watched ~24 times; without

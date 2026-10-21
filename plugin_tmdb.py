@@ -673,7 +673,7 @@ def _tmdb_search_suggestions(query, limit=8):
 
     suggestions = []
     seen = set()
-    for media_kind, kind_label in (("movie", "فيلم"), ("tv", "مسلسل")):
+    for media_kind, kind_label in (("movie", "Movie"), ("tv", "Series")):
         try:
             data = _tmdb_request("/search/{}".format(media_kind), {"query": query, "page": 1}) or {}
             for result in data.get("results") or []:

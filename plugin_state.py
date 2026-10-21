@@ -538,12 +538,12 @@ def _library_search_suggestions(query="", current_site="", limit=8):
         seen.add(nr)
         rows.append((score, -1, -int(time.time()), {
             "title": r, "query": r,
-            "source": "بحث سابق", "site": "", "kind": "", "year": "",
+            "source": "Previous search", "site": "", "kind": "", "year": "",
         }))
 
     for source_name, items, source_rank in (
-        ("المفضلة", _favorite_items(), 0),
-        ("السجل", _history_items(), 1),
+        ("Favorites", _favorite_items(), 0),
+        ("History", _history_items(), 1),
     ):
         for item in items or []:
             title = re.sub(r"\s+", " ", item.get("title", "") or "").strip()
@@ -571,7 +571,7 @@ def _library_search_suggestions(query="", current_site="", limit=8):
                     "query": title,
                     "source": source_name,
                     "site": item.get("_site", ""),
-                    "kind": {"movie": "فيلم", "series": "مسلسل", "episode": "حلقة"}.get(item.get("type", ""), ""),
+                    "kind": {"movie": "Movie", "series": "Series", "episode": "Episode"}.get(item.get("type", ""), ""),
                     "year": item.get("year", ""),
                 }
             ))
