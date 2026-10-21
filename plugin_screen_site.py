@@ -63,9 +63,9 @@ _CAT_Y0, _CAT_STEP, _CAT_H = 212, 62, 56
 
 P_COLS, P_ROWS = 5, 2
 P_VIEW = P_COLS * P_ROWS
-PW, PH = 174, 270
-_PX = tuple(430 + c * (PW + 20) for c in range(P_COLS))
-_PY = (226, 558)
+PW, PH = 178, 267
+_PX = tuple(430 + c * (PW + 15) for c in range(P_COLS))
+_PY = (222, 574)
 
 _PAGED_SITES = ("egydead", "egydead_coupons", "fasel", "faselhdx")
 _ADULT = ["18+", "للكبار", "سكس", "xxx", "adult", "إباح", "sex"]
@@ -127,9 +127,10 @@ def _skin():
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
         <widget name="pRate{i}" position="{rx},{ry}" size="78,30" font="Bold;19" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
-        <widget name="pName{i}" position="{x},{ty}" size="{w},34" font="Regular;22" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        <widget name="pName{i}" position="{x},{ty}" size="{w},32" font="Regular;22" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        <widget name="pYear{i}" position="{x},{yy}" size="{w},26" font="Regular;18" foregroundColor="#A3ADBB" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 4, ey=y - 4, ew=PW + 8, eh=PH + 8,
-                   rx=x + 8, ry=y + 8, my=y + PH - 28, ty=y + PH + 8,
+                   rx=x + 8, ry=y + 8, my=y + PH - 28, ty=y + PH + 6, yy=y + PH + 36,
                    gold=GOLD, card=CARD, white=WHITE, bg=BG))
     parts.append("</screen>")
     return "".join(parts)
@@ -183,7 +184,7 @@ class NovaPlaySite(Screen):
             self["cBar%d" % i] = Label("")
             self["cText%d" % i] = Label("")
         for i in range(P_VIEW):
-            for n in ("pEdge", "pBack", "pRate", "pMark", "pName"):
+            for n in ("pEdge", "pBack", "pRate", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)] = Label("")
             self["pImg%d" % i] = Pixmap()
 
@@ -464,7 +465,7 @@ class NovaPlaySite(Screen):
         self["gridMsg"].setText(text)
         self["gridMsg"].show()
         for i in range(P_VIEW):
-            for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName"):
+            for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)].hide()
         self["gridCount"].setText("")
         self["gridMore"].setText("")
@@ -495,7 +496,7 @@ class NovaPlaySite(Screen):
         missing = False
         for i in range(P_VIEW):
             g = base + i
-            names = ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName")
+            names = ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")
             if g >= n:
                 for nm in names:
                     self["%s%d" % (nm, i)].hide()
@@ -506,8 +507,12 @@ class NovaPlaySite(Screen):
             self["pBack%d" % i].show()
             self["pName%d" % i].show()
             self["pName%d" % i].setText(_single_line_text(_strip_arabic_from_english_title(it.get("title", "")) or it.get("title", ""),
-                                                          width=15, fallback="—"))
+                                                          width=16, fallback="—"))
             self._color("pName%d" % i, fg=GOLD if sel else WHITE)
+            _yr = str(it.get("year") or "")[:4]
+            _kd = _KIND.get(it.get("type", ""), "")
+            self["pYear%d" % i].setText("  ·  ".join(b for b in (_yr, _kd) if b))
+            self["pYear%d" % i].show()
             # rating
             r = str(it.get("rating") or "").strip()
             try:
