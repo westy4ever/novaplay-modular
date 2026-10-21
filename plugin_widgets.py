@@ -89,6 +89,48 @@ class StreamList(GUIComponent):
             return None
         return row_idx * self.ROW_H
 
+    # [panel 2026-10-21] detail screen row: number box | name | details |
+    # quality badge (only when it says more than "HD"); episode rows show
+    # their S01E05 marker in the box instead of a number.
+    def _panelRow(self, n, item, quality, filename, size, seeders_source):
+        H = self.ROW_H_COMPACT
+        W = self.width
+        q = re.sub(r'[\[\]]', '', (quality or "")).strip()
+        right = " | ".join([x for x in (size, seeders_source) if x])
+        row = [item]
+        if not filename:
+            # placeholder rows ("No servers available")
+            row.append(MultiContentEntryText(pos=(20, 0), size=(W - 40, H), font=1,
+                                             flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER, text=q, color="#A3ADBB"))
+            return row
+        is_ep = bool(re.match(r'^S\d{1,3}E\d{1,4}$', q, re.I))
+        box_w = 112 if is_ep else 50
+        row.append(MultiContentEntryText(pos=(8, 9), size=(box_w, H - 18), font=2,
+                                         flags=RT_HALIGN_CENTER | RT_VALIGN_CENTER,
+                                         text=(q if is_ep else str(n + 1)), color="#C9D0DA",
+                                         backcolor=0x232B38, backcolor_sel=0x3A4760))
+        badge = "" if (is_ep or q.upper() in ("", "HD", "SD", "AUTO")) else q.upper()
+        badge_w = 0
+        if badge:
+            badge_w = min(170, 26 + 14 * len(badge))
+            gold = badge.startswith("4K") or badge.startswith("2160")
+            row.append(MultiContentEntryText(pos=(W - badge_w - 14, 12), size=(badge_w, H - 24), font=2,
+                                             flags=RT_HALIGN_CENTER | RT_VALIGN_CENTER, text=badge,
+                                             color=(0x0C1017 if gold else 0xF0F6FC),
+                                             color_sel=(0x0C1017 if gold else 0xF0F6FC),
+                                             backcolor=(0xF2C230 if gold else 0x2E3A4D),
+                                             backcolor_sel=(0xF2C230 if gold else 0x46566E)))
+        right_w = 220 if right else 0
+        if right:
+            row.append(MultiContentEntryText(pos=(W - badge_w - 24 - right_w, 0), size=(right_w, H), font=2,
+                                             flags=RT_HALIGN_RIGHT | RT_VALIGN_CENTER, text=right, color="#A3ADBB"))
+        nx = 8 + box_w + 18
+        nw = max(120, W - nx - badge_w - right_w - 40)
+        row.append(MultiContentEntryText(pos=(nx, 0), size=(nw, H), font=1,
+                                         flags=(RT_HALIGN_RIGHT if _has_arabic(filename) else RT_HALIGN_LEFT) | RT_VALIGN_CENTER,
+                                         text=filename, color="#F0F6FC", color_sel="#F2C230"))
+        return row
+
     # [panel] columns: quality 10-160 | name 170..W-250 | details W-240..W-30
     def _rightX(self):
         return self.width - 240 if self.width < 1800 else 1560
@@ -98,11 +140,14 @@ class StreamList(GUIComponent):
 
     def setList(self, items):
         res = []
-        for item in items:
+        for _n, item in enumerate(items):
             quality = item[0]
             filename = item[1]
             size = item[2] if len(item) > 2 else ""
             seeders_source = item[3] if len(item) > 3 else ""
+            if self.compact and self.width < 1800:
+                res.append(self._panelRow(_n, item, quality, filename, size, seeders_source))
+                continue
             if self.compact:
                 # [row-compact] one text line per column, vertically
                 # centered in the shorter row -- no resolution/source-tag

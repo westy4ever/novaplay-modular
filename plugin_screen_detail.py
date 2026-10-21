@@ -1823,7 +1823,10 @@ class NovaPlayDetail(Screen):
                 badge = "⚪"
             else:
                 badge = "🟣"
-            quality_labels.append(("{}. {} {}".format(i + 1, badge, label), "", ""))
+            # [panel] number box + name + resolution badge (StreamList draws them)
+            _qm = re.search(r"(2160|1440|1080|720|576|480|360|240)\s*p|\b4k\b", label, re.I)
+            _qt = ("4K" if _qm.group(0).lower() == "4k" or _qm.group(1) == "2160" else _qm.group(1) + "P") if _qm else "HD"
+            quality_labels.append((_qt, label, "", ""))
 
         self["section"].setText(_single_line_text("Available qualities: {}  |  pick a quality".format(len(choices)), width=90))
         # [detail-stagger] quality menu pops in one row at a time
