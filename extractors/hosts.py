@@ -3312,6 +3312,48 @@ def resolve_vidapi_player(url, referer=None):
         return None
 
 
+# ─── FireStream (firestream.to -> firestream.site) ─────────────────────────
+# [2026-10-21 capture, TopCinema "Remembrance"] firestream.to/e/<slug> moves to
+# firestream.site/e/<slug>; the page carries a one-time token
+#   <script id="token-blob" type="text/plain">BASE64</script>
+# and its own code does POST /api/videos/<slug>/resolve {"blob": token}
+#   -> {"signedVideoUrl": "https://fi-cdn-0.firestream.to/.../video.mp4/video.m3u8?md5=..&expires=..",
+#       "signedVideoSdUrl": null}
+# (the /challenge call 502'd in the browser and playback still worked).
+
+def resolve_firestream(url, referer=None):
+    try:
+        html, final = fetch(url, referer=referer or "https://topcinema.film/",
+                            extra_headers={"Sec-Fetch-Dest": "iframe"})
+        if not html:
+            return None
+        page = final or url
+        p = urlparse(page)
+        origin = "{}://{}".format(p.scheme or "https", p.netloc)
+        m = re.search(r'<script[^>]+id=["\']token-blob["\'][^>]*>\s*([^<\s]+)\s*</script>', html)
+        slug_m = re.search(r'/e/([A-Za-z0-9_-]+)', p.path)
+        if not m or not slug_m:
+            log("firestream: no token on {} ({} bytes)".format(page[:80], len(html)))
+            return None
+        body, _f = fetch(origin + "/api/videos/" + slug_m.group(1) + "/resolve", referer=page,
+                         post_data=json.dumps({"blob": m.group(1)}),
+                         extra_headers={"Content-Type": "application/json", "Origin": origin,
+                                        "Accept": "application/json"})
+        try:
+            data = json.loads(body or "{}")
+        except ValueError:
+            data = {}
+        link = (data or {}).get("signedVideoUrl") or (data or {}).get("signedVideoSdUrl")
+        if not link:
+            log("firestream: resolve gave no link: {}".format(str(body)[:160]))
+            return None
+        log("firestream: {} -> {}".format(slug_m.group(1), link[:90]))
+        return link + "|Referer={0}/&Origin={0}".format(origin)
+    except Exception as e:
+        log("firestream error: {}".format(e))
+        return None
+
+
 def resolve_vidapi(url, referer=None):
     """[2026-10-21] vidapi.xyz/embed/{movie,tv}/<id> (ZetMoon "Zeon"): the page
     keeps its player in <iframe id="iframesrc" data-src=
@@ -4806,6 +4848,7 @@ HOST_RESOLVERS = {
     # ─── OnlyFlix server tabs — vidsrc-family players (2026-09-24) ──────
     "vidfast.vc":   resolve_vidvm_family,
     "vidapi.xyz":   resolve_vidapi,
+    "firestream":   resolve_firestream,          # firestream.to / firestream.site (2026-10-21)
     "player.imdb.su":      resolve_vidapi_player,     # 2026-10-21
     "nextgencloudfabric":  resolve_vidapi_player,
     "vscdn.xyz":    resolve_streamwish,
