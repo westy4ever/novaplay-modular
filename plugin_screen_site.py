@@ -354,17 +354,21 @@ class NovaPlaySite(Screen):
         if car:
             for i in range(P_VIEW):
                 self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")], False)
+        # carousel + category list open: a "peek" -- the section name, the
+        # counter and the poster strip stay in view beside the panel (was a
+        # large empty hint card in the middle of the screen)
+        peek = car and self._zone == "cats" and bool(self._posters)
         self._vis(self._CAR_W, browsing)
-        if not browsing:
+        if peek:
+            self["kCount"].show()
+            self["gridTitle"].setText(_single_line_text(self._cat_name, width=34, fallback=""))
+            self["gridTitle"].show()
+        if not (browsing or peek):
             for i in range(K_SLOTS):
                 self._vis(["kEdge%d" % i, "kBack%d" % i, "kImg%d" % i, "kRate%d" % i], False)
         if not car or not self._bd_path:
             self["kBackdrop"].hide()
-        if car and self._zone == "cats" and self._posters:
-            self["gridMsg"].setText(u"{}\n\n▶  back to the titles      OK  open the section".format(
-                _single_line_text(self._cat_name, width=40, fallback="")))
-            self["gridMsg"].show()
-        elif car and self._posters:
+        if car and self._posters:
             self["gridMsg"].hide()
         self["key_green"].setText("Grid view" if car else "Carousel view")
 
@@ -717,12 +721,14 @@ class NovaPlaySite(Screen):
         for s_ in range(K_SLOTS):
             g = self._pi + (s_ - K_MID)
             names = ["kEdge%d" % s_, "kBack%d" % s_, "kImg%d" % s_, "kRate%d" % s_]
-            if not browsing or not (0 <= g < n):
+            # categories open: keep the strip in view right of the panel (slot 0
+            # sits under it), without the gold focus frame
+            if not (0 <= g < n) or (not browsing and _KX[s_] < 420):
                 self._vis(names, False)
                 continue
             it = self._posters[g]
             self["kBack%d" % s_].show()
-            self["kEdge%d" % s_].show() if s_ == K_MID else self["kEdge%d" % s_].hide()
+            self["kEdge%d" % s_].show() if (browsing and s_ == K_MID) else self["kEdge%d" % s_].hide()
             path, loading = self._posterPath(it)
             missing = missing or loading
             inst = self["kImg%d" % s_].instance
