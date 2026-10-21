@@ -613,6 +613,8 @@ class NovaPlaySimplePlayer(Screen):
         self._sleep_timer = None
         self._sleep_minutes = 0
         self._aspect_idx = 0
+        self._pic_extra = None
+        self._pic_extra_list = []
         self._saved_av_aspect = None
         self._av_aspect_dirty = False
         try:
@@ -3112,9 +3114,33 @@ class NovaPlaySimplePlayer(Screen):
     _SLEEP_STEPS = (0, 30, 60, 90, 120)
     _SKIP_STEPS = (60, 90, 120)
 
+    def _picExtras(self):
+        try:
+            import novaplay_picture
+            return novaplay_picture.available()
+        except Exception as e:
+            my_log("picture modes: {}".format(e))
+            return []
+
     def _menuPictureItems(self):
-        cur = getattr(self, "_aspect_idx", 0)
-        return [(lbl, i == cur, True) for i, (lbl, _bar) in enumerate(self._ASPECT_MODES)]
+        extra = getattr(self, "_pic_extra", None)
+        cur = -1 if extra is not None else getattr(self, "_aspect_idx", 0)
+        rows = [(lbl, i == cur, True) for i, (lbl, _bar) in enumerate(self._ASPECT_MODES)]
+        self._pic_extra_list = self._picExtras()
+        rows += [(lbl, extra == j, True) for j, (lbl, _k, _v) in enumerate(self._pic_extra_list)]
+        return rows
+
+    def _applyPictureExtra(self, j):
+        """Box display modes (letterbox / pan & scan / stretch / zoom) from
+        novaplay_picture -> status text."""
+        import novaplay_picture
+        label, kind, value = self._pic_extra_list[j]
+        self._aspect_idx = 0
+        self._applyAspectMode()            # bars off, system aspect back
+        ok = novaplay_picture.apply(kind, value)
+        self._pic_extra = j if ok else None
+        my_log("picture: {} ({} {}) -> {}".format(label, kind, value, "ok" if ok else "refused"))
+        return u"Picture: {}".format(label) if ok else u"Picture: {} — not supported by this box".format(label)
 
     def _menuTimerItems(self):
         rows = [((u"Sleep: Off" if m == 0 else u"Sleep {} min".format(m)),
@@ -3138,9 +3164,18 @@ class NovaPlaySimplePlayer(Screen):
     def _menuLive(self, col, idx):
         msg = u""
         if col == "picture":
-            self._aspect_idx = idx
-            self._applyAspectMode()
-            msg = u"Picture: {}".format(self._ASPECT_MODES[idx][0])
+            n = len(self._ASPECT_MODES)
+            if idx >= n and idx - n < len(getattr(self, "_pic_extra_list", []) or []):
+                msg = self._applyPictureExtra(idx - n)
+                try:
+                    self["status"].setText(msg)
+                except Exception:
+                    pass
+            else:
+                self._pic_extra = None
+                self._aspect_idx = idx
+                self._applyAspectMode()
+                msg = u"Picture: {}".format(self._ASPECT_MODES[idx][0])
         elif col == "timer" and idx < len(self._SLEEP_STEPS):
             self.__sleepPicked((u"", self._SLEEP_STEPS[idx]))
             msg = u"Sleep: {}".format(self._sleepLabel())
@@ -3464,6 +3499,11 @@ class NovaPlaySimplePlayer(Screen):
             return False
 
     def _restoreSystemAspect(self):
+        try:
+            import novaplay_picture
+            novaplay_picture.restore()
+        except Exception:
+            pass
         if not getattr(self, "_av_aspect_dirty", False):
             return
         saved = getattr(self, "_saved_av_aspect", None)
