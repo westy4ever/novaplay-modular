@@ -3969,6 +3969,222 @@ def resolve_vidsrc_family(url, referer=None):
         in_progress.discard(host)  # [PATCH H1]
 
 
+# ─── OnlyFlix Server 1 — share.cdnm.ink → <sub>.cdnmovies-stream.online ────
+# [2026-10-21 capture] share.cdnm.ink/embed/imdb/<tt> only wraps
+#   <iframe id="player" data-src="https://ugly-turkey.cdnmovies-stream.online/
+#           imdb/<tt>/iframe?translation_id=145&ftp_server_id=5&poster=...">
+# whose page builds a PlayerJS player with
+#   file: '#2<base64 with "//"+40-char trash chunks spliced in>'
+# Decoded: "[240p]https://s1.cdnmvs.online/<sig>:<exp>/videos_new/.../240.mp4/
+# index-v1-a1.m3u8,[360p]...,[1080p]...". The page only *hides* 480p+ in the
+# menu (forbidden_quality) -- every quality carries its own signed link.
+# Series: the decoded value is a PlayerJS JSON playlist (folders of episodes).
+
+def _pjs_decode(enc):
+    """PlayerJS '#2' file: strip the '//'+base64(trash) chunks, base64-decode."""
+    s = (enc or "").strip()
+    if s.startswith("#2"):
+        s = s[2:]
+    elif s.startswith("#"):
+        return ""
+    for n in (40, 32, 44, 36, 48, 28):
+        t = re.sub(r'//[A-Za-z0-9+/=]{%d}' % n, "", s)
+        try:
+            out = base64.b64decode(t + "=" * (-len(t) % 4)).decode("utf-8")
+        except Exception:
+            continue
+        if "http" in out and all(31 < ord(c) < 127 or c in "\r\n\t" or ord(c) > 159 for c in out):
+            return out
+    return ""
+
+
+def _pjs_quality_list(file_value):
+    """'[360p]url,[720p]url' (or 'url or url') -> [(label, url)] best first."""
+    out = []
+    for m in re.finditer(r'\[([^\]]*)\]\s*(https?://[^,\[\s]+)', file_value or ""):
+        out.append((m.group(1).strip() or "Auto", m.group(2).split(" or ")[0]))
+    if not out:
+        for u in re.findall(r'https?://[^,\s]+', file_value or ""):
+            out.append(("Auto", u))
+
+    def _rank(lbl):
+        m = re.search(r'(\d{3,4})', lbl)
+        return int(m.group(1)) if m else 0
+    out.sort(key=lambda p: -_rank(p[0]))
+    return out
+
+
+def _pjs_pick_episode(playlist, season, episode):
+    """Walk a PlayerJS JSON playlist for season/episode; returns its 'file'."""
+    def _num(t):
+        m = re.search(r'(\d+)', str(t or ""))
+        return m.group(1) if m else ""
+    seasons = playlist if isinstance(playlist, list) else []
+    for s in seasons:
+        if not isinstance(s, dict):
+            continue
+        if s.get("folder") and (not season or _num(s.get("title")) == str(int(season))
+                                or len(seasons) == 1):
+            for e in s["folder"]:
+                if isinstance(e, dict) and e.get("file") and (
+                        not episode or _num(e.get("title")) == str(int(episode))):
+                    return e["file"]
+                if isinstance(e, dict) and e.get("folder"):        # dub/voice level
+                    r = _pjs_pick_episode([dict(title=s.get("title"), folder=e["folder"])],
+                                          season, episode)
+                    if r:
+                        return r
+        elif s.get("file") and not season:
+            return s["file"]
+    return ""
+
+
+def resolve_cdnm(url, referer=None):
+    try:
+        parsed = urlparse(url)
+        q = parse_qs(parsed.query)
+        season = (q.get("season") or q.get("s") or [""])[0]
+        episode = (q.get("episode") or q.get("e") or [""])[0]
+        page_url, page_ref = url, (referer or "https://onlyflix.to/")
+        if "cdnm.ink" in parsed.netloc:
+            html, _f = fetch(url, referer=page_ref, timeout=12, max_retries=1)
+            m = re.search(r'<iframe[^>]+(?:data-src|src)="(https?://[^"]*cdnmovies[^"]+)"',
+                          html or "", re.I)
+            if not m:
+                log("resolve_cdnm: no cdnmovies player on {} ({} bytes)".format(
+                    url[:90], len(html or "")))
+                return None
+            page_url = html_module.unescape(m.group(1))
+            if season and "season=" not in page_url:
+                page_url += "&season={}&episode={}".format(season, episode)
+            page_ref = "https://{}/".format(parsed.netloc)
+        html, final = fetch(page_url, referer=page_ref, timeout=12, max_retries=1)
+        m = re.search(r'''\bfile\s*:\s*(['"])(.+?)\1''', html or "", re.S)
+        if not m:
+            log("resolve_cdnm: no PlayerJS file on {} ({} bytes)".format(
+                page_url[:90], len(html or "")))
+            return None
+        raw = m.group(2)
+        value = _pjs_decode(raw) if raw.startswith("#") else raw
+        if value.lstrip().startswith("["):
+            try:
+                pl = json.loads(value)
+                value = _pjs_pick_episode(pl, season, episode) or ""
+                if value.startswith("#"):
+                    value = _pjs_decode(value)
+            except ValueError:
+                pass                     # plain "[360p]url,..." list
+        variants = _pjs_quality_list(value)
+        if not variants:
+            log("resolve_cdnm: nothing playable in the decoded file ({} chars)".format(len(value)))
+            return None
+        origin = "{0.scheme}://{0.netloc}".format(urlparse(final or page_url))
+        suffix = "|Referer={}/&Origin={}".format(origin, origin)
+        # every quality has its own signed link; use the best one that answers
+        for i, (lbl, u) in enumerate(variants):
+            body = ""
+            try:
+                body, _ = fetch(u, referer=origin + "/", timeout=8, max_retries=0,
+                                extra_headers={"Origin": origin})
+            except Exception:
+                body = ""
+            if body and "#EXTM3U" in body:
+                ok = variants[i:]
+                _quality_tls.variants = [v + suffix for _, v in ok]
+                log("resolve_cdnm: {} quality(ies), playing {}".format(len(ok), lbl))
+                return u + suffix
+            log("resolve_cdnm: {} did not answer, trying the next quality".format(lbl))
+        return None
+    except Exception as e:
+        log("resolve_cdnm error: {}".format(e))
+        return None
+
+
+# ─── OnlyFlix Server 4 — sv2.nontongo.stream (→ sv4.nontongo.day) ─────────
+# [2026-10-21 capture] /soap/{movie/<tt> | tv/<tt>/<s>/<e>} carries
+#   const cfg = {"type":"movie","tmdbId":1263337,"season":1,"episode":1,
+#     "servers":[{"movie_url":".../01russia/multisourcesoap.php?id={tmdb_id}&type=movie",
+#                 "tv_url":"...?id={tmdb_id}&season={season}&episode={episode}&type=tv"}]}
+# and that page lists plain sources:
+#   const sources = [{"html":"Soap2Cloud","file":"https://<x>.soapsoap123.workers.dev/cdn/<tok>#file.m3u8"}, ...]
+# (HLS master, 1080/720/...; segments on relay.medmedia04.help). The player
+# requests them with Referer/Origin https://sv4.nontongo.day.
+
+def resolve_nontongo(url, referer=None):
+    try:
+        parsed = urlparse(url)
+        parts = [p for p in parsed.path.strip("/").split("/") if p]
+        season = episode = ""
+        if "tv" in parts:
+            tail = parts[parts.index("tv") + 1:]
+            if len(tail) >= 3:
+                season, episode = tail[1], tail[2]
+        multi = ""
+        if "multisourcesoap" in url:
+            multi, soap_url = url, url
+        else:
+            soap_url = url
+            hosts = [parsed.netloc] + [h for h in ("sv4.nontongo.day", "sv2.nontongo.stream")
+                                       if h != parsed.netloc]
+            for host in hosts:
+                soap_url = "{}://{}{}".format(parsed.scheme or "https", host, parsed.path)
+                html, final = fetch(soap_url, referer=referer or "https://onlyflix.to/",
+                                    timeout=12, max_retries=0)
+                soap_url = final or soap_url
+                m = re.search(r'const\s+cfg\s*=\s*(\{.*?\})\s*;\s*\n', html or "", re.S) or \
+                    re.search(r'const\s+cfg\s*=\s*(\{.*?\});', html or "", re.S)
+                if not m:
+                    log("resolve_nontongo: no player config on {} ({} bytes)".format(
+                        soap_url[:80], len(html or "")))
+                    continue
+                cfg = json.loads(m.group(1))
+                tmdb = str(cfg.get("tmdbId") or "")
+                s = season or str(cfg.get("season") or 1)
+                e = episode or str(cfg.get("episode") or 1)
+                is_tv = (cfg.get("type") == "tv") or bool(season)
+                for srv in cfg.get("servers") or []:
+                    tpl = srv.get("tv_url" if is_tv else "movie_url") or ""
+                    if tpl and tmdb:
+                        multi = (tpl.replace("{tmdb_id}", tmdb)
+                                 .replace("{season}", s).replace("{episode}", e))
+                        break
+                if multi:
+                    break
+        if not multi:
+            return None
+        mhost = "{0.scheme}://{0.netloc}".format(urlparse(multi))
+        html, _f = fetch(multi, referer=soap_url, timeout=12, max_retries=1)
+        m = re.search(r'const\s+sources\s*=\s*(\[.*?\])\s*;', html or "", re.S)
+        if not m:
+            log("resolve_nontongo: no sources on {} ({} bytes)".format(multi[:90], len(html or "")))
+            return None
+        sources = [s for s in json.loads(m.group(1))
+                   if isinstance(s, dict) and str(s.get("file", "")).startswith("http")]
+        log("resolve_nontongo: {} source(s): {}".format(
+            len(sources), ", ".join(str(s.get("html")) for s in sources)))
+        suffix = "|Referer={}/&Origin={}".format(mhost, mhost)
+        for src in sources:
+            u = src["file"].split("#", 1)[0]
+            try:
+                body, _ = fetch(u, referer=mhost + "/", timeout=10, max_retries=0,
+                                extra_headers={"Origin": mhost})
+            except Exception:
+                body = ""
+            if not body or "#EXTM3U" not in body:
+                log("resolve_nontongo: {} gave no playlist".format(src.get("html")))
+                continue
+            variants = _parse_hls_master_variants(u, body)
+            if variants:
+                _quality_tls.variants = [v + suffix for _, v in variants]
+                log("resolve_nontongo: {} -> {} quality(ies)".format(src.get("html"), len(variants)))
+                return variants[0][1] + suffix
+            return u + suffix
+        return None
+    except Exception as e:
+        log("resolve_nontongo error: {}".format(e))
+        return None
+
+
 def megamax_list_mirrors(url, referer=None):
     """[PATCH MM2] List EVERY mirror megamax.me's (q7v3k8m2p1.top)
     file-download aggregator exposes, across ALL qualities -- not just
@@ -4168,8 +4384,9 @@ HOST_RESOLVERS = {
     "vidfast.vc":   resolve_vidvm_family,
     "vidapi.xyz":   resolve_vidapi,
     "vscdn.xyz":    resolve_streamwish,
-    "cdnm.ink":     resolve_vidsrc_family,   # share.cdnm.ink
-    "nontongo":     resolve_vidsrc_family,   # sv2.nontongo.stream / .day
+    "cdnm.ink":     resolve_cdnm,            # share.cdnm.ink → cdnmovies PlayerJS (2026-10-21)
+    "cdnmovies-stream": resolve_cdnm,
+    "nontongo":     resolve_nontongo,        # sv2.nontongo.stream → sv4.nontongo.day multisource
 
     "streamtape":  resolve_streamtape,
     "dood":        resolve_doodstream,
