@@ -1969,14 +1969,37 @@ def resolve_n1mwq(url, referer=None, origin=None, video_id=None):
             jh = dict(pb_headers or {})
             jh["Content-Type"] = "application/json"
             jh["Origin"] = origin or _N1MWQ_ORIGIN
+            import urllib.request as _ur
+            import urllib.error as _ue
+            import ssl as _ssl
+
+            def _post(body):
+                h = dict(jh)
+                h["User-Agent"] = UA
+                h["Referer"] = page_referer
+                h["Accept"] = "application/json"
+                req = _ur.Request(base + "playback", data=json.dumps(body).encode(), headers=h, method="POST")
+                try:
+                    with _ur.urlopen(req, timeout=15, context=_ssl._create_unverified_context()) as r:
+                        return r.status, r.read().decode("utf-8", "replace")
+                except _ue.HTTPError as e:
+                    return e.code, e.read().decode("utf-8", "replace")
+
             for body in ({}, {"captcha_token": captcha_token}, {"token": captcha_token}):
                 if not captcha_token and body:
                     continue
-                playback_resp = fetch_json(base + "playback", referer=page_referer,
-                                           post_data=json.dumps(body), extra_headers=jh)
+                try:
+                    code, text = _post(body)
+                except Exception as e:
+                    code, text = 0, str(e)
+                try:
+                    playback_resp = json.loads(text)
+                except ValueError:
+                    playback_resp = None
                 playback = (playback_resp or {}).get("playback") if isinstance(playback_resp, dict) else None
-                log("n1mwq: POST playback {} -> {}".format(
-                    list(body.keys()) or "{}", "payload" if playback else str(playback_resp)[:160]))
+                # the error text says what the server wants (box: 400, 33 bytes)
+                log("n1mwq: POST playback {} -> HTTP {}: {}".format(
+                    list(body.keys()) or "{}", code, "payload" if playback else text[:200]))
                 if playback:
                     break
         if not playback:
