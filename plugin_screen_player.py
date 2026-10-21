@@ -302,6 +302,26 @@ def _build_remote_play_candidates(url):
     return candidates
 
 
+def _nav_play_unhooked(nav, sref):
+    """[2026-10-21] play NOVA's own stream with Enigma2's real playService.
+    Other plugins replace session.nav.playService on the instance and reroute
+    every http address (StreamProxy's ServiceMonitor: 127.0.0.1:7860/proxy/m3u
+    -- fine for HLS, but a plain MP4 such as Mixdrop's failed at once with
+    FF_ERROR and never reached NOVA's proxy). NOVA's addresses are already
+    final, so call the class method and skip such instance-level hooks."""
+    try:
+        if "playService" in getattr(nav, "__dict__", {}):
+            orig = getattr(type(nav), "playService", None)
+            if orig is not None:
+                hook = nav.__dict__["playService"]
+                my_log("play: bypassing a playService hook ({})".format(
+                    getattr(getattr(hook, "__func__", hook), "__qualname__", hook)))
+                return orig(nav, sref)
+    except Exception as e:
+        my_log("play: unhooked call failed ({}), using the normal one".format(e))
+    return nav.playService(sref)
+
+
 def _copy_service_ref(sref):
     if not sref: return None
     try:
@@ -2178,7 +2198,7 @@ class NovaPlaySimplePlayer(Screen):
             self.session.nav.stopService()
         except: pass
         try:
-            self.session.nav.playService(self.sref)
+            _nav_play_unhooked(self.session.nav, self.sref)
             # proxy attempts that are broken fail within a second or two; one that is
             # still waiting on a slow CDN playlist gets 30 s (seen: 16-46 s on the box)
             self._retry_timer.start(30000 if uses_proxy else 12000, True)
