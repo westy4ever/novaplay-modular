@@ -3044,17 +3044,32 @@ def _vscdn_pick_link(html, page_url):
             body = None
         if body and "#EXTM3U" in body:
             log("resolve_vidapi: vscdn {} serves the playlist".format(k))
-            # hls4 lists its pieces as tiktokcdn "images": proxy only (it strips that)
-            disguised = ("tiktokcdn" in body) or (k == "hls4")
-            if disguised and "EXT-X-STREAM-INF" in body:
-                try:
-                    v = [l for l in body.splitlines() if l.strip() and not l.startswith("#")]
-                    sub, _f = fetch(urljoin(u, v[0]), referer=base + "/", timeout=10,
-                                    max_retries=0, extra_headers=hdrs) if v else ("", "")
-                    disguised = "tiktokcdn" in (sub or "") or ".image" in (sub or "") or k == "hls4"
-                except Exception:
-                    pass
-            return u + "|Referer={}/&Origin={}&User-Agent={}{}".format(
+            # Box 2026-10-21: vscdn's /stream/ links answered this check with 200,
+            # then the proxy's own request 403 seconds later -- download each
+            # playlist ONCE here and hand it to the proxy (as vidvm does).
+            play, text = u, body
+            if "#EXT-X-STREAM-INF" in body:
+                var = _parse_hls_master_variants(u, body)
+                if var:
+                    vu = var[0][1]
+                    try:
+                        sub, _f = fetch(vu, referer=base + "/", timeout=10, max_retries=0,
+                                        extra_headers=hdrs)
+                    except Exception:
+                        sub = None
+                    if sub and "#EXTM3U" in sub:
+                        play, text = vu, sub
+                        log("resolve_vidapi: vscdn {} quality playlist {} ({} bytes)".format(
+                            k, var[0][0], len(sub)))
+            disguised = ("tiktokcdn" in text) or (".image" in text) or k == "hls4"
+            try:
+                import novaplay_proxy
+                if play != u:
+                    novaplay_proxy.remember_playlist(u, body, u, keep=3 * 3600)
+                novaplay_proxy.remember_playlist(play, text, play, keep=3 * 3600)
+            except Exception as e:
+                log("resolve_vidapi: could not hand the playlist to the proxy: {}".format(e))
+            return play + "|Referer={}/&Origin={}&User-Agent={}{}".format(
                 base, base, ua, "&X-NP-Proxy=1" if disguised else "")
         log("resolve_vidapi: vscdn {} gave no playlist ({} bytes)".format(k, len(body or "")))
     return None
