@@ -375,13 +375,18 @@ class NovaPlayDetail(Screen):
             "ok":     self._onOk,
             "cancel": self._onCancel,
             "red":    self._toggleFavorite,
-            "yellow": self._refreshTMDb,
+            "yellow": self._onYellow,
             "blue":   self._openDownloads,
             "green":  self._playTrailer,
             "up":     self._navMenuUp,
             "down":   self._navMenuDown,
             "left":   lambda: self["menu"].pageUp(),
             "right":  lambda: self["menu"].pageDown(),
+        }, -1)
+        # [2026-10-21] CH+ / CH- step the torrent quality filter (like YTS's tabs)
+        self["torFilterActions"] = ActionMap(["ChannelSelectBaseActions"], {
+            "nextBouquet": lambda: self._stepTorrentFilter(1),
+            "prevBouquet": lambda: self._stepTorrentFilter(-1),
         }, -1)
 
         self.onLayoutFinish.append(self._load)
@@ -900,13 +905,88 @@ class NovaPlayDetail(Screen):
         finally:
             _wt.cancel()
 
+    # ── [2026-10-21] torrent lists: "🧲 Torrents N" + All / 4K / 1080p / 720p / SD
+    _TOR_BUCKETS = ("All", "4K", "1080p", "720p", "SD")
+
+    @staticmethod
+    def _torBucket(sv):
+        q = "{} {}".format(sv.get("quality") or "", sv.get("name") or "").upper()
+        if "2160" in q or "4K" in q:
+            return "4K"
+        if "1080" in q:
+            return "1080p"
+        if "720" in q:
+            return "720p"
+        return "SD"
+
+    def _initTorrentFilter(self):
+        srv = list(self._servers or [])
+        self._tor_all = None
+        self._tor_filter = "All"
+        if len(srv) >= 2 and all(str(x.get("url", "")).startswith("magnet:") for x in srv):
+            self._tor_all = srv
+        try:
+            self["key_yellow"].setText(self._yellowLabel())
+        except Exception:
+            pass
+
+    def _torCounts(self):
+        c = {b: 0 for b in self._TOR_BUCKETS}
+        for x in self._tor_all or []:
+            c[self._torBucket(x)] += 1
+        c["All"] = len(self._tor_all or [])
+        return c
+
+    def _yellowLabel(self):
+        if getattr(self, "_tor_all", None):
+            return u"Quality: {}".format(self._tor_filter)
+        return "Update TMDb"
+
+    def _setServerSection(self):
+        if getattr(self, "_tor_all", None):
+            c = self._torCounts()
+            tabs = u"   ".join((u"[{}]" if b == self._tor_filter else u"{}").format(
+                u"{} {}".format(b, c[b]) if b != "All" else u"All")
+                for b in self._TOR_BUCKETS if b == "All" or c[b])
+            self["section"].setText(_single_line_text(
+                u"🧲 Torrents {}   {}".format(c["All"], tabs), width=90))
+        else:
+            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
+
+    def _onYellow(self):
+        if getattr(self, "_tor_all", None):
+            self._stepTorrentFilter(1)
+        else:
+            self._refreshTMDb()
+
+    def _stepTorrentFilter(self, d):
+        if not getattr(self, "_tor_all", None) or self._quality_choices:
+            return
+        c = self._torCounts()
+        order = [b for b in self._TOR_BUCKETS if b == "All" or c[b]]
+        if len(order) < 2:
+            return
+        i = order.index(self._tor_filter) if self._tor_filter in order else 0
+        self._tor_filter = order[(i + d) % len(order)]
+        self._servers = [x for x in self._tor_all
+                         if self._tor_filter == "All" or self._torBucket(x) == self._tor_filter]
+        self["key_yellow"].setText(self._yellowLabel())
+        self._setServerSection()
+        self._setMenu([self._format_server_item(x) for x in self._servers])
+        try:
+            self["menu"].instance.moveSelectionTo(0)
+            self._updateMenuAccent()
+        except Exception:
+            pass
+        self["status"].setText(self._status_hint(u"{} torrent(s) — OK to play".format(len(self._servers))))
+
     def _backToServers(self, server=None):
         """Quality list -> server list, keeping the cursor on `server`."""
         if not self._quality_choices:
             return
         self._quality_choices = []
         try:
-            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
+            self._setServerSection()
             self._setMenu([self._format_server_item(s) for s in self._servers])
             self["status"].setText(self._status_hint("Choose a server — OK"))
             if server is not None and server in self._servers:
@@ -918,7 +998,7 @@ class NovaPlayDetail(Screen):
     def _onCancel(self):
         if self._quality_choices:
             self._quality_choices = []
-            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
+            self._setServerSection()
             items = [self._format_server_item(s) for s in self._servers]
             self._setMenu(items)
             self["status"].setText(self._status_hint("Choose a server — OK"))
@@ -1341,6 +1421,7 @@ class NovaPlayDetail(Screen):
 
         _title_key = (getattr(self, "_item", None) or {}).get("url", "")
         self._servers = _sort_servers([s for s in data.get("servers", []) if s.get("url")], title_key=_title_key)
+        self._initTorrentFilter()
         self._episodes = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
         _chain_poster = data.get("poster") or self._item.get("poster") or ""
         if _chain_poster:
@@ -1355,7 +1436,7 @@ class NovaPlayDetail(Screen):
 
         # [detail-stagger] menu population is now progressive
         if episode_has_servers:
-            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
+            self._setServerSection()
             items = [self._format_server_item(s) for s in self._servers]
             self._setMenuStaggered(items)
             self["status"].setText(self._status_hint("Choose a server — OK"))
@@ -1369,7 +1450,7 @@ class NovaPlayDetail(Screen):
             self._setMenuStaggered(items)
             self["status"].setText(self._status_hint(_ok_hint))
         elif self._servers:
-            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
+            self._setServerSection()
             items = [self._format_server_item(s) for s in self._servers]
             self._setMenuStaggered(items)
             self["status"].setText(self._status_hint("Choose a server — OK"))
