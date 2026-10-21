@@ -4115,7 +4115,13 @@ _IFRAME_HDRS = {"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
 
 
+_cdnm_dead = {}
+
+
 def resolve_cdnm(url, referer=None):
+    if any(t > time.time() for t in _cdnm_dead.values()):
+        log("resolve_cdnm: video server unreachable a few minutes ago, skipping")
+        return None
     try:
         parsed = urlparse(url)
         q = parse_qs(parsed.query)
@@ -4188,12 +4194,15 @@ def resolve_cdnm(url, referer=None):
                 log("resolve_cdnm: {} quality(ies), playing {}".format(len(ok), lbl))
                 return u + suffix
             if time.time() - t0 > 6:
-                # a timeout is the connection, not this quality: don't wait on
-                # every link -- hand them to the player (it has its own routes)
-                _quality_tls.variants = [v + suffix for _, v in variants[i:]]
-                log("resolve_cdnm: {} timed out, handing {} link(s) to the player unchecked".format(
-                    lbl, len(variants) - i))
-                return u + suffix
+                # a timeout is the connection, not this quality. Measured
+                # 2026-10-21: s1.cdnmvs.online (50.7.204.106, same answer from
+                # the ISP's DNS and 1.1.1.1) never answers on the user's line --
+                # box and PC browser alike. Give up now and skip the server for
+                # 10 minutes so the next server is tried at once.
+                _cdnm_dead[urlparse(u).netloc] = time.time() + 600
+                log("resolve_cdnm: {} timed out -- {} unreachable from this line, skipping it for 10 min".format(
+                    lbl, urlparse(u).netloc))
+                return None
             log("resolve_cdnm: {} did not answer, trying the next quality".format(lbl))
         return None
     except Exception as e:
@@ -4933,7 +4942,7 @@ def resolve_generic_embed(url, referer=None):
 
 # JSON APIs with their own resolver: a page scrape of them finds nothing and
 # only wastes time (Movy's dubbed servers hit the 90 s test limit that way).
-_NO_GENERIC_FALLBACK = ("api.wecollege.net", "api.wing.st", "vidapi.xyz")
+_NO_GENERIC_FALLBACK = ("api.wecollege.net", "api.wing.st", "vidapi.xyz", "cdnm.ink")
 
 
 def resolve_host(url, referer=None):
