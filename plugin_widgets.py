@@ -32,8 +32,9 @@ class StreamList(GUIComponent):
     ROW_H_COMPACT = 60
     ROW_H = ROW_H_NORMAL   # class-level default; __init__ sets the real instance value
 
-    def __init__(self):
+    def __init__(self, width=1800):
         GUIComponent.__init__(self)
+        self.width = int(width)       # [panel] row width (detail screen: 930)
         self.compact = False
         self.ROW_H = self.ROW_H_NORMAL
         self.l = eListboxPythonMultiContent()
@@ -88,6 +89,13 @@ class StreamList(GUIComponent):
             return None
         return row_idx * self.ROW_H
 
+    # [panel] columns: quality 10-160 | name 170..W-250 | details W-240..W-30
+    def _rightX(self):
+        return self.width - 240 if self.width < 1800 else 1560
+
+    def _nameW(self):
+        return max(200, self._rightX() - 190) if self.width < 1800 else 1130
+
     def setList(self, items):
         res = []
         for item in items:
@@ -106,10 +114,10 @@ class StreamList(GUIComponent):
                 res.append([
                     item,
                     MultiContentEntryText(pos=(10, pad), size=(150, 30), font=0, flags=RT_HALIGN_LEFT|RT_VALIGN_CENTER, text=q_clean, color="#F0F6FC"),
-                    MultiContentEntryText(pos=(170, pad), size=(1130, 30), font=1,
+                    MultiContentEntryText(pos=(170, pad), size=(self._nameW(), 30), font=1,
                                           flags=(RT_HALIGN_RIGHT if _has_arabic(filename) else RT_HALIGN_LEFT)|RT_VALIGN_CENTER,
                                           text=filename, color="#F0F6FC"),
-                    MultiContentEntryText(pos=(1560, pad), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=right, color="#F0F6FC"),
+                    MultiContentEntryText(pos=(self._rightX(), pad), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=right, color="#A3ADBB"),
                 ])
                 continue
             # [PATCH 19] row layout: tight columns, metadata beside the
@@ -136,7 +144,7 @@ class StreamList(GUIComponent):
                 # ends 20px before the metadata column (was flush at
                 # both edges — long names looked cut off at the right,
                 # and quality text visually collided at the left)
-                MultiContentEntryText(pos=(170, 12), size=(1130, 70), font=1,
+                MultiContentEntryText(pos=(170, 12), size=(self._nameW(), 70), font=1,
                                       flags=(RT_HALIGN_RIGHT if _has_arabic(filename) else RT_HALIGN_LEFT)|RT_VALIGN_TOP,
                                       text=filename, color="#F0F6FC"),
                 # [PATCH 41] column moved right (1330→1560, width 230→330):
@@ -144,8 +152,8 @@ class StreamList(GUIComponent):
                 # numbers and the scrollbar
                 # [PATCH 41c] moved LEFT of the scrollbar edge (~1790):
                 # the 1560 position put the text under the scrollbar bar
-                MultiContentEntryText(pos=(1560, 12), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=size, color="#F0F6FC"),
-                MultiContentEntryText(pos=(1560, 52), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=seeders_source, color="#39D98A")
+                MultiContentEntryText(pos=(self._rightX(), 12), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=size, color="#F0F6FC"),
+                MultiContentEntryText(pos=(self._rightX(), 52), size=(210, 30), font=2, flags=RT_HALIGN_RIGHT|RT_VALIGN_CENTER, text=seeders_source, color="#39D98A")
             ]
             res.append(entry)
         self.l.setList(res)

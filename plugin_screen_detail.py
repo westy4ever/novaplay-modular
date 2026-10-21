@@ -153,64 +153,53 @@ _TORRENT_SEEDER_SITES = ("torrentio", "yts")
 
 
 class NovaPlayDetail(Screen):
+    # [panel 2026-10-21] three columns like the other panel screens:
+    # poster + facts | servers / episodes | backdrop + plot, header with the
+    # site logo, title, details and clock, colour-key bar at the bottom.
     skin = """
-    <screen name="NovaPlayDetail" position="center,center" size="1920,1080" flags="wfNoBorder">
-        <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
+    <screen name="NovaPlayDetail" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="#0C1017">
+        <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="1" />
+        <widget name="siteLogo" position="40,40" size="180,64" zPosition="3" alphatest="blend" scale="1" />
+        <widget name="title" position="240,28" size="1120,56" font="Bold;40" foregroundColor="#F2C230" transparent="1" zPosition="4" />
+        <widget name="meta" position="240,86" size="1120,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="4" />
+        <widget name="proxy_warning" position="240,118" size="1120,28" font="Regular;22" foregroundColor="#FF6B6B" transparent="1" zPosition="4" halign="left" />
+        <widget name="clock_time" position="1380,22" size="500,62" font="Bold;54" halign="right" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="clock_date" position="1280,90" size="600,30" font="Regular;22" halign="right" foregroundColor="#A3ADBB" transparent="1" zPosition="4" />
 
-        <!-- [detail-tmdb] poster_box, info_box and plot_box merged into one
-             TMDb-style backdrop panel: a single shared background behind
-             the poster, title/meta block and plot, instead of three
-             separate boxes with gaps between them. No user-score widget
-             (TMDb's circular 84% dial) is ported; posterRating below is
-             the plugin's own gold-star rating badge, kept as-is. -->
-        <!-- [FIX] #161B22 (the old info_box shade) is only ~9-10 points
-             per channel away from bg's #0D1117; it rendered correctly but
-             was confirmed too low-contrast to read as a panel on a real TV.
-             #1C2333 (the old poster_box/plot_box shade) has roughly double
-             that delta and was already proven visible on this exact
-             screen before. -->
-        <widget name="backdrop" position="45,30" size="1830,600" backgroundColor="#1C2333" zPosition="2" />
-        <!-- [detail-tmdb] real TMDb DOM has a blurred/darkened copy of the
-             poster as the header's actual background (its ".blurred" div),
-             with the sharp poster layered on top as a card. Same here:
-             backdropImage sits above the flat-color backdrop (fallback
-             while it decodes, or if PIL is unavailable) and below the
-             sharp poster/title/plot text. -->
-        <widget name="backdropImage" position="45,30" size="1830,600" zPosition="3" alphatest="blend" />
+        <eLabel position="40,150" size="360,810" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
+        <eLabel position="62,172" size="316,470" backgroundColor="#161C26" cornerRadius="10" zPosition="3" />
+        <widget name="poster" position="62,172" size="316,470" zPosition="4" alphatest="blend" />
+        <widget name="posterYear" position="70,180" size="86,34" font="Bold;22" foregroundColor="#0C1017" backgroundColor="#F2C230" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
+        <widget name="posterRating" position="282,180" size="88,34" font="Bold;22" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
+        <widget name="source" position="62,662" size="316,280" font="Regular;22" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
 
-        <widget name="poster" position="68,52" size="375,555" zPosition="4" alphatest="blend" />
-        <widget name="posterYear" position="76,56" size="96,36" font="Regular;26" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
-        <widget name="posterRating" position="325,58" size="104,36" font="Regular;26" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
-
-        <widget name="title" position="525,93" size="1320,90" font="Regular;42" foregroundColor="#00E5FF" transparent="1" zPosition="4" />
-        <widget name="meta" position="525,183" size="1320,60" font="Regular;27" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="source" position="525,243" size="1320,80" font="Regular;24" foregroundColor="#58A6FF" transparent="1" halign="left" zPosition="4" />
-        <widget name="proxy_warning" position="1355,52" size="470,33" font="Regular;24" foregroundColor="#FF4444" transparent="1" zPosition="4" halign="right" />
-
-        <widget name="plot_title" position="525,355" size="600,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" halign="left" zPosition="4" />
-        <widget name="plot" position="525,394" size="1320,256" font="Regular;27" foregroundColor="#F0F6FC" transparent="1" halign="block" valign="top" zPosition="4" />
-
-        <widget name="menu_box" position="45,652" size="1830,390" backgroundColor="#161B22" zPosition="2" />
-        <widget name="section" position="75,663" size="1770,36" font="Regular;26" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-
-        <widget name="menu" position="60,708" size="1800,320" zPosition="4"
+        <widget name="section" position="430,152" size="950,48" font="Bold;30" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="menu_box" position="430,210" size="950,750" backgroundColor="#161C26" cornerRadius="14" zPosition="2" />
+        <widget name="menu" position="440,222" size="930,720" zPosition="4"
                 scrollbarMode="showOnDemand"
                 enableWrapAround="1"
                 transparent="1"
-                backgroundColor="#161B22"
-                backgroundColorSelected="#21262D" />
+                backgroundColor="#161C26"
+                backgroundColorSelected="#2B3648" />
+        <widget name="menuAccent"   position="434,222"  size="5,60"  backgroundColor="#F2C230" transparent="0" cornerRadius="2" zPosition="5" />
+        <widget name="menuProgress" position="440,946" size="180,5" backgroundColor="#F2C230" transparent="0" cornerRadius="2" zPosition="5" />
 
-        <widget name="menuAccent"   position="48,712"  size="6,87"  backgroundColor="#FFD740" transparent="0" cornerRadius="3" zPosition="5" />
-        <widget name="menuProgress" position="45,1036" size="180,4" backgroundColor="#00E5FF" transparent="0" cornerRadius="2" zPosition="5" />
+        <eLabel position="1410,150" size="470,810" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
+        <widget name="backdrop" position="1430,170" size="430,242" backgroundColor="#161C26" cornerRadius="12" zPosition="2" />
+        <widget name="backdropImage" position="1430,170" size="430,242" zPosition="3" alphatest="blend" />
+        <widget name="plot_title" position="1430,428" size="430,32" font="Bold;22" foregroundColor="#F2C230" transparent="1" halign="left" zPosition="4" />
+        <widget name="plot" position="1430,466" size="430,476" font="Regular;23" foregroundColor="#D6DCE5" transparent="1" halign="left" valign="top" zPosition="4" />
 
-        <widget name="key_red"    position="45,1042"  size="330,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="4" />
-        <widget name="key_yellow" position="385,1042" size="330,36" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="4" />
-        <widget name="key_blue"   position="725,1042" size="330,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="4" />
-        <!-- [detail-trailer] green key added for "play trailer"; status's
-             own width/x shrunk to make room without moving the other
-             three key labels. -->
-        <widget name="key_green"  position="1065,1042" size="330,36" font="Regular;24" foregroundColor="#4CAF50" transparent="1" zPosition="4" />
-        <widget name="status"     position="1405,1042" size="470,36" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="4" />
+        <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
+        <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="3" />
+        <widget name="key_red"    position="106,994" size="220,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="dotGreen" position="332,1003" size="22,22" backgroundColor="#30A46C" cornerRadius="11" zPosition="3" />
+        <widget name="key_green"  position="366,994" size="180,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <eLabel position="552,1003" size="22,22" backgroundColor="#F2C230" cornerRadius="11" zPosition="3" />
+        <widget name="key_yellow" position="586,994" size="230,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="dotBlue" position="822,1003" size="22,22" backgroundColor="#3E7BFA" cornerRadius="11" zPosition="3" />
+        <widget name="key_blue"   position="856,994" size="240,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="status"     position="1110,994" size="740,40" font="Regular;22" valign="center" foregroundColor="#C9D0DA" transparent="1" halign="right" zPosition="4" />
     </screen>
     """
 
@@ -221,49 +210,49 @@ class NovaPlayDetail(Screen):
     # (name, ((widget_key, design_x, design_y), ...), off_x, off_y, delay, duration)
     _REVEAL_GROUPS = (
         ("poster", (
-            ("backdrop", 45, 30),
-            ("backdropImage", 45, 30),
-            ("poster", 68, 52),
-            ("posterYear", 76, 56),
-            ("posterRating", 325, 58),
-        ), -320, 0, 0, 8),
+            ("poster", 62, 172),
+            ("posterYear", 70, 180),
+            ("posterRating", 282, 180),
+            ("source", 62, 662),
+        ), -360, 0, 0, 8),
         ("info", (
-            ("title", 525, 93),
-            ("meta", 525, 183),
-            ("source", 525, 243),
-            ("proxy_warning", 1355, 52),
+            ("title", 240, 28),
+            ("meta", 240, 86),
+            ("proxy_warning", 240, 118),
         ), 220, 0, 2, 8),
         ("menu", (
-            ("menu_box", 45, 652),
-            ("section", 75, 663),
-            ("menu", 60, 708),
+            ("menu_box", 430, 210),
+            ("section", 430, 152),
+            ("menu", 440, 222),
         ), 0, 320, 3, 8),
         ("plot", (
-            ("plot_title", 525, 355),
-            ("plot", 525, 394),
-        ), 220, 0, 4, 8),
+            ("backdrop", 1430, 170),
+            ("backdropImage", 1430, 170),
+            ("plot_title", 1430, 428),
+            ("plot", 1430, 466),
+        ), 360, 0, 4, 8),
     )
 
     # [detail-accent] geometry of the menu widget, used to compute where
     # the accent bar should sit relative to the selected row.
-    _MENU_X = 60
-    _MENU_Y = 708
-    _MENU_W = 1800
+    _MENU_X = 440
+    _MENU_Y = 222
+    _MENU_W = 930
     # [PATCH 115] confirmed live from screen recording: 4 server rows are
     # actually visible on screen at once (e.g. "fastved / firestream /
     # luluvdoo / rpmvip" all shown together), not 3 -- 320 // 95 was
     # computing visible_rows=3, so the accent bar pinned itself one row
     # too early and could never reach the real 4th row. 380 // 95 = 4,
     # matching the real screen.
-    _MENU_H = 380
+    _MENU_H = 720
     _MENU_ROW_H = 95
 
     # [detail-progress] geometry of the indeterminate bar
-    _PROG_X0 = 45
-    _PROG_Y  = 1036
+    _PROG_X0 = 440
+    _PROG_Y  = 946
     _PROG_W  = 180
-    _PROG_H  = 4
-    _PROG_SPAN = 1830 - 180   # bar travels this far before reversing
+    _PROG_H  = 5
+    _PROG_SPAN = 930 - 180   # bar travels this far before reversing
     _PROG_STEP = 40
 
     def __init__(self, session, item, site="egydead", m_type="movie",
@@ -337,7 +326,14 @@ class NovaPlayDetail(Screen):
         self["plot_title"] = Label("Plot")
         self["plot"]   = Label("")
         self["section"] = Label("Preparing...")
-        self["menu"]   = StreamList()
+        self["menu"]   = StreamList(width=930)
+        self["siteLogo"] = Pixmap()
+        self["clock_time"] = Label("")
+        self["clock_date"] = Label("")
+        self["dotGreen"] = Label("")
+        self["dotBlue"] = Label("")
+        self._clockTimer = eTimer()
+        self._clockTimer.callback.append(self._tickClock)
         self["menuAccent"]   = Label("")
         self["menuProgress"] = Label("")
         self["menuAccent"].hide()
@@ -428,42 +424,9 @@ class NovaPlayDetail(Screen):
         return min(256, lines * 36)
 
     def _layoutHeader(self):
-        """The skin reserves 2 lines for the title and the details; a one-line
-        title left a big gap. Place each block right under the previous one,
-        using as many lines as its text really has."""
-        def lines(key):
-            try:
-                t = self[key].getText() or ""
-            except Exception:
-                t = ""
-            return (t.count("\n") + 1) if t.strip() else 0
-        tl, ml, sl = max(1, lines("title")), lines("meta"), lines("source")
-        y = 93
-        pos = {"title": (y, tl * 54)}
-        y += tl * 54 + 6
-        pos["meta"] = (y, max(1, ml) * 36)
-        y += ml * 36 + (4 if ml else 0)
-        pos["source"] = (y, max(1, sl) * 32)
-        # [plot-low] the plot sits low, ending near the bottom of the
-        # backdrop (616); never higher than its old place (394), so a long
-        # plot keeps all its lines
-        ph = self._plotTextHeight()
-        plot_y = max(394, 616 - ph)
-        pos["plot_title"] = (plot_y - 39, 30)
-        pos["plot"] = (plot_y, max(36, min(256, 650 - plot_y)))
-        self._hdr_y = dict((k, v[0]) for k, v in pos.items())
-        if getattr(self, "_reveal_running", False):
-            # the slide-in places them; just size them now
-            for k, (yy, h) in pos.items():
-                try:
-                    inst = self[k].instance
-                    if inst:
-                        inst.resize(eSize(self._HDR_W, int(h)))
-                except Exception:
-                    pass
-            return
-        for k, (yy, h) in pos.items():
-            self._moveResize(k, self._HDR_X, yy, self._HDR_W, h)
+        """[panel] title, details, facts and plot have fixed places in the
+        three-column layout (the skin positions); nothing to stack."""
+        self._hdr_y = {}
 
     # ── [detail-common] move+resize helper ─────────────────────────────
     def _moveResize(self, key, x, y, w, h):
@@ -823,7 +786,35 @@ class NovaPlayDetail(Screen):
             callInMainThread(_done)
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _tickClock(self):
+        try:
+            t = time.localtime()
+            self["clock_time"].setText("{}:{:02d}".format(t.tm_hour % 12 or 12, t.tm_min))
+            self["clock_date"].setText(time.strftime("%A %d %B", t))
+        except Exception:
+            pass
+
+    def _syncKeyDots(self):
+        for key, dot in (("key_green", "dotGreen"), ("key_blue", "dotBlue")):
+            try:
+                self[dot].show() if (self[key].getText() or "").strip() else self[dot].hide()
+            except Exception:
+                pass
+
     def _load(self):
+        self._tickClock()
+        try:
+            self._clockTimer.start(10000, False)
+        except Exception:
+            pass
+        try:
+            from plugin_gridlist import resolve_icon_path
+            _lp = resolve_icon_path({"_action": "site_" + str(self._site)})
+            if _lp and self["siteLogo"].instance:
+                self["siteLogo"].instance.setPixmapFromFile(_lp)
+        except Exception as e:
+            my_log("detail logo: {}".format(e))
+        self._syncKeyDots()
         item_snapshot = self._item
         # [detail-reveal] kick off the entry animation on the main thread
         # before we hand off to the loading worker
@@ -943,7 +934,7 @@ class NovaPlayDetail(Screen):
         self.close()
 
     def _onCloseCleanup(self):
-        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer"):
+        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer", "_clockTimer"):
             try:
                 timer = getattr(self, t, None)
                 if timer:
@@ -1032,7 +1023,19 @@ class NovaPlayDetail(Screen):
 
             img = Image.open(src_path).convert("RGB")
 
-            if is_landscape:
+            if is_landscape and w < 1000:
+                # [panel] small backdrop card in the right column: a plain
+                # cover crop of the (same-aspect) TMDb photo, lightly dimmed
+                try:
+                    from PIL import ImageOps
+                    fitted = ImageOps.fit(img, (w, h), Image.LANCZOS)
+                except Exception:
+                    fitted = img.resize((w, h))
+                try:
+                    fitted = ImageEnhance.Brightness(fitted).enhance(0.9)
+                except Exception:
+                    pass
+            elif is_landscape:
                 # [FIX] confirmed against the user's own reference crop of
                 # this exact backdrop image: TMDb's photo is a roughly
                 # 16:9 frame, but this panel is an unusually wide ~3:1 box
@@ -1137,7 +1140,7 @@ class NovaPlayDetail(Screen):
                 except Exception:
                     pass
 
-            out_path = "{}_bd.jpg".format(os.path.splitext(src_path)[0])
+            out_path = "{}_bd{}.jpg".format(os.path.splitext(src_path)[0], "" if w >= 1000 else "_s")
             fitted.save(out_path, format="JPEG", quality=82)
             if is_tmp and out_path not in self._tmp_posters:
                 self._tmp_posters.append(out_path)
@@ -1202,7 +1205,7 @@ class NovaPlayDetail(Screen):
         self._quality_choices = []
         current_title = _strip_arabic_from_english_title(data.get("title") or self._item.get("title", ""))
         self._raw_title = re.sub(r"\s+", " ", current_title).strip()
-        self["title"].setText(_wrap_ui_text(current_title, width=30, max_lines=2, fallback="Untitled"))
+        self["title"].setText(_single_line_text(current_title, width=46, fallback="Untitled"))
 
         # [detail-tmdb-meta] real TMDb page shows one line right under the
         # title: certification badge + release date + genres + runtime
@@ -1256,7 +1259,7 @@ class NovaPlayDetail(Screen):
             if _rd_fmt:             tmdb_meta.append(_rd_fmt)
             if data.get("genres"): tmdb_meta.append(data["genres"])
             if _rt_fmt:             tmdb_meta.append(_rt_fmt)
-            self["meta"].setText(_wrap_ui_text("   ".join(tmdb_meta), width=58, max_lines=2))
+            self["meta"].setText(_single_line_text("{}  |  {}".format(_site_label(self._site), "  ·  ".join(tmdb_meta)), width=96, fallback=""))
         else:
             meta = []
             if data.get("year"):    meta.append(data["year"])
@@ -1264,7 +1267,7 @@ class NovaPlayDetail(Screen):
             if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "Item"))
             if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
             if data.get("genres"):  meta.append(data["genres"])
-            self["meta"].setText(_wrap_ui_text("   ".join(meta), width=58, max_lines=2))
+            self["meta"].setText(_single_line_text("{}  |  {}".format(_site_label(self._site), "  ·  ".join(meta)), width=96, fallback=""))
         counts = []
         _nav_items = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
         has_episodes = bool(_nav_items)
@@ -1287,7 +1290,7 @@ class NovaPlayDetail(Screen):
             counts.append("Runtime: {}".format(data.get("runtime")))
         if data.get("channel"):
             counts.append("Channel: {}".format(data.get("channel")))
-        self["source"].setText(_wrap_ui_text("Source: {}  |  {}".format(_site_label(self._site), "  |  ".join(counts)), width=58, max_lines=2))
+        self["source"].setText("\n".join(["Source: {}".format(_site_label(self._site))] + counts))
         if has_episodes:
             plot_label = "Series plot"
         elif has_servers:
@@ -1298,7 +1301,7 @@ class NovaPlayDetail(Screen):
             plot_label = "Movie plot"
         if current_title:
             plot_label = "{}: {}".format(plot_label, current_title[:32])
-        self["plot_title"].setText(_single_line_text(plot_label, width=46, fallback="Plot"))
+        self["plot_title"].setText(_single_line_text(plot_label.split(":")[0].upper(), width=30, fallback="PLOT"))
         self._layoutHeader()
 
         plot_text, plot_source = _pick_plot_text_with_source(data, self._item)
@@ -1382,6 +1385,7 @@ class NovaPlayDetail(Screen):
             self["key_green"].setText("Trailer")
         else:
             self["key_green"].setText("")
+        self._syncKeyDots()
 
         try:
             _r = str(data.get("rating") or self._item.get("rating") or "").strip()
