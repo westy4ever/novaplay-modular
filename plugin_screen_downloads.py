@@ -16,7 +16,7 @@ import os
 import time
 
 from Screens.Screen import Screen
-from Screens.MessageBox import MessageBox
+from novaplay_choice import NovaMessageBox as MessageBox
 from novaplay_choice import NovaChoiceBox as ChoiceBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label

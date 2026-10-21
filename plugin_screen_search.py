@@ -17,7 +17,7 @@ from plugin_common import PLUGIN_PATH
 from plugin_gridlist import scale_skin_xml
 from plugin_state import (_library_search_suggestions, _save_search_query,
                           _clear_search_history, _remove_search_query)
-from Screens.MessageBox import MessageBox
+from novaplay_choice import NovaMessageBox as MessageBox
 from plugin_tmdb import _tmdb_enabled, _tmdb_search_suggestions
 from plugin_util import (_wrap_ui_text, _single_line_text,
                          _search_scope_label, _normalize_query)

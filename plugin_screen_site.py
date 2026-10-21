@@ -23,7 +23,7 @@ import threading
 import time
 
 from Screens.Screen import Screen
-from Screens.MessageBox import MessageBox
+from novaplay_choice import NovaMessageBox as MessageBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
