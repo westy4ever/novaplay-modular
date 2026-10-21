@@ -223,12 +223,22 @@ class TorrentioExtractor(BaseExtractor):
             # [PATCH 30d] light up the StreamList size/seeders columns
             seeds_m = re.search(r'👤\s*(\d+)', title)
             size_m = re.search(r'(\d+(?:[.,]\d+)?\s*(?:GB|MB))', title, re.I)
+            # [2026-10-21] a season pack's first title line is the PACK's name
+            # ("Breaking.Bad.S01.Complete...") -- show the episode file inside
+            # it that will play (behaviorHints.filename) instead
+            first = title.split("\n", 1)[0].strip()
+            bh_file = (bh.get("filename") if isinstance(bh, dict) else "") or ""
+            is_pack = bool(bh_file) and bh_file.strip() != first and \
+                bh_file.rsplit(".", 1)[0].strip() != first
+            shown = (u"📦 {}  · season pack".format(bh_file.strip()) + "\n" +
+                     title.split("\n", 1)[-1]) if is_pack else title
+            size_txt = size_m.group(1) if size_m else ""
             servers.append({
-                "name": title,
+                "name": shown,
                 "url": magnet,
                 "quality": quality,
                 "seeders": seeds_m.group(1) if seeds_m else "",
-                "size": size_m.group(1) if size_m else "",
+                "size": size_txt,
             })
         return self._balance(servers)
 
