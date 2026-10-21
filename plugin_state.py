@@ -376,6 +376,23 @@ def _save_position(url, seconds, force=False):
                 return
 
 
+def _remove_library_item(bucket, url):
+    """Remove one title from "favorites" or "history"."""
+    if not url:
+        return
+    with _STATE_LOCK:
+        state = _load_state()
+        state[bucket] = [i for i in (state.get(bucket) or []) if i.get("url") != url]
+        _save_state(state)
+
+
+def _clear_library(bucket):
+    with _STATE_LOCK:
+        state = _load_state()
+        state[bucket] = []
+        _save_state(state)
+
+
 def _clear_continue_item(url):
     if not url:
         return

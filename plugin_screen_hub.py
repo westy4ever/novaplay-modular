@@ -562,7 +562,7 @@ class NovaPlayHub(Screen):
             items = _favorite_items() if key == "favorites" else _history_items()
             self.session.openWithCallback(self._back, NovaPlaySite, None,
                                           title="Favorites" if key == "favorites" else "History",
-                                          items=[dict(i) for i in (items or [])])
+                                          items=[dict(i) for i in (items or [])], library=key)
         elif key == "downloads":
             from plugin_screen_downloads import NovaPlayDownloads
             self.session.openWithCallback(self._back, NovaPlayDownloads)

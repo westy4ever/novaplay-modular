@@ -47,9 +47,38 @@ _CHIP = {
     "done": ("Done", 0x1E6B45, 0xFFFFFF),
     "error": ("Failed", 0x7A1E24, 0xFFFFFF),
     "cancelled": ("Cancelled", 0x3A4252, 0xC9D0DA),
+    "saved": ("Saved", 0x1E4E6B, 0xFFFFFF),
 }
 _ROW_H = 92
 _LIST_W = 1804
+
+
+_VIDEO_EXT = (".mp4", ".mkv", ".ts", ".avi", ".m4v", ".webm", ".mov", ".mpg")
+
+
+class _SavedFile(object):
+    """A video already in the download folder (from an earlier session)."""
+    status = "saved"
+
+    def __init__(self, path):
+        self.dest_path = path
+        self.title = os.path.splitext(os.path.basename(path))[0]
+        self.error = ""
+
+
+def _saved_files(skip):
+    d = plugin_downloads.download_dir()
+    out = []
+    try:
+        for name in os.listdir(d):
+            path = os.path.join(d, name)
+            if (name.lower().endswith(_VIDEO_EXT) and os.path.isfile(path)
+                    and path not in skip and not name.endswith(".part")):
+                out.append(path)
+    except Exception:
+        return []
+    out.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return [_SavedFile(p) for p in out]
 
 
 class DownloadList(GUIComponent):
@@ -132,7 +161,7 @@ class NovaPlayDownloads(Screen):
         self["header"] = Label("Downloads")
         self["footer"] = Label("")
         self["list"] = DownloadList()
-        self["key_red"] = Label("Cancel download")
+        self["key_red"] = Label("Cancel / Delete")
         self["key_blue"] = Label("Clear finished")
         self["key_exit"] = Label("OK  Options    EXIT  Close")
         self._tasks = []
@@ -159,6 +188,8 @@ class NovaPlayDownloads(Screen):
             self._tasks = plugin_downloads.get_all_tasks()
         except Exception:
             self._tasks = []
+        skip = set(getattr(t, "dest_path", "") for t in self._tasks)
+        self._tasks = list(self._tasks) + _saved_files(skip)
         rows = []
         self._row_map = []
         for t in self._tasks:
@@ -166,12 +197,12 @@ class NovaPlayDownloads(Screen):
             rows.append(label)
             self._row_map.append(t)
         if not rows:
-            rows = ["No downloads in this session"]
+            rows = ["No downloads yet — files saved by NovaPlay appear here"]
         self._set_rows(rows)
         active = sum(1 for t in self._tasks if t.status in ("queued", "downloading"))
-        done = sum(1 for t in self._tasks if t.status == "done")
+        done = sum(1 for t in self._tasks if t.status in ("done", "saved"))
         failed = sum(1 for t in self._tasks if t.status == "error")
-        self["header"].setText("{} active  ·  {} done  ·  {} failed".format(active, done, failed))
+        self["header"].setText("{} active  ·  {} saved  ·  {} failed".format(active, done, failed))
         if time.time() >= self._flash_until:
             self["footer"].setText("Folder: {}".format(plugin_downloads.download_dir()))
 
@@ -185,11 +216,17 @@ class NovaPlayDownloads(Screen):
                 return (t.status, title, "{:.0f}%".format(pct),
                         "{:.1f} / {:.1f} MB".format(mb(t.bytes_done), mb(t.bytes_total)), pct)
             return (t.status, title, "{:.1f} MB".format(mb(t.bytes_done)), "Starting…", 0)
-        if t.status == "done" and t.dest_path:
+        if t.status in ("done", "saved") and t.dest_path:
             try:
                 size = "{:.1f} MB".format(os.path.getsize(t.dest_path) / 1048576.0)
             except Exception:
                 size = ""
+            if t.status == "saved":
+                try:
+                    when = time.strftime("%d %b %Y  %H:%M", time.localtime(os.path.getmtime(t.dest_path)))
+                except Exception:
+                    when = ""
+                return (t.status, title, size, when, 0)
             return (t.status, title, size, os.path.basename(t.dest_path), 0)
         if t.status == "error":
             return (t.status, title, "", (t.error or "")[:120], 0)
@@ -260,12 +297,10 @@ class NovaPlayDownloads(Screen):
                 MessageBox, "Cancel download:\n{}".format(self._title(t)[:60]),
                 MessageBox.TYPE_YESNO, timeout=8, default=False)
             return
-        if t.status == "done" and t.dest_path and os.path.exists(t.dest_path):
-            parent = os.path.dirname(t.dest_path)
+        if t.status in ("done", "saved") and t.dest_path and os.path.exists(t.dest_path):
             entries = [
-                ("▶ Play file", "play"),
-                ("📂 Open folder", "open"),
-                ("🗑 Delete file", "delete"),
+                (u"▶  Play", "play"),
+                (u"✕  Delete file", "delete"),
             ]
             self.session.openWithCallback(
                 lambda c: self._onFileAction(c, t),
@@ -285,12 +320,30 @@ class NovaPlayDownloads(Screen):
             except Exception:
                 pass
 
+    def _play(self, t):
+        try:
+            from plugin_screen_player import NovaPlaySimplePlayer
+            self.session.open(NovaPlaySimplePlayer, t.title or os.path.basename(t.dest_path),
+                              [(4097, t.dest_path, u"local file", False)],
+                              previous_service=None, resume_pos=0, item_url="",
+                              next_episode=None, on_next=None, poster_url="",
+                              quality_variants=None, server_url="", is_preview=True)
+        except Exception as e:
+            self._say("Could not play: {}".format(str(e)[:40]))
+
     def _onCancelActive(self):
+        """RED: cancel the selected download, or delete the selected file."""
         t = self._selected_task()
-        if not t or t.status not in ("queued", "downloading"):
-            self._say("No active download selected")
+        if t and t.status in ("done", "saved") and t.dest_path and os.path.exists(t.dest_path):
+            self._onFileAction((u"", "delete"), t)
             return
-        self._confirm_cancel(True, t)
+        if not t or t.status not in ("queued", "downloading"):
+            self._say("Select a download or a file")
+            return
+        self.session.openWithCallback(
+            lambda ans: self._confirm_cancel(ans, t),
+            MessageBox, "Cancel download:\n{}".format(self._title(t)[:60]),
+            MessageBox.TYPE_YESNO, timeout=8, default=False)
 
     def _onClearFinished(self):
         try:
@@ -305,9 +358,7 @@ class NovaPlayDownloads(Screen):
             return
         action = choice[1] if isinstance(choice, (tuple, list)) and len(choice) > 1 else choice
         if action == "play":
-            self.close(("play", t.dest_path))
-        elif action == "open":
-            self.close(("open", os.path.dirname(t.dest_path)))
+            self._play(t)
         elif action == "delete":
             self.session.openWithCallback(
                 lambda ans: self._delete_file(ans, t),

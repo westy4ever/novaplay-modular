@@ -139,13 +139,14 @@ def _skin():
 class NovaPlaySite(Screen):
     skin = scale_skin_xml(_skin())
 
-    def __init__(self, session, site, title=None, items=None, loader=None, m_type="movie"):
+    def __init__(self, session, site, title=None, items=None, loader=None, m_type="movie", library=None):
         Screen.__init__(self, session)
         self._site = site
         self._m_type = m_type
         self._fixed_title = title
         self._loader = loader
         self._init_items = items
+        self._library = library          # "favorites" | "history" | None
         self._zone = "cats"
         # category levels: [{"title", "items", "sel"}]; sub-folders push a level
         self._levels = []
@@ -189,7 +190,8 @@ class NovaPlaySite(Screen):
             self["pImg%d" % i] = Pixmap()
 
         self["actions"] = ActionMap(
-            ["OkCancelActions", "DirectionActions", "ColorActions"], {
+            ["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"], {
+                "menu": self._menu,
                 "ok": self._ok,
                 "cancel": self._exit,
                 "up": lambda: self._move(0, -1),
@@ -718,6 +720,8 @@ class NovaPlaySite(Screen):
     def _paintHint(self):
         if self._zone == "cats":
             self["hint"].setText("OK  Open section    ▶  Titles    EXIT  Back")
+        elif self._library:
+            self["hint"].setText("OK  Open    MENU  Remove    EXIT  Back")
         else:
             self["hint"].setText("OK  Open    ◀  Sections    EXIT  Sections")
 
@@ -833,6 +837,52 @@ class NovaPlaySite(Screen):
         url, self._page = self._history[-1]
         self._focus_end = True
         self._fetch(url)
+
+    # ─── MENU: remove from Favorites / History ──────────────────────────
+
+    def _menu(self):
+        if not self._library:
+            return
+        it = self._current()
+        name = u"Favorites" if self._library == "favorites" else u"History"
+        opts = []
+        if it and it.get("url"):
+            opts.append((u"Remove \"{}\" from {}".format(
+                _single_line_text(it.get("title", ""), width=40, fallback="this title"), name), "one"))
+        if self._posters:
+            opts.append((u"Clear all of {} ({} titles)".format(name, len(self._posters)), "all"))
+        if not opts:
+            return
+
+        def _chosen(ans):
+            act = ans[1] if ans else None
+            if act == "one":
+                from plugin_state import _remove_library_item
+                _remove_library_item(self._library, it.get("url"))
+                self._posters = [p for p in self._posters if p.get("url") != it.get("url")]
+                self._afterRemove(u"Removed from {}".format(name))
+            elif act == "all":
+                def _yes(ok):
+                    if ok:
+                        from plugin_state import _clear_library
+                        _clear_library(self._library)
+                        self._posters = []
+                        self._afterRemove(u"{} cleared".format(name))
+                self.session.openWithCallback(_yes, MessageBox, u"Remove all {} titles from {}?".format(
+                    len(self._posters), name), MessageBox.TYPE_YESNO, default=False)
+        from novaplay_choice import NovaChoiceBox
+        self.session.openWithCallback(_chosen, NovaChoiceBox, title=name, list=opts)
+
+    def _afterRemove(self, msg):
+        self._status(msg)
+        self._info_item = None
+        if not self._posters:
+            self._zone = "cats"
+            self._showMsg(u"Nothing here yet")
+        else:
+            self._pi = min(self._pi, len(self._posters) - 1)
+            self._paintPosters()
+        self._paintHint()
 
     # ─── colour keys ────────────────────────────────────────────────────
 
