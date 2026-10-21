@@ -86,7 +86,7 @@ def _apply_dst():
 
 def apply(kind, value):
     """-> True when the box accepted the change."""
-    restore()
+    restore(keep_pep=True)
     if kind == "policy":
         ok = False
         for name in ("policy", "policy2"):
@@ -110,11 +110,26 @@ def apply(kind, value):
     return False
 
 
-def restore():
-    """Put back everything this module changed."""
+def restore(keep_pep=False):
+    """Put back everything this module changed (keep_pep: leave brightness /
+    contrast / colour as they are)."""
+    if not _saved:
+        return
+    if keep_pep:
+        keep = dict((p, v) for p, v in _saved.items() if "pep_" in p)
+        for p in keep:
+            _saved.pop(p)
+        _restore_items()
+        _saved.update(keep)
+        return
+    _restore_items(all_items=True)
+
+
+def _restore_items(all_items=False):
     if not _saved:
         return
     dst = False
+    paths = list(_saved)
     for path, old in list(_saved.items()):
         try:
             with open(path, "w") as f:
@@ -123,6 +138,14 @@ def restore():
             pass
         dst = dst or path.startswith(_VMPEG)
     _saved.clear()
+    _pep_level.clear()
+    if any("pep_" in p for p in paths):
+        try:
+            if os.path.exists(_VMPEG + "pep_apply"):
+                with open(_VMPEG + "pep_apply", "w") as f:
+                    f.write("1")
+        except Exception:
+            pass
     if dst:
         try:
             if os.path.exists(_VMPEG + "dst_apply"):
@@ -130,3 +153,51 @@ def restore():
                     f.write("1")
         except Exception:
             pass
+
+
+# ─── Brightness / contrast / colour (Picture Enhancement, /proc/stb/vmpeg/0/pep_*) ──
+# Same files and scale as Enigma2's own Video Enhancement settings:
+# level 0..256 (128 = normal), written as "%08X" % (level * 256), then pep_apply.
+PEP = (("brightness", u"Brightness"), ("contrast", u"Contrast"), ("saturation", u"Colour"))
+PEP_STEP = 16
+_pep_level = {}
+
+
+def pep_available():
+    return [(k, lbl) for k, lbl in PEP if os.path.exists(_VMPEG + "pep_" + k)]
+
+
+def pep_get(key):
+    if key in _pep_level:
+        return _pep_level[key]
+    raw = _read(_VMPEG + "pep_" + key)
+    try:
+        lvl = int(raw, 16) // 256
+        if not 0 <= lvl <= 256:
+            raise ValueError
+    except Exception:
+        lvl = 128
+    _pep_level[key] = lvl
+    return lvl
+
+
+def pep_set(key, level):
+    level = max(0, min(256, int(level)))
+    ok = _write(_VMPEG + "pep_" + key, "%08X" % (level * 256))
+    if ok and os.path.exists(_VMPEG + "pep_apply"):
+        try:
+            with open(_VMPEG + "pep_apply", "w") as f:
+                f.write("1")
+        except Exception:
+            pass
+    if ok:
+        _pep_level[key] = level
+    return ok
+
+
+def pep_percent(key):
+    return int(round(pep_get(key) * 100 / 256.0))
+
+
+def pep_forget():
+    _pep_level.clear()

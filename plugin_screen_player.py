@@ -615,6 +615,7 @@ class NovaPlaySimplePlayer(Screen):
         self._aspect_idx = 0
         self._pic_extra = None
         self._pic_extra_list = []
+        self._pic_pep_rows = []
         self._saved_av_aspect = None
         self._av_aspect_dirty = False
         try:
@@ -2103,6 +2104,7 @@ class NovaPlaySimplePlayer(Screen):
         except: pass
         self._disarmSkipHint()
         my_log("Play confirmed: {}".format(self._candidate_label))
+        self._reapplySavedPep()
         self._recordPlayMemory(True)
         try:
             from plugin_server_rank import record_host_result, record_title_working
@@ -3128,7 +3130,48 @@ class NovaPlaySimplePlayer(Screen):
         rows = [(lbl, i == cur, True) for i, (lbl, _bar) in enumerate(self._ASPECT_MODES)]
         self._pic_extra_list = self._picExtras()
         rows += [(lbl, extra == j, True) for j, (lbl, _k, _v) in enumerate(self._pic_extra_list)]
+        # brightness / contrast / colour: "+" and "−" rows (OK repeats)
+        self._pic_pep_rows = []
+        try:
+            import novaplay_picture as NP
+            for key, lbl in NP.pep_available():
+                pct = NP.pep_percent(key)
+                rows.append((u"{} +   ({}%)".format(lbl, pct), False, True))
+                rows.append((u"{} −".format(lbl), False, True))
+                self._pic_pep_rows += [(key, +1), (key, -1)]
+            if self._pic_pep_rows:
+                rows.append((u"Reset brightness / colour", False, True))
+                self._pic_pep_rows.append((None, 0))
+        except Exception as e:
+            my_log("picture pep: {}".format(e))
         return rows
+
+    def _applyPep(self, j):
+        import novaplay_picture as NP
+        key, d = self._pic_pep_rows[j]
+        if key is None:
+            for k, _l in NP.pep_available():
+                NP.pep_set(k, 128)
+                _set_config("pep_" + k, "")
+            return u"Brightness / colour: normal"
+        lvl = NP.pep_get(key) + d * NP.PEP_STEP
+        ok = NP.pep_set(key, lvl)
+        if ok:
+            _set_config("pep_" + key, str(NP.pep_get(key)))
+        lbl = dict(NP.PEP).get(key, key)
+        return (u"{}: {}%".format(lbl, NP.pep_percent(key)) if ok
+                else u"{}: not supported by this box".format(lbl))
+
+    def _reapplySavedPep(self):
+        """Brightness / contrast / colour picked in an earlier film."""
+        try:
+            import novaplay_picture as NP
+            for key, _l in NP.pep_available():
+                v = (_get_config("pep_" + key, "") or "").strip()
+                if v.isdigit() and int(v) != 128:
+                    NP.pep_set(key, int(v))
+        except Exception as e:
+            my_log("picture pep reapply: {}".format(e))
 
     def _applyPictureExtra(self, j):
         """Box display modes (letterbox / pan & scan / stretch / zoom) from
@@ -3165,7 +3208,14 @@ class NovaPlaySimplePlayer(Screen):
         msg = u""
         if col == "picture":
             n = len(self._ASPECT_MODES)
-            if idx >= n and idx - n < len(getattr(self, "_pic_extra_list", []) or []):
+            n_extra = len(getattr(self, "_pic_extra_list", []) or [])
+            if idx >= n + n_extra and idx - n - n_extra < len(getattr(self, "_pic_pep_rows", []) or []):
+                msg = self._applyPep(idx - n - n_extra)
+                try:
+                    self["status"].setText(msg)
+                except Exception:
+                    pass
+            elif idx >= n and idx - n < n_extra:
                 msg = self._applyPictureExtra(idx - n)
                 try:
                     self["status"].setText(msg)
