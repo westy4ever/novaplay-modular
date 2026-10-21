@@ -29,26 +29,33 @@ import plugin_downloads
 
 
 _STATUS_LABELS = {
-    "queued":      "⏳ Queued",
-    "downloading": "⬇ Downloading",
-    "done":        "✅ Done",
-    "error":       "❌ Failed",
-    "cancelled":   "⛔ Cancelled",
+    "queued":      "…  Queued",
+    "downloading": "⬇  Downloading",
+    "done":        "✓  Done",
+    "error":       "✕  Failed",
+    "cancelled":   "■  Cancelled",
 }
 
 
 class NovaPlayDownloads(Screen):
+    # [panel 2026-10-21] full-screen, same style as the other screens
     skin = scale_skin_xml("""
-    <screen name="NovaPlayDownloads" position="center,center" size="1700,940" title="Downloads" flags="wfNoBorder">
-        <eLabel position="0,0" size="1700,940" backgroundColor="#0D1117" zPosition="0" />
-        <eLabel position="0,0" size="1700,90" backgroundColor="#161B22" zPosition="1" />
-        <widget name="header" position="50,20" size="1600,50" font="Regular;38" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
-        <widget name="list" position="40,110" size="1620,720" scrollbarMode="showOnDemand" foregroundColor="#F0F6FC" foregroundColorSelected="#00E5FF" backgroundColor="#161B22" backgroundColorSelected="#21262D" font="Regular;30" itemHeight="56" zPosition="2" />
-        <widget name="footer" position="50,840" size="1600,40" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="2" />
-        <widget name="key_red" position="60,895" size="380,36" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" halign="center" zPosition="2" />
-        <widget name="key_blue" position="460,895" size="380,36" font="Regular;24" foregroundColor="#58A6FF" transparent="1" halign="center" zPosition="2" />
-        <widget name="key_exit" position="860,895" size="780,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" halign="right" zPosition="2" />
-    </screen>""")
+    <screen name="NovaPlayDownloads" position="center,center" size="1920,1080" title="Downloads" flags="wfNoBorder" backgroundColor="#0C1017">
+        <eLabel position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="0" />
+        <ePixmap position="40,30" size="84,84" pixmap="{p}/images/plugin.png" alphatest="blend" scale="1" zPosition="2" />
+        <eLabel position="146,30" size="800,52" text="Downloads" font="Bold;40" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="1" zPosition="2" />
+        <widget name="header" position="146,86" size="1700,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
+        <eLabel position="40,150" size="1840,810" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
+        <widget name="list" position="58,170" size="1804,700" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;28" itemHeight="58" zPosition="2" />
+        <eLabel position="58,888" size="1804,1" backgroundColor="#2A3240" zPosition="2" />
+        <widget name="footer" position="74,900" size="1770,44" font="Regular;22" valign="center" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
+        <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
+        <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="2" />
+        <widget name="key_red" position="106,994" size="300,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
+        <eLabel position="412,1003" size="22,22" backgroundColor="#3E7BFA" cornerRadius="11" zPosition="2" />
+        <widget name="key_blue" position="446,994" size="300,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
+        <widget name="key_exit" position="900,994" size="950,40" font="Regular;24" valign="center" foregroundColor="#C9D0DA" transparent="1" halign="right" zPosition="2" />
+    </screen>""".format(p=PLUGIN_PATH))
 
     def __init__(self, session):
         Screen.__init__(self, session)
@@ -58,7 +65,7 @@ class NovaPlayDownloads(Screen):
         self["list"] = MenuList([])
         self["key_red"] = Label("Cancel download")
         self["key_blue"] = Label("Clear finished")
-        self["key_exit"] = Label("EXIT close")
+        self["key_exit"] = Label("OK  Options    EXIT  Close")
         self._tasks = []
         self._row_map = []
         self._last_rows = None                     # [FIX-DL]
@@ -95,7 +102,7 @@ class NovaPlayDownloads(Screen):
         active = sum(1 for t in self._tasks if t.status in ("queued", "downloading"))
         done = sum(1 for t in self._tasks if t.status == "done")
         failed = sum(1 for t in self._tasks if t.status == "error")
-        self["header"].setText("Downloads: {} active  |  {} done  |  {} failed".format(active, done, failed))
+        self["header"].setText("{} active  ·  {} done  ·  {} failed".format(active, done, failed))
         if time.time() >= self._flash_until:
             self["footer"].setText("Folder: {}".format(plugin_downloads.download_dir()))
 

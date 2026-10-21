@@ -23,28 +23,39 @@ from novaplay_thread import callInMainThread
 
 
 class NovaPlaySearch(Screen):
+    # [panel 2026-10-21] same style as Home / Settings / site screens
     skin = scale_skin_xml("""
-    <screen name="NovaPlaySearch" position="center,center" size="1920,1080" flags="wfNoBorder">
-        <ePixmap position="0,0" size="1920,1080" pixmap="{}/images/bg_search.png" zPosition="0" alphatest="blend" />
-        <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="1" />
-        <widget name="title" position="60,30" size="900,54" font="Regular;45" foregroundColor="#00E5FF" transparent="1" zPosition="3" />
-        <widget name="subtitle" position="60,90" size="1800,36" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="3" />
-        <widget name="query_box" position="60,150" size="1800,105" backgroundColor="#161B22" zPosition="2" />
-        <widget name="query_label" position="90,165" size="180,27" font="Regular;24" foregroundColor="#00E5FF" transparent="1" zPosition="3" />
-        <widget name="query" position="90,198" size="1740,39" font="Regular;33" foregroundColor="#F0F6FC" transparent="1" zPosition="3" />
-        <widget name="scope_box" position="60,278" size="1800,72" backgroundColor="#1C2333" zPosition="2" />
-        <widget name="scope_label" position="90,296" size="165,30" font="Regular;24" foregroundColor="#E040FB" transparent="1" zPosition="3" />
-        <widget name="scope" position="270,294" size="1560,33" font="Regular;28" foregroundColor="#F0F6FC" transparent="1" zPosition="3" />
-        <widget name="suggestions_box" position="60,372" size="1800,570" backgroundColor="#161B22" zPosition="2" />
-        <widget name="suggestions_title" position="90,390" size="450,30" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="3" />
-        <widget name="suggestions" position="87,435" size="1746,480" zPosition="3" scrollbarMode="showOnDemand" foregroundColor="#F0F6FC" foregroundColorSelected="#00E5FF" backgroundColor="#161B22" backgroundColorSelected="#21262D" font="Regular;32" itemHeight="38" />
-        <widget name="hint" position="60,960" size="1800,33" font="Regular;22" foregroundColor="#8B949E" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_red" position="60,1002" size="420,33" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_green" position="522,1002" size="420,33" font="Regular;24" foregroundColor="#39D98A" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_yellow" position="984,1002" size="420,33" font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="3" halign="center" />
-        <widget name="key_blue" position="1446,1002" size="420,33" font="Regular;24" foregroundColor="#58A6FF" transparent="1" zPosition="3" halign="center" />
+    <screen name="NovaPlaySearch" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="#0C1017">
+        <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="1" />
+        <ePixmap position="40,30" size="84,84" pixmap="{p}/images/plugin.png" alphatest="blend" scale="1" zPosition="3" />
+        <widget name="title" position="146,30" size="1100,52" font="Bold;40" foregroundColor="#F2C230" transparent="1" zPosition="3" />
+        <widget name="subtitle" position="146,86" size="1500,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
+
+        <eLabel position="40,150" size="1840,124" backgroundColor="#F2C230" cornerRadius="16" zPosition="2" />
+        <widget name="query_box" position="43,153" size="1834,118" backgroundColor="#161C26" cornerRadius="14" zPosition="2" />
+        <widget name="query_label" position="74,166" size="400,28" font="Regular;20" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
+        <widget name="query" position="74,198" size="1770,60" font="Bold;36" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />
+
+        <widget name="scope_box" position="40,292" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
+        <widget name="scope_label" position="74,292" size="160,76" font="Regular;20" valign="center" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
+        <widget name="scope" position="240,292" size="1600,76" font="Regular;28" valign="center" foregroundColor="#F2C230" transparent="1" zPosition="3" />
+
+        <widget name="suggestions_box" position="40,388" size="1840,572" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
+        <widget name="suggestions_title" position="74,404" size="900,30" font="Regular;20" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
+        <widget name="suggestions" position="58,446" size="1804,500" zPosition="3" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;30" itemHeight="50" />
+
+        <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
+        <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="3" />
+        <widget name="key_red" position="106,994" size="200,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />
+        <eLabel position="312,1003" size="22,22" backgroundColor="#30A46C" cornerRadius="11" zPosition="3" />
+        <widget name="key_green" position="346,994" size="220,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />
+        <eLabel position="572,1003" size="22,22" backgroundColor="#F2C230" cornerRadius="11" zPosition="3" />
+        <widget name="key_yellow" position="606,994" size="200,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />
+        <eLabel position="812,1003" size="22,22" backgroundColor="#3E7BFA" cornerRadius="11" zPosition="3" />
+        <widget name="key_blue" position="846,994" size="240,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />
+        <widget name="hint" position="1100,994" size="750,40" font="Regular;22" valign="center" foregroundColor="#C9D0DA" transparent="1" zPosition="3" halign="right" />
     </screen>
-    """.format(PLUGIN_PATH))
+    """.format(p=PLUGIN_PATH))
 
     def __init__(self, session, current_site="egydead", default_scope="all", query=""):
         Screen.__init__(self, session)
@@ -53,17 +64,17 @@ class NovaPlaySearch(Screen):
         self._scope = default_scope or "all"
         self["bg"] = Label("")
         self["title"] = Label("Search")
-        self["subtitle"] = Label("Type a name and choose the scope: the current source or all sources.")
+        self["subtitle"] = Label("Type a name, pick a suggestion, or press GREEN to search")
         self["query_box"] = Label("")
-        self["query_label"] = Label("Search text")
+        self["query_label"] = Label("SEARCH TEXT")
         self["query"] = Label("")
         self["scope_box"] = Label("")
-        self["scope_label"] = Label("Scope")
+        self["scope_label"] = Label("SCOPE")
         self["scope"] = Label("")
         self["suggestions_box"] = Label("")
         self["suggestions_title"] = Label("Quick suggestions")
         self["suggestions"] = MenuList([])
-        self["hint"] = Label("OK opens suggestion  |  Up/Down move  |  Red: clear  |  Yellow: type  |  Blue: scope")
+        self["hint"] = Label("OK  Search / pick    ▲ ▼  Suggestions    ◀ ▶  Scope")
         self["key_red"] = Label("Clear")
         self["key_green"] = Label("Search now")
         self["key_yellow"] = Label("Type")
@@ -97,20 +108,20 @@ class NovaPlaySearch(Screen):
 
     def _refresh_suggestion_list(self):
         if not self._suggestions:
-            self["suggestions_title"].setText("Quick suggestions")
+            self["suggestions_title"].setText("QUICK SUGGESTIONS")
             self["suggestions"].setList(["No suggestions yet"])
             return
-        self["suggestions_title"].setText("Quick suggestions: {}".format(len(self._suggestions)))
+        self["suggestions_title"].setText("QUICK SUGGESTIONS  ·  {}".format(len(self._suggestions)))
         rows = []
         for item in self._suggestions:
             meta = []
             if item.get("source"): meta.append(item.get("source"))
             if item.get("kind"): meta.append(item.get("kind"))
             if item.get("year"): meta.append(item.get("year"))
-            label = _single_line_text(item.get("title", ""), width=34, fallback="Suggestion")
-            meta_text = " | ".join([x for x in meta if x])
+            label = _single_line_text(item.get("title", ""), width=60, fallback="Suggestion")
+            meta_text = "  ·  ".join([x for x in meta if x])
             if meta_text:
-                label = "{} [{}]".format(label, meta_text)
+                label = "{}      {}".format(label, meta_text)
             rows.append(label)
         self["suggestions"].setList(rows)
 
@@ -138,6 +149,8 @@ class NovaPlaySearch(Screen):
         self._refresh_suggestion_list()
 
     def _toggle_scope(self):
+        if not self._current_site:          # opened from Home: all sources only
+            return
         self._scope = self._current_site if self._scope == "all" else "all"
         self._refresh_suggestions()
         self._refresh()
