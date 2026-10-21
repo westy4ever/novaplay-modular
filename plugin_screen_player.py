@@ -4323,12 +4323,12 @@ class NovaPlaySimplePlayer(Screen):
 
         class _FontPick(Screen):
             skin = """
-            <screen name="NovaFontPick" position="center,center" size="1500,860" title="Select Font" flags="wfNoBorder">
-                <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
-                <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
-                <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-                <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" zPosition="2" />
-                <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="2" />
+            <screen name="NovaFontPick" position="center,center" size="1500,860" backgroundColor="transparent" title="Select Font" flags="wfNoBorder">
+                <eLabel position="0,0" size="1500,860" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
+        <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
+                <widget name="path" position="40,18" size="1420,44" font="Bold;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
+                <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
+                <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
             </screen>"""
             def __init__(self2, session, start_dir):
                 Screen.__init__(self2, session)

@@ -1791,12 +1791,12 @@ class NovaOnlineSubsScreen(Screen):
     closes with the .srt path."""
 
     skin = """
-    <screen name="NovaOnlineSubsScreen" position="center,center" size="1700,940" title="Online subtitles" flags="wfNoBorder">
-        <eLabel position="0,0" size="1700,940" backgroundColor="#0C1017" zPosition="0" />
-        <eLabel position="0,0" size="1700,90" backgroundColor="#121822" zPosition="1" />
-        <widget name="header" position="50,20" size="1600,50" font="Regular;38" foregroundColor="#F2C230" transparent="1" zPosition="2" />
+    <screen name="NovaOnlineSubsScreen" position="center,center" size="1700,940" backgroundColor="transparent" title="Online subtitles" flags="wfNoBorder">
+        <eLabel position="0,0" size="1700,940" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
+        <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
+        <widget name="header" position="50,20" size="1600,50" font="Bold;38" foregroundColor="#F2C230" transparent="1" zPosition="2" />
         <widget name="list" position="40,110" size="1620,720" scrollbarMode="showOnDemand" foregroundColor="#F0F6FC" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;40" itemHeight="60" zPosition="2" />
-        <widget name="hint" position="50,860" size="1600,40" font="Regular;28" foregroundColor="#8B949E" transparent="1" zPosition="2" />
+        <widget name="hint" position="50,860" size="1600,40" font="Regular;28" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
     </screen>"""
 
     def __init__(self, session, title="", video_url="", provider="subsource", api_key=""):
@@ -1938,12 +1938,12 @@ class NovaSubtitleBrowser(Screen):
     """Folder browser for local subtitle files; best match tagged [BEST]."""
 
     skin = """
-    <screen name="NovaSubtitleBrowser" position="center,center" size="1500,860" title="Select subtitle" flags="wfNoBorder">
-        <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
-        <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
-        <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" zPosition="2" />
-        <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="2" />
+    <screen name="NovaSubtitleBrowser" position="center,center" size="1500,860" backgroundColor="transparent" title="Select subtitle" flags="wfNoBorder">
+        <eLabel position="0,0" size="1500,860" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
+        <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
+        <widget name="path" position="40,18" size="1420,44" font="Bold;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
+        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
+        <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
     </screen>"""
 
     def __init__(self, session, start_dir="", video_title=""):
@@ -2027,12 +2027,12 @@ class NovaFolderBrowser(Screen):
     replacement for typing a path on the VirtualKeyBoard."""
 
     skin = """
-    <screen name="NovaFolderBrowser" position="center,center" size="1500,860" title="Select Folder" flags="wfNoBorder">
-        <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
-        <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
-        <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" zPosition="2" />
-        <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="2" />
+    <screen name="NovaFolderBrowser" position="center,center" size="1500,860" backgroundColor="transparent" title="Select Folder" flags="wfNoBorder">
+        <eLabel position="0,0" size="1500,860" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
+        <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
+        <widget name="path" position="40,18" size="1420,44" font="Bold;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
+        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
+        <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
     </screen>"""
 
     def __init__(self, session, start_dir="/"):
@@ -2119,16 +2119,20 @@ class NovaSubtitleSettings(Screen):
     cache clearing."""
 
     skin = """
-    <screen name="NovaSubtitleSettings" position="center,center" size="1500,860" title="Subtitle Settings" flags="wfNoBorder">
-        <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
-        <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
-        <widget name="header" position="40,18" size="1420,44" font="Regular;32" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-        <widget name="body" position="40,100" size="1420,660" font="Regular;26" foregroundColor="#F0F6FC" transparent="1" zPosition="2" />
-        <eLabel position="0,790" size="1500,70" backgroundColor="#121822" zPosition="1" />
-        <widget name="key_red"    position="30,806"  size="350,32" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" halign="center" zPosition="2" />
-        <widget name="key_green"  position="390,806" size="350,32" font="Regular;24" foregroundColor="#39D98A" transparent="1" halign="center" zPosition="2" />
-        <widget name="key_yellow" position="750,806" size="350,32" font="Regular;24" foregroundColor="#F2C230" transparent="1" halign="center" zPosition="2" />
-        <widget name="key_blue"   position="1110,806" size="360,32" font="Regular;24" foregroundColor="#58A6FF" transparent="1" halign="center" zPosition="2" />
+    <screen name="NovaSubtitleSettings" position="center,center" size="1500,860" title="Subtitle Settings" flags="wfNoBorder" backgroundColor="transparent">
+        <eLabel position="0,0" size="1500,860" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
+        <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
+        <widget name="header" position="40,18" size="1420,52" font="Bold;32" foregroundColor="#F2C230" transparent="1" zPosition="2" />
+        <widget name="body" position="40,104" size="1420,660" font="Regular;26" foregroundColor="#D6DCE5" transparent="1" zPosition="2" />
+        <eLabel position="20,780" size="1460,62" backgroundColor="#1A212D" cornerRadius="14" zPosition="1" />
+        <eLabel position="44,801" size="20,20" backgroundColor="#E5484D" cornerRadius="10" zPosition="2" />
+        <widget name="key_red"    position="74,793"  size="290,36" font="Regular;24" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
+        <eLabel position="404,801" size="20,20" backgroundColor="#30A46C" cornerRadius="10" zPosition="2" />
+        <widget name="key_green"  position="434,793" size="290,36" font="Regular;24" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
+        <eLabel position="764,801" size="20,20" backgroundColor="#F2C230" cornerRadius="10" zPosition="2" />
+        <widget name="key_yellow" position="794,793" size="290,36" font="Regular;24" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
+        <eLabel position="1124,801" size="20,20" backgroundColor="#3E7BFA" cornerRadius="10" zPosition="2" />
+        <widget name="key_blue"   position="1154,793" size="310,36" font="Regular;24" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
     </screen>"""
 
     def __init__(self, session):
