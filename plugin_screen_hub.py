@@ -271,7 +271,9 @@ class NovaPlayHub(Screen):
         try:
             # one card per title (the same film watched from two sites)
             seen, self._cont = set(), []
-            for it in _continue_items(CONT_N * 4):
+            _all = _continue_items(500)
+            self._cont_total = len(set(_norm_title(i.get("title", "")) for i in _all))
+            for it in _all:
                 k = _norm_title(it.get("title", ""))
                 if k in seen:
                     continue
@@ -360,7 +362,8 @@ class NovaPlayHub(Screen):
 
     def _paintCont(self):
         n = len(self._cont)
-        self["contCount"].setText("{} items".format(n) if n else "")
+        tot = max(n, getattr(self, "_cont_total", n))
+        self["contCount"].setText(("{} of {}  ·  MENU to clear".format(n, tot) if tot > n else "{} items".format(n)) if n else "")
         if not n:
             self["contEmpty"].setText("      Nothing in progress — pick a site below")
             self["contEmpty"].show()
@@ -595,17 +598,35 @@ class NovaPlayHub(Screen):
     def _menu(self):
         if self._zone == "cont" and self._cont:
             it = self._cont[self._ci]
+            try:
+                from plugin_state import _continue_items as _ci
+                total = len(_ci(500))
+            except Exception:
+                total = len(self._cont)
 
-            def _confirm(ans, _url=it.get("url", "")):
-                if ans:
+            def _do(ans, _url=it.get("url", "")):
+                act = ans[1] if ans else None
+                if act == "one":
                     try:
                         _clear_continue_item(_url)
                     except Exception as e:
                         my_log("clear continue: {}".format(e))
                     self._back()
-            self.session.openWithCallback(_confirm, MessageBox, u"Remove from Continue Watching?\n{}".format(
-                _single_line_text(it.get("title", ""), width=40, fallback="Item")),
-                MessageBox.TYPE_YESNO, timeout=8, default=False)
+                elif act == "all":
+                    def _yes(ok):
+                        if ok:
+                            try:
+                                from plugin_state import _clear_all_continue
+                                _clear_all_continue()
+                            except Exception as e:
+                                my_log("clear all continue: {}".format(e))
+                            self._back()
+                    self.session.openWithCallback(_yes, MessageBox,
+                        u"Clear Continue Watching?\n\n{} unfinished titles will be removed from the list "
+                        u"(they stay in History).".format(total), MessageBox.TYPE_YESNO, default=False)
+            self.session.openWithCallback(_do, ChoiceBox, title=u"Continue Watching", list=[
+                (u"Remove \"{}\"".format(_single_line_text(it.get("title", ""), width=40, fallback="this title")), "one"),
+                (u"Clear all ({} titles)".format(total), "all")])
             return
         if self._zone != "sites" or not self._sites:
             return
