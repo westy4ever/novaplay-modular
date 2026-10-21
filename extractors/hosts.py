@@ -93,9 +93,10 @@ def resolve_streamtape(url):
     to a real get_video URL are kept, rather than trusting a single fixed element id.
     """
     try:
-        html, _ = fetch(url, referer="https://streamtape.com/")
+        html, page_final = fetch(url, referer="https://streamtape.com/")
         if not html:
             return None
+        page_host = urlparse(page_final or url).netloc.lower()
 
         assignment_pattern = re.compile(
             r"document\.getElementById\(['\"]\w+['\"]\)\.innerHTML\s*=\s*"
@@ -104,6 +105,11 @@ def resolve_streamtape(url):
             r"\(\s*(['\"])(.*?)\3\s*\)"
             r"((?:\.substring\(\d+\))+)"
         )
+        # [2026-10-21] decoys can be well-formed too, just on a host that
+        # doesn't exist (box: "streamtape.bc" -> Name or service not known).
+        # Keep every well-formed one; prefer the page's own host, then any
+        # host that resolves.
+        cands = []
         for m in assignment_pattern.finditer(html):
             _, prefix, _, computed, chain_text = m.groups()
             candidate = _evaluate_streamtape_assignment(prefix, computed, chain_text)
@@ -113,8 +119,28 @@ def resolve_streamtape(url):
                 if link.startswith("//"):
                     link = "https:" + link
                 elif not link.startswith("http"):
-                    link = "https://streamtape.com" + link
-                return link
+                    link = "https://" + (page_host or "streamtape.com") + link
+                if link not in cands:
+                    cands.append(link)
+        if cands:
+            import socket as _sock
+
+            def _resolves(h):
+                try:
+                    _sock.getaddrinfo(h, 443)
+                    return True
+                except Exception:
+                    return False
+            same = [c for c in cands if urlparse(c).netloc.lower() == page_host]
+            for c in same + [c for c in cands if c not in same]:
+                if _resolves(urlparse(c).netloc):
+                    if len(cands) > 1:
+                        log("resolve_streamtape: {} candidate link(s), using {}".format(
+                            len(cands), urlparse(c).netloc))
+                    return c
+            # none resolves: the real path/token on the page's own host
+            p0 = urlparse(cands[0])
+            return "https://{}{}?{}".format(page_host or "streamtape.com", p0.path, p0.query)
 
         # fall back to the older, simpler patterns in case a page variant still uses them
         m = re.search(r"robotlink\)\.innerHTML\s*=\s*'([^']+)'\s*\+\s*'([^']+)'", html)
@@ -389,24 +415,34 @@ def _mixdrop_wurl(html, referer_base):
         link = m.group(1)
         if link.startswith("//"):
             link = "https:" + link
-        return link + "|Referer={}/".format(referer_base)
+        return link + "|Referer={0}/&Origin={0}".format(referer_base)
     for txt in _unpack_all(html):
         m = re.search(r'MDCore\.wurl\s*=\s*"([^"]+)"', txt)
         if m:
             link = m.group(1)
             if link.startswith("//"):
                 link = "https:" + link
-            return link + "|Referer={}/".format(referer_base)
+            return link + "|Referer={0}/&Origin={0}".format(referer_base)
     return None
 
 
+def _origin(u, default="https://mixdrop.to"):
+    try:
+        p = urlparse(u)
+        return "{}://{}".format(p.scheme or "https", p.netloc) if p.netloc else default
+    except Exception:
+        return default
+
+
 def resolve_mixdrop(url):
+    # [2026-10-21] mxcontent.net answered 403 to Referer mixdrop.to for a link
+    # issued by another Mixdrop mirror: send the issuing page's own origin
     try:
         html, final = fetch(url, referer=url)
         if not html:
             return None
         log("Mixdrop fetched {} bytes, MDCore present: {}".format(len(html), "MDCore" in html))
-        result = _mixdrop_wurl(html, "https://mixdrop.to")
+        result = _mixdrop_wurl(html, _origin(final or url))
         if result:
             return result
         # [PATCH WC] confirmed directly against a real mixdrop.ps/e/
@@ -418,7 +454,7 @@ def resolve_mixdrop(url):
         iframe_url = _follow_landing_iframe(html, final or url)
         if iframe_url:
             html2, final2 = fetch(iframe_url, referer=final or url)
-            result = _mixdrop_wurl(html2, "https://mixdrop.to")
+            result = _mixdrop_wurl(html2, _origin(final2 or iframe_url))
             if result:
                 return result
     except Exception:
