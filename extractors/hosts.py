@@ -3108,8 +3108,10 @@ def resolve_vidapi_player(url, referer=None):
             js = json.loads(body or "{}") or {}
         except ValueError:
             js = {}
-        data = js.get("data") or {} if isinstance(js, dict) else {}
-        if str(js.get("status_code", "")) == "404" if isinstance(js, dict) else False:
+        if not isinstance(js, dict):
+            js = {}
+        data = js.get("data") if isinstance(js.get("data"), dict) else {}
+        if str(js.get("status_code", "")) == "404":
             log("resolve_vidapi_player: VidAPI doesn't have this title (404)")
             return None
         urls = [u for u in (data.get("stream_urls") or []) if isinstance(u, str) and u.startswith("http")]
