@@ -556,10 +556,13 @@ def _library_search_suggestions(query="", current_site="", limit=8):
             "source": "Previous search", "site": "", "kind": "", "year": "",
         }))
 
-    for source_name, items, source_rank in (
+    # [search] with nothing typed only previous searches are suggested, so
+    # "Clear history" really empties the list; library titles (favorites /
+    # history) are offered once the user types something that matches them
+    for source_name, items, source_rank in ((
         ("Favorites", _favorite_items(), 0),
         ("History", _history_items(), 1),
-    ):
+    ) if q else ()):
         for item in items or []:
             title = re.sub(r"\s+", " ", item.get("title", "") or "").strip()
             if not title:

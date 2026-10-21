@@ -200,7 +200,7 @@ class NovaPlaySearch(Screen):
                 _clear_search_history()
                 self._refresh_suggestions()
                 self._refresh()
-        self.session.openWithCallback(_yes, MessageBox, "Remove all previous searches?\n\n(Titles from your Favorites and History will still be suggested.)",
+        self.session.openWithCallback(_yes, MessageBox, "Remove all previous searches?",
                                       MessageBox.TYPE_YESNO, default=False)
 
     def _remove_suggestion(self):
