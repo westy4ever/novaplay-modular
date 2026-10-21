@@ -3105,9 +3105,13 @@ def resolve_vidapi_player(url, referer=None):
                 "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"}
         body, _f = fetch(api, referer=_VAPI_ORIGIN + "/", timeout=15, max_retries=1, extra_headers=hdrs)
         try:
-            data = (json.loads(body or "{}") or {}).get("data") or {}
+            js = json.loads(body or "{}") or {}
         except ValueError:
-            data = {}
+            js = {}
+        data = js.get("data") or {} if isinstance(js, dict) else {}
+        if str(js.get("status_code", "")) == "404" if isinstance(js, dict) else False:
+            log("resolve_vidapi_player: VidAPI doesn't have this title (404)")
+            return None
         urls = [u for u in (data.get("stream_urls") or []) if isinstance(u, str) and u.startswith("http")]
         log("resolve_vidapi_player: {} -> {} link(s) ({})".format(
             api[len(_VAPI):][:60], len(urls), data.get("file_name") or "no file"))
