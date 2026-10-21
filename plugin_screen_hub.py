@@ -135,7 +135,7 @@ def _skin():
         <widget name="kEdge{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{edge}" cornerRadius="14" zPosition="2" />
         <widget name="kBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
         <widget name="kPoster{i}" position="{px},{py}" size="72,100" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="kTitle{i}" position="{tx},{ty}" size="336,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="kTitle{i}" halign="left" position="{tx},{ty}" size="336,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
         <widget name="kSub{i}" position="{tx},{sy}" size="336,30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
         <widget name="kBar{i}" position="{tx},{by}" size="330,6" backgroundColor="#2A3240" foregroundColor="{gold}" borderWidth="0" cornerRadius="3" zPosition="4" />
         """.format(i=i, x=x, y=y, w=_CONT_W, h=_CONT_H, x3=x + 3, y3=y + 3, w3=_CONT_W - 6, h3=_CONT_H - 6,
@@ -148,7 +148,7 @@ def _skin():
         <widget name="sBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
         <widget name="sLogo{i}" position="{lx},{ly}" size="132,47" alphatest="blend" scale="1" zPosition="4" />
         <widget name="sDot{i}" position="{dx},{dy}" size="14,14" backgroundColor="{card}" cornerRadius="7" zPosition="4" />
-        <widget name="sName{i}" position="{nx},{ny}" size="310,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="sName{i}" halign="left" position="{nx},{ny}" size="310,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
         <widget name="sTag{i}" position="{nx},{gy}" size="310,30" font="Regular;20" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="4" />
         """.format(i=i, x=x, y=y, w=_S_W, h=_S_H, x3=x + 3, y3=y + 3, w3=_S_W - 6, h3=_S_H - 6,
                    lx=x + 18, ly=y + 18, dx=x + _S_W - 34, dy=y + 34, nx=x + 18, ny=y + 74, gy=y + 112,

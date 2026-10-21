@@ -51,8 +51,8 @@ class NovaFamilyPicker(Screen):
             <widget name="e{i}" position="28,{y}" size="{cw},{rh}" backgroundColor="{edge}" cornerRadius="14" zPosition="1" />
             <eLabel position="31,{y3}" size="{cw3},{rh3}" backgroundColor="{card}" cornerRadius="12" zPosition="2" />
             <widget name="logo{i}" position="50,{ly}" size="190,67" alphatest="blend" scale="1" zPosition="3" />
-            <widget name="name{i}" position="268,{ny}" size="{nw},42" font="Bold;30" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="3" />
-            <widget name="tag{i}" position="268,{gy}" size="{nw},32" font="Regular;22" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="3" />
+            <widget name="name{i}" halign="left" position="268,{ny}" size="{nw},42" font="Bold;30" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="3" />
+            <widget name="tag{i}" halign="left" position="268,{gy}" size="{nw},32" font="Regular;22" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="3" />
             <widget name="dot{i}" position="{dx},{dy}" size="16,16" backgroundColor="{card}" cornerRadius="8" zPosition="3" />
             """.format(i=i, y=y, y3=y + 3, cw=_W - 56, cw3=_W - 62, rh=_RH, rh3=_RH - 6,
                        ly=y + 22, ny=y + 16, gy=y + 60, nw=_W - 360, dx=_W - 70, dy=y + 48,

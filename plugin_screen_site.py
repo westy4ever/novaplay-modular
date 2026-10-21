@@ -126,7 +126,7 @@ def _skin():
         parts.append("""
         <widget name="cBg{i}" position="54,{y}" size="332,{h}" backgroundColor="{panel}" cornerRadius="10" zPosition="3" />
         <widget name="cBar{i}" position="54,{y}" size="5,{h}" backgroundColor="{gold}" zPosition="5" />
-        <widget name="cText{i}" position="72,{y}" size="304,{h}" font="Regular;25" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        <widget name="cText{i}" position="72,{y}" size="304,{h}" font="Regular;25" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
         """.format(i=i, y=y, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
     for i in range(P_VIEW):
         x, y = _PX[i % P_COLS], _PY[i // P_COLS]
@@ -136,7 +136,7 @@ def _skin():
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
         <widget name="pRate{i}" position="{rx},{ry}" size="78,30" font="Bold;19" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
-        <widget name="pName{i}" position="{x},{ty}" size="{w},32" font="Regular;22" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        <widget name="pName{i}" halign="left" position="{x},{ty}" size="{w},32" font="Regular;22" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         <widget name="pYear{i}" position="{x},{yy}" size="{w},26" font="Regular;18" foregroundColor="#A3ADBB" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 4, ey=y - 4, ew=PW + 8, eh=PH + 8,
                    rx=x + 8, ry=y + 8, my=y + PH - 28, ty=y + PH + 6, yy=y + PH + 36,
