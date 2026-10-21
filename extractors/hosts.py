@@ -1871,16 +1871,20 @@ def _n1mwq_video_id(url):
     return m.group(1) if m else None
 
 
-def resolve_n1mwq(url, referer=None):
+def resolve_n1mwq(url, referer=None, origin=None, video_id=None):
+    """origin/video_id: the same Byse app served from another address
+    ([2026-10-21] byseqekaho.com/e/<id> is an empty shell of the same
+    index-DocunfmE.js app; its API lives on its own origin)."""
     try:
-        video_id = _n1mwq_video_id(url)
+        video_id = video_id or _n1mwq_video_id(url)
         if not video_id:
             log("n1mwq: could not extract video id from {}".format(url))
             return None
         page_referer = referer or url
-        base = "{}/api/videos/{}/embed/".format(_N1MWQ_ORIGIN, video_id)
+        base = "{}/api/videos/{}/embed/".format(origin or _N1MWQ_ORIGIN, video_id)
 
         settings = fetch_json(base + "settings", referer=page_referer)
+        log("n1mwq: {}settings -> {}".format(base[-60:], str(settings)[:160]))
         captcha_required = bool(settings and settings.get("captcha_required"))
 
         captcha_token = None
@@ -2262,6 +2266,16 @@ def resolve_byse_any(url, referer=None):
     r = resolve_byselapuix(url)
     if r:
         return r
+    # the page may be only the app's empty shell (<div id="root">): run the
+    # Byse embed API (settings -> PoW captcha -> playback) on its own origin
+    m = re.search(r'/(?:e|d|v)/([A-Za-z0-9_-]+)', urlparse(url).path)
+    if m:
+        p = urlparse(url)
+        origin = "{}://{}".format(p.scheme or "https", p.netloc)
+        log("resolve_byse_any: trying the Byse embed API on {} for {}".format(origin, m.group(1)))
+        r = resolve_n1mwq(url, referer=url, origin=origin, video_id=m.group(1))
+        if r:
+            return r
     try:
         return resolve_streamwish(url)
     except Exception:
