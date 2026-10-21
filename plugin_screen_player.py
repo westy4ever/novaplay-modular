@@ -171,6 +171,14 @@ def _build_remote_play_candidates(url):
     proxy_only = any(k.lower() == "x-np-proxy" for k in headers)
     for _k in [k for k in headers if k.lower() == "x-np-proxy"]:
         headers.pop(_k, None)
+    # [2026-10-21] X-NP-Strict: the stream's own Referer is required -- leave out
+    # every header-less method (one hung Enigma2 on TopCinema's VideoTube)
+    strict = any(k.lower() == "x-np-strict" for k in headers)
+    for _k in [k for k in headers if k.lower() == "x-np-strict"]:
+        headers.pop(_k, None)
+    if strict:
+        # drop the marker from the "+ headers" URL, same separator and format
+        url = re.sub(r'(?i)(^|[#|&])X-NP-Strict=[^&]*&?', r'\1', url).rstrip("&#|")
 
     def add_candidate(p_type, svc_url, label, uses_proxy=False):
         key = (p_type, svc_url)
@@ -281,6 +289,12 @@ def _build_remote_play_candidates(url):
         if legacy_proxied:
             add_candidate(4097, legacy_proxied, "4097 + legacy proxy", True)
 
+    if strict:
+        kept = [c for c in candidates if c[3] or "headers" in c[2]]
+        if kept and len(kept) < len(candidates):
+            my_log("candidates: stream needs its headers -- skipping {} header-less method(s)".format(
+                len(candidates) - len(kept)))
+            candidates = kept
     return candidates
 
 

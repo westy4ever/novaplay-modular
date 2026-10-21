@@ -2218,11 +2218,20 @@ class NovaPlayDetail(Screen):
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"}
             if final_ref:
                 headers["Referer"] = final_ref
+            own_ref = False
             if old_params:
                 for p in old_params.split("&"):
                     if "=" in p:
                         k, v = p.split("=", 1)
-                        if k not in headers: headers[k] = v
+                        # [2026-10-21] the resolver's own Referer/Origin win over
+                        # the site address (VideoTube's CDN 403s the site's)
+                        if k in ("Referer", "Origin") or k not in headers:
+                            headers[k] = v
+                            own_ref = own_ref or k == "Referer"
+            if own_ref:
+                # the stream named its Referer: requests without it are refused,
+                # and on the box a refused header-less request can hang Enigma2
+                headers["X-NP-Strict"] = "1"
 
             header_str = "&".join(["{}={}".format(k, v) for k, v in headers.items()])
             pure_url = main_url.split("|")[0].strip()

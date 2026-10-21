@@ -901,6 +901,19 @@ def _hanerix_extract(html):
     return _best_media_url(html)
 
 
+def _with_page_referer(stream, page_url):
+    """[2026-10-21] these players' CDNs (TopCinema's VideoTube on
+    cdn-video.xyz: 403 without it) want the player page as Referer -- the
+    site's own address, which the player fell back to, isn't accepted."""
+    if not stream or "|" in stream or not page_url:
+        return stream
+    p = urlparse(page_url)
+    if not p.netloc:
+        return stream
+    origin = "{}://{}".format(p.scheme or "https", p.netloc)
+    return stream + "|Referer={0}/&Origin={0}".format(origin)
+
+
 def resolve_hanerix_style(url):
     try:
         html, final = fetch(url, referer=url)
@@ -908,7 +921,7 @@ def resolve_hanerix_style(url):
             return None
         result = _hanerix_extract(html)
         if result:
-            return result
+            return _with_page_referer(result, final or url)
         # [PATCH WC] confirmed directly against a real luluvdo.com/e/
         # capture: a direct fetch lands on the "/d/" landing page (no
         # stream URL anywhere on it), not the real "/e/" player -- the
@@ -917,10 +930,10 @@ def resolve_hanerix_style(url):
         # (e.g. luluvdo.com's landing page embeds luluvido.com).
         iframe_url = _follow_landing_iframe(html, final or url)
         if iframe_url:
-            html2, _ = fetch(iframe_url, referer=final or url)
+            html2, final2 = fetch(iframe_url, referer=final or url)
             result = _hanerix_extract(html2)
             if result:
-                return result
+                return _with_page_referer(result, final2 or iframe_url)
     except Exception:
         pass
     return None
