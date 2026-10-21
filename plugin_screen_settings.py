@@ -91,8 +91,22 @@ def _skin():
         <widget name="secCount" position="1380,162" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
 
         <widget name="aboutBox" position="430,222" size="1450,734" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
-        <widget name="aboutLeft" position="470,252" size="760,680" font="Regular;24" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
-        <widget name="aboutRight" position="1270,252" size="580,680" font="Regular;24" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH0" position="470,252" size="760,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB0" position="492,294" size="738,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH1" position="470,424" size="760,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB1" position="492,466" size="738,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH2" position="470,596" size="760,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB2" position="492,638" size="738,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH3" position="470,768" size="760,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB3" position="492,810" size="738,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH4" position="1270,252" size="580,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB4" position="1292,294" size="558,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH5" position="1270,424" size="580,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB5" position="1292,466" size="558,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH6" position="1270,596" size="580,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB6" position="1292,638" size="558,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aH7" position="1270,768" size="580,36" font="Bold;26" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="3" />
+        <widget name="aB7" position="1292,810" size="558,118" font="Regular;23" foregroundColor="{text}" backgroundColor="{card}" transparent="1" zPosition="3" />
 
         <eLabel position="40,976" size="1840,76" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
         <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="2" />
@@ -218,8 +232,9 @@ class NovaPlaySettings(Screen):
         self["secTitle"] = Label("")
         self["secCount"] = Label("")
         self["aboutBox"] = Label("")
-        self["aboutLeft"] = Label("")
-        self["aboutRight"] = Label("")
+        for _i in range(8):
+            self["aH%d" % _i] = Label("")
+            self["aB%d" % _i] = Label("")
         self["key_red"] = Label("Proxy")
         self["key_green"] = Label("Adult content")
         self["key_yellow"] = Label("TMDb key")
@@ -393,7 +408,7 @@ class NovaPlaySettings(Screen):
         self["secTitle"].setText(self.SECTIONS[self._sec][1])
         about = key == "about"
         self["secCount"].setText("" if about else "{} items".format(len(self._items)))
-        for n in ("aboutBox", "aboutLeft", "aboutRight"):
+        for n in ["aboutBox"] + ["aH%d" % _i for _i in range(8)] + ["aB%d" % _i for _i in range(8)]:
             self[n].show() if about else self[n].hide()
         if about:
             self._paintAbout()
@@ -421,23 +436,24 @@ class NovaPlaySettings(Screen):
 
     def _paintAbout(self):
         api_key = (_get_config("tmdb_api_key", "") or "").strip()
-        self["aboutLeft"].setText(
-            "NovaPlay Media Center {}\n\n"
-            "Movies, series and anime from many sites in one place,\n"
-            "with TMDb posters and plots, subtitles and resume.\n\n"
-            "Current source\n  {}\n  {}\n\n"
-            "Update (PuTTY)\n  wget -qO /tmp/install_novaplay.sh https://raw.githubusercontent.com/\n"
-            "  westy4ever/novaplay-modular/main/install_novaplay.sh && sh /tmp/install_novaplay.sh".format(
-                _PLUGIN_VERSION, _site_label(self._current_site) if self._current_site else "—",
-                (_site_tagline(self._current_site) if self._current_site else "")[:60]))
-        self["aboutRight"].setText(
-            "Developer\n  {}\n\n"
-            "GitHub\n  github.com/westy4ever/novaplay-modular\n\n"
-            "TMDb\n  {}\n\n"
-            "Library\n  Favorites: {}\n  History: {}".format(
-                _get_config("owner", _PLUGIN_OWNER),
-                "Built-in key" if api_key == _DEFAULT_TMDB_API_KEY else ("Your key" if api_key else "Off"),
-                len(_favorite_items()), len(_history_items())))
+        site = self._current_site
+        blocks = [
+            (u"◆  NovaPlay Media Center {}".format(_PLUGIN_VERSION),
+             u"Movies, series and anime from many sites in one place,\nwith TMDb posters and plots, subtitles and resume."),
+            (u"◆  Current source",
+             u"{}\n{}".format(_site_label(site) if site else u"—", (_site_tagline(site) if site else u"")[:60])),
+            (u"◆  Update (PuTTY)",
+             u"wget -qO /tmp/install_novaplay.sh https://raw.githubusercontent.com/\n"
+             u"westy4ever/novaplay-modular/main/install_novaplay.sh && sh /tmp/install_novaplay.sh"),
+            (u"◆  Note", u"Thank you for using NovaPlay!"),
+            (u"◆  Developer", _get_config("owner", _PLUGIN_OWNER)),
+            (u"◆  GitHub", u"github.com/westy4ever/novaplay-modular"),
+            (u"◆  TMDb", u"Built-in key" if api_key == _DEFAULT_TMDB_API_KEY else (u"Your key" if api_key else u"Off")),
+            (u"◆  Library", u"Favorites: {}\nHistory: {}".format(len(_favorite_items()), len(_history_items()))),
+        ]
+        for i, (h, b) in enumerate(blocks):
+            self["aH%d" % i].setText(h)
+            self["aB%d" % i].setText(b)
 
     # ─── navigation ─────────────────────────────────────────────────────
 
