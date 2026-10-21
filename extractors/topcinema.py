@@ -23,7 +23,8 @@ class TopCinemaExtractor(BaseExtractor):
     """Extractor for TopCinema - topcinemaa.top"""
     
     DOMAINS = [
-        "https://topcinema.io/",          # [PATCH C] primary
+        "https://topcinema.film/",        # [2026-10-21] the site's own canonical address
+        "https://topcinema.io/",
         "https://topcinemaa.com/",
         "https://topcinemaa.top/",
         "https://topcinma.com/",

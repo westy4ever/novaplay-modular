@@ -248,7 +248,7 @@ class CimaWebasExtractor(BaseExtractor):
         "vidsrc", "vidfast", "vidapi", "cdnm.ink", "nontongo",
         "downet.net", "af3.downet", "drive.google", "mega.nz", "mediafire",
         # Added 2026-09-28 from live watch-page captures:
-        "topcinemaa", "topcinema.io",
+        "topcinemaa", "topcinema.io", "topcinema.film",
         "d0o0d", "vaplayer", "nextgencloudfabric",
         "streamwish.fun", "digitalnomadventures", "cloudatacdn",
         # Embed services on the two additional watch captures:
@@ -493,7 +493,8 @@ class CimaWebasExtractor(BaseExtractor):
             return url
         low = url.lower()
         if ("topcinemaa.com/play.php" not in low
-                and "topcinema.io/play.php" not in low):
+                and "topcinema.io/play.php" not in low
+                and "topcinema.film/play.php" not in low):
             return url
         try:
             qs = parse_qs(urlparse(url).query)
@@ -1038,7 +1039,7 @@ class CimaWebasExtractor(BaseExtractor):
             ("vidfast", "VidFast"), ("vidapi", "VidAPI"),
             ("vaplayer", "VidAPI"),
             ("nextgencloudfabric", "VidAPI"),
-            ("topcinemaa", "TopCinema"), ("topcinema.io", "TopCinema"),
+            ("topcinemaa", "TopCinema"), ("topcinema.io", "TopCinema"), ("topcinema.film", "TopCinema"),
             ("cdnm.ink", "CDNM"), ("nontongo", "Nontongo"),
             ("cybervynx", "CyberVynx"), ("dhcplay", "DHCPlay"),
             ("firestream", "FireStream"),
