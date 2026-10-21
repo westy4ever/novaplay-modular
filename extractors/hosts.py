@@ -3050,7 +3050,18 @@ def resolve_vidapi(url, referer=None):
                 url[:90], len(html), re.sub(r"\s+", " ", html[:300])))
         for code in codes:
             emb = "https://vscdn.xyz/e/{}".format(code)
-            r = resolve_streamwish(emb) or _streamwish_from_html(_zm_relay_fetch(emb))
+            # vscdn.xyz 403s the Chrome/120 default too: fetch it like the browser
+            # did (iframe from stream.vidapi.xyz), and play with the same UA
+            try:
+                eh, _f = fetch(emb, referer="https://stream.vidapi.xyz/", timeout=12,
+                               max_retries=0, extra_headers=_VIDAPI_HDRS)
+            except Exception:
+                eh = ""
+            r = _streamwish_from_html(eh)
+            if r and "|" not in r:
+                r = _correct_stream_url(r) + "|Referer=https://vscdn.xyz/&Origin=https://vscdn.xyz&User-Agent=" + \
+                    quote(_VIDAPI_HDRS["User-Agent"], safe="")
+            r = r or resolve_streamwish(emb) or _streamwish_from_html(_zm_relay_fetch(emb))
             if r:
                 log("resolve_vidapi: {} -> {}".format(emb, r[:90]))
                 return r
@@ -4159,17 +4170,29 @@ def resolve_cdnm(url, referer=None):
         origin = "{0.scheme}://{0.netloc}".format(urlparse(final or page_url))
         suffix = "|Referer={}/&Origin={}".format(origin, origin)
         # every quality has its own signed link; use the best one that answers
+        hdrs = {"Origin": origin, "User-Agent": _VIDAPI_HDRS["User-Agent"],
+                "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
+                "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "cross-site"}
+        suffix += "&User-Agent=" + quote(hdrs["User-Agent"], safe="")
         for i, (lbl, u) in enumerate(variants):
-            body = ""
+            body = None
+            t0 = time.time()
             try:
                 body, _ = fetch(u, referer=origin + "/", timeout=8, max_retries=0,
-                                extra_headers={"Origin": origin})
+                                extra_headers=hdrs)
             except Exception:
-                body = ""
+                body = None
             if body and "#EXTM3U" in body:
                 ok = variants[i:]
                 _quality_tls.variants = [v + suffix for _, v in ok]
                 log("resolve_cdnm: {} quality(ies), playing {}".format(len(ok), lbl))
+                return u + suffix
+            if time.time() - t0 > 6:
+                # a timeout is the connection, not this quality: don't wait on
+                # every link -- hand them to the player (it has its own routes)
+                _quality_tls.variants = [v + suffix for _, v in variants[i:]]
+                log("resolve_cdnm: {} timed out, handing {} link(s) to the player unchecked".format(
+                    lbl, len(variants) - i))
                 return u + suffix
             log("resolve_cdnm: {} did not answer, trying the next quality".format(lbl))
         return None
