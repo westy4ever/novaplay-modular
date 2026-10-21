@@ -512,7 +512,22 @@ class NovaPlayHub(Screen):
         self.session.openWithCallback(self._back, NovaPlayHome, start=start)
 
     def _openSite(self, key):
-        self._openHome(("site", key))
+        members = get_family_members(key)
+        if len(members) > 1:
+            from plugin_util import _site_label, _site_tagline
+
+            def _picked(ans):
+                if ans:
+                    self._openSiteScreen(ans[1])
+            self.session.openWithCallback(_picked, ChoiceBox, title=u"Choose a site",
+                                          list=[(u"{}  —  {}".format(_site_label(m), _site_tagline(m))[:90], m)
+                                                for m in members])
+            return
+        self._openSiteScreen(key)
+
+    def _openSiteScreen(self, key):
+        from plugin_screen_site import NovaPlaySite
+        self.session.openWithCallback(self._back, NovaPlaySite, key)
 
     def _openItem(self, item):
         from plugin_screen_detail import NovaPlayDetail
@@ -524,15 +539,32 @@ class NovaPlayHub(Screen):
             self._zone = "cont" if self._cont else "sites"
             self._paint()
         elif key == "search":
-            self._openHome(("search",))
+            from plugin_screen_search import NovaPlaySearch
+            self.session.openWithCallback(self._onQuery, NovaPlaySearch, current_site="",
+                                          default_scope="all", query=getattr(self, "_last_query", ""))
         elif key in ("favorites", "history"):
-            self._openHome(("library", key))
+            from plugin_screen_site import NovaPlaySite
+            items = _favorite_items() if key == "favorites" else _history_items()
+            self.session.openWithCallback(self._back, NovaPlaySite, None,
+                                          title="Favorites" if key == "favorites" else "History",
+                                          items=[dict(i) for i in (items or [])])
         elif key == "downloads":
             from plugin_screen_downloads import NovaPlayDownloads
             self.session.openWithCallback(self._back, NovaPlayDownloads)
         elif key == "settings":
             from plugin_screen_settings import NovaPlaySettings
             self.session.openWithCallback(self._afterSettings, NovaPlaySettings, None)
+
+    def _onQuery(self, result=None):
+        if not result:
+            return
+        query, scope = (result, "all") if isinstance(result, str) else (result[0], result[1] if len(result) > 1 else "all")
+        if not query:
+            return
+        self._last_query = query
+        from plugin_screen_site import NovaPlaySite, search_items
+        self.session.openWithCallback(self._back, NovaPlaySite, None, title=u"Search: {}".format(query),
+                                      loader=lambda: search_items(query, scope or "all"))
 
     def _afterSettings(self, *args):
         if _get_config("home_style", "panel") == "classic":
