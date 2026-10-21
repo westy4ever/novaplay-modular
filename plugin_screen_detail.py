@@ -861,6 +861,21 @@ class NovaPlayDetail(Screen):
         finally:
             _wt.cancel()
 
+    def _backToServers(self, server=None):
+        """Quality list -> server list, keeping the cursor on `server`."""
+        if not self._quality_choices:
+            return
+        self._quality_choices = []
+        try:
+            self["section"].setText(_single_line_text("السيرفرات المتاحة: {}  |  اختر الجودة أو السيرفر".format(len(self._servers)), width=90))
+            self._setMenu([self._format_server_item(s) for s in self._servers])
+            self["status"].setText(self._status_hint("اختار سيرفر — OK"))
+            if server is not None and server in self._servers:
+                self["menu"].instance.moveSelectionTo(self._servers.index(server))
+                self._updateMenuAccent()
+        except Exception as e:
+            my_log("back to servers: {}".format(e))
+
     def _onCancel(self):
         if self._quality_choices:
             self._quality_choices = []
@@ -1784,6 +1799,9 @@ class NovaPlayDetail(Screen):
             if 0 <= idx < len(self._quality_choices):
                 choice = self._quality_choices[idx]
                 self._last_quality_selection = choice
+                # the panel made the choice: put the server list back (on the
+                # same server) so the old quality list isn't there after the film
+                self._backToServers(choice.get("server") or server)
                 self._onStreamFound(choice["url"], choice["label"], choice["final_ref"], choice["server"])
         elif col == "server" and 0 <= idx < len(self._servers):
             other = self._servers[idx]

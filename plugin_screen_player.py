@@ -441,7 +441,7 @@ class NovaPlaySimplePlayer(Screen):
                     "studioPreviewBg","studioPreview")
     _STUDIO_TABS = ("studioTab0","studioTab1","studioTab2","studioTab3")
     _STUDIO_SLOTS_X = (60, 425, 790, 1155, 1520)
-    # [studio-ui] settings grouped into 4 tabs (CH+/CH- or 1-4 switch tabs)
+    # [studio-ui] settings grouped into 4 tabs (1-4 switch tabs)
     _STUDIO_GROUPS = (
         (u"TEXT · النص", ("size", "font", "color", "spacing", "autowrap")),
         (u"LOOK · الشكل", ("outline", "ocolor", "bg", "bg_alpha")),
@@ -561,7 +561,7 @@ class NovaPlaySimplePlayer(Screen):
         self["studioAccent"] = Label("")
         self["studioTitle"] = Label("Subtitle Studio")
         self["studioStatus"] = Label("")
-        self["studioHelp"] = Label(u"◀ ▶ setting   ▲ ▼ change   CH+ / CH− or 1-4 tab   OK menu   EXIT close")
+        self["studioHelp"] = Label(u"◀ ▶ setting   ▲ ▼ change   1 2 3 4 tab   OK menu   EXIT close")
         for _i in range(4):
             self["studioTab%d" % _i] = Label("")
         for c in self._STUDIO_CARDS:
@@ -820,18 +820,8 @@ class NovaPlaySimplePlayer(Screen):
             "mainMenu":         self._playerMenu,
             "info":             self.__streamInfo,
         }, -1)
-        # [studio-ui] CH+ / CH- switch the studio tabs (ignored otherwise)
-        try:
-            # only the channel-key action names: "switchChannelUp/Down" are
-            # the arrow keys in some keymaps and must not be taken here
-            self["studioChActions"] = ActionMap(["InfobarChannelSelection", "ChannelSelectBaseActions"], {
-                "zapDown": lambda: self._studioChKey(+1),
-                "zapUp": lambda: self._studioChKey(-1),
-                "nextBouquet": lambda: self._studioChKey(+1),
-                "prevBouquet": lambda: self._studioChKey(-1),
-            }, -1)
-        except Exception as e:
-            my_log("studio CH keys: {}".format(e))
+        # [studio-ui] no CH+/CH- binding: in many keymaps ◀ ▶ also send the
+        # zap actions, which made one press move a setting AND switch tab.
         eventmap = {
             iPlayableService.evTuneFailed: self.__onFailed,
             iPlayableService.evEOF: self.__onEOF,
@@ -3178,12 +3168,9 @@ class NovaPlaySimplePlayer(Screen):
             return []
 
     def _menuPictureItems(self):
-        extra = getattr(self, "_pic_extra", None)
-        cur = -1 if extra is not None else getattr(self, "_aspect_idx", 0)
-        rows = [(lbl, i == cur, True) for i, (lbl, _bar) in enumerate(self._ASPECT_MODES)]
-        self._pic_extra_list = self._picExtras()
-        rows += [(lbl, extra == j, True) for j, (lbl, _k, _v) in enumerate(self._pic_extra_list)]
-        # brightness / contrast / colour: "+" and "−" rows (OK repeats)
+        """Picture column: brightness / contrast / colour (+ reset) only --
+        the aspect / zoom modes did nothing on the box and were removed."""
+        rows = []
         self._pic_pep_rows = []
         try:
             import novaplay_picture as NP
@@ -3197,6 +3184,8 @@ class NovaPlaySimplePlayer(Screen):
                 self._pic_pep_rows.append((None, 0))
         except Exception as e:
             my_log("picture pep: {}".format(e))
+        if not rows:
+            rows = [(u"Not supported by this box", False)]
         return rows
 
     def _applyPep(self, j):
@@ -3260,25 +3249,12 @@ class NovaPlaySimplePlayer(Screen):
     def _menuLive(self, col, idx):
         msg = u""
         if col == "picture":
-            n = len(self._ASPECT_MODES)
-            n_extra = len(getattr(self, "_pic_extra_list", []) or [])
-            if idx >= n + n_extra and idx - n - n_extra < len(getattr(self, "_pic_pep_rows", []) or []):
-                msg = self._applyPep(idx - n - n_extra)
+            if idx < len(getattr(self, "_pic_pep_rows", []) or []):
+                msg = self._applyPep(idx)
                 try:
                     self["status"].setText(msg)
                 except Exception:
                     pass
-            elif idx >= n and idx - n < n_extra:
-                msg = self._applyPictureExtra(idx - n)
-                try:
-                    self["status"].setText(msg)
-                except Exception:
-                    pass
-            else:
-                self._pic_extra = None
-                self._aspect_idx = idx
-                self._applyAspectMode()
-                msg = u"Picture: {}".format(self._ASPECT_MODES[idx][0])
         elif col == "timer" and idx < len(self._SLEEP_STEPS):
             self.__sleepPicked((u"", self._SLEEP_STEPS[idx]))
             msg = u"Sleep: {}".format(self._sleepLabel())
