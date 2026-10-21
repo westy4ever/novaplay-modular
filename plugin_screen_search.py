@@ -31,7 +31,7 @@ class NovaPlaySearch(Screen):
         <widget name="title" position="146,30" size="1100,52" font="Bold;40" foregroundColor="#F2C230" transparent="1" zPosition="3" />
         <widget name="subtitle" position="146,86" size="1500,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
 
-        <eLabel position="40,150" size="1840,124" backgroundColor="#F2C230" cornerRadius="16" zPosition="2" />
+        <eLabel position="40,150" size="1840,124" backgroundColor="#F2C230" cornerRadius="16" zPosition="1" />
         <widget name="query_box" position="43,153" size="1834,118" backgroundColor="#161C26" cornerRadius="14" zPosition="2" />
         <widget name="query_label" position="74,166" size="400,28" font="Regular;20" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
         <widget name="query" position="74,198" size="1770,60" font="Bold;36" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />

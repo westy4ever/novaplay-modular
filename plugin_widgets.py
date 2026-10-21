@@ -127,7 +127,7 @@ class StreamList(GUIComponent):
         nx = 8 + box_w + 18
         nw = max(120, W - nx - badge_w - right_w - 40)
         row.append(MultiContentEntryText(pos=(nx, 0), size=(nw, H), font=1,
-                                         flags=(RT_HALIGN_RIGHT if _has_arabic(filename) else RT_HALIGN_LEFT) | RT_VALIGN_CENTER,
+                                         flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
                                          text=filename, color="#F0F6FC", color_sel="#F2C230"))
         return row
 

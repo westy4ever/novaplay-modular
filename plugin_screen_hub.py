@@ -24,7 +24,7 @@ import time
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
-from Screens.ChoiceBox import ChoiceBox
+from novaplay_choice import NovaChoiceBox as ChoiceBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
@@ -157,6 +157,12 @@ def _skin():
     return "".join(parts)
 
 
+def _norm_title(t):
+    import re as _re
+    t = _re.sub(r"\(?\b(19|20)\d{2}\b\)?", " ", str(t or "").lower())
+    return _re.sub(r"[^0-9a-z\u0600-\u06ff]+", "", t)
+
+
 def _remaining(item):
     pos = int(item.get("last_position_sec") or 0)
     dur = int(item.get("total_duration") or item.get("duration") or item.get("total_seconds") or 0)
@@ -263,7 +269,16 @@ class NovaPlayHub(Screen):
 
     def _reload(self):
         try:
-            self._cont = _continue_items(CONT_N)
+            # one card per title (the same film watched from two sites)
+            seen, self._cont = set(), []
+            for it in _continue_items(CONT_N * 4):
+                k = _norm_title(it.get("title", ""))
+                if k in seen:
+                    continue
+                seen.add(k)
+                self._cont.append(it)
+                if len(self._cont) >= CONT_N:
+                    break
         except Exception:
             self._cont = []
         self._ci = min(self._ci, max(0, len(self._cont) - 1))

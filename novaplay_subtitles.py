@@ -87,7 +87,7 @@ except ImportError:
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
-from Screens.ChoiceBox import ChoiceBox
+from novaplay_choice import NovaChoiceBox as ChoiceBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.MenuList import MenuList

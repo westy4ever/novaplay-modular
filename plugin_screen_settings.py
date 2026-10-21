@@ -24,7 +24,7 @@ import time
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
-from Screens.ChoiceBox import ChoiceBox
+from novaplay_choice import NovaChoiceBox as ChoiceBox
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
@@ -163,6 +163,14 @@ def _read(path):
             return f.read().strip()
     except Exception:
         return ""
+
+
+def _sites_summary():
+    try:
+        from extractors import get_site_names, get_home_sites
+        return u"{} sites  ·  {} on the Home screen".format(len(get_site_names()), len(list(get_home_sites())))
+    except Exception:
+        return u"—"
 
 
 def _system_lines():
@@ -440,8 +448,8 @@ class NovaPlaySettings(Screen):
         blocks = [
             (u"◆  NovaPlay Media Center {}".format(_PLUGIN_VERSION),
              u"Movies, series and anime from many sites in one place,\nwith TMDb posters and plots, subtitles and resume."),
-            (u"◆  Current source",
-             u"{}\n{}".format(_site_label(site) if site else u"—", (_site_tagline(site) if site else u"")[:60])),
+            (u"◆  Current source" if site else u"◆  Sources",
+             u"{}\n{}".format(_site_label(site), _site_tagline(site)[:60]) if site else _sites_summary()),
             (u"◆  Update (PuTTY)",
              u"wget -qO /tmp/install_novaplay.sh https://raw.githubusercontent.com/\n"
              u"westy4ever/novaplay-modular/main/install_novaplay.sh && sh /tmp/install_novaplay.sh"),

@@ -78,8 +78,8 @@ def _skin():
     <screen name="NovaPlaySite" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="{bg}">
         <eLabel position="0,0" size="1920,1080" backgroundColor="{bg}" zPosition="0" />
         <widget name="logo" position="40,40" size="180,64" alphatest="blend" scale="1" zPosition="2" />
-        <widget name="title" position="240,32" size="1100,52" font="Bold;40" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
-        <widget name="subtitle" position="240,86" size="1100,32" font="Regular;22" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="title" position="240,32" size="1100,52" halign="left" font="Bold;40" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="subtitle" position="240,86" size="1100,32" halign="left" font="Regular;22" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="clock_time" position="1380,22" size="500,62" font="Bold;54" halign="right" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="clock_date" position="1280,90" size="600,30" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
 
@@ -88,7 +88,7 @@ def _skin():
         <widget name="catHead" position="68,170" size="300,30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <widget name="catPage" position="68,906" size="300,30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
 
-        <widget name="gridTitle" position="430,148" size="700,58" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="gridTitle" position="430,148" size="700,58" halign="left" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridCount" position="1080,162" size="300,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridMsg" position="430,226" size="950,602" font="Regular;28" halign="center" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
         <widget name="gridMore" position="430,906" size="950,34" font="Regular;22" halign="center" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
@@ -96,7 +96,7 @@ def _skin():
         <eLabel position="1410,150" size="470,810" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
         <widget name="infoBack" position="1430,170" size="430,242" backgroundColor="{card}" cornerRadius="12" zPosition="2" />
         <widget name="infoImg" position="1430,170" size="430,242" alphatest="blend" scale="1" zPosition="3" />
-        <widget name="infoTitle" position="1430,428" size="430,84" font="Bold;32" foregroundColor="{gold}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="infoTitle" position="1430,428" size="430,84" halign="left" font="Bold;32" foregroundColor="{gold}" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <widget name="infoMeta" position="1430,516" size="430,32" font="Regular;22" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <widget name="infoState" position="1430,552" size="430,32" font="Regular;22" foregroundColor="#30C48D" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <widget name="infoPlot" position="1430,596" size="430,346" font="Regular;22" foregroundColor="#B4BCC8" backgroundColor="{panel}" transparent="1" zPosition="3" />
@@ -421,7 +421,7 @@ class NovaPlaySite(Screen):
             self._setPosters(content)
             if getattr(self, "_focus_after", True):
                 self._zone = "posters"
-            self._status("{}  ·  page {}".format(self._cat_name, self._page))
+            self._status(u"Page {}  ·  {}".format(self._page, self._cat_name))
         elif items and any(self._selectable(i) for i in items):
             # a folder of sub-categories: open it in the left panel
             self._levels.append({"title": self._cat_name, "items": items,
@@ -631,7 +631,10 @@ class NovaPlaySite(Screen):
         self["infoTitle"].setText(_wrap_ui_text(title, width=24, max_lines=2, fallback="—"))
         self._paintMeta(it, {})
         self["infoState"].setText(self._stateText(it))
-        self["infoPlot"].setText(_wrap_ui_text(it.get("plot") or "", width=38, max_lines=11, fallback=""))
+        _p = (it.get("plot") or "").strip()
+        if len(_p) < 60 or _p == (self._cat_name or "").strip():
+            _p = ""
+        self["infoPlot"].setText(_wrap_ui_text(_p, width=38, max_lines=11, fallback=""))
         self._paintBackdrop(it)
         self._info_token += 1
         self._infoTimer.start(450, True)
@@ -703,7 +706,8 @@ class NovaPlaySite(Screen):
         if tok != self._info_token or it is not self._info_item:
             return
         self._paintMeta(it, meta)
-        if not it.get("plot") and meta.get("plot"):
+        _own = (it.get("plot") or "").strip()
+        if meta.get("plot") and (len(_own) < 60 or _own == (self._cat_name or "").strip()):
             self["infoPlot"].setText(_wrap_ui_text(meta["plot"], width=38, max_lines=11, fallback=""))
         if meta.get("backdrop_url") and not (it.get("fanart") or it.get("backdrop")):
             it["fanart"] = meta["backdrop_url"]

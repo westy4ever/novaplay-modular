@@ -48,7 +48,7 @@ from urllib.parse import quote, unquote, urlparse
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
-from Screens.ChoiceBox import ChoiceBox
+from novaplay_choice import NovaChoiceBox as ChoiceBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
@@ -325,7 +325,7 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="osd_title"    position="180,868" size="620,38" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="left" />
         <widget name="osd_videinfo" position="820,868" size="400,38" font="Regular;26" foregroundColor="#D1D4D9" transparent="1" zPosition="12" halign="left" />
         <widget name="osd_subinfo" position="1230,870" size="36,34" font="Regular;28" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="center" valign="center" />
-        <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#49E4B9" transparent="1" zPosition="12" halign="right" />
+        <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" />
         <widget name="osd_durtext"  position="1290,866" size="370,42" font="Regular;30" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" valign="center" />
         <!-- [POLISH v1] seek-bar ring, percent chip, playhead marker (enigma2 alpha: 00 = solid, FF = clear) -->
         <widget name="seekFrame" position="178,916" size="1484,10" zPosition="11" backgroundColor="#3A4450" cornerRadius="5" />

@@ -35,7 +35,7 @@ import traceback
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
 from Screens.Console import Console
-from Screens.ChoiceBox import ChoiceBox
+from novaplay_choice import NovaChoiceBox as ChoiceBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
@@ -176,7 +176,7 @@ class NovaPlayDetail(Screen):
         <widget name="section" position="430,152" size="950,48" font="Bold;30" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
         <widget name="menu_box" position="430,210" size="950,750" backgroundColor="#161C26" cornerRadius="14" zPosition="2" />
         <widget name="menu" position="440,222" size="930,720" zPosition="4"
-                scrollbarMode="showOnDemand"
+                scrollbarMode="showNever"
                 enableWrapAround="1"
                 transparent="1"
                 backgroundColor="#161C26"
@@ -1264,7 +1264,7 @@ class NovaPlayDetail(Screen):
             meta = []
             if data.get("year"):    meta.append(data["year"])
             if data.get("rating"):  meta.append("{}/10".format(data["rating"]))
-            if data.get("type"):    meta.append(_TYPE_LABELS.get(data["type"], "Item"))
+            if data.get("type") in _TYPE_LABELS: meta.append(_TYPE_LABELS[data["type"]])
             if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
             if data.get("genres"):  meta.append(data["genres"])
             self["meta"].setText(_single_line_text("{}  |  {}".format(_site_label(self._site), "  ·  ".join(meta)), width=96, fallback=""))

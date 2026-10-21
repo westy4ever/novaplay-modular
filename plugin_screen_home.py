@@ -59,7 +59,7 @@ import time
 
 from Screens.Screen import Screen
 from Screens.MessageBox import MessageBox
-from Screens.ChoiceBox import ChoiceBox                     # [UX-5]
+from novaplay_choice import NovaChoiceBox as ChoiceBox                     # [UX-5]
 from Screens.VirtualKeyBoard import VirtualKeyBoard          # [UX-rename]
 from Components.ActionMap import ActionMap
 from Components.Label import Label
