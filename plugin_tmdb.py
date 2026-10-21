@@ -678,6 +678,10 @@ def _tmdb_search_suggestions(query, limit=8):
             data = _tmdb_request("/search/{}".format(media_kind), {"query": query, "page": 1}) or {}
             for result in data.get("results") or []:
                 title = (result.get("title") or result.get("name") or "").strip()
+                # Arabic-made films / series: the Arabic sites list them by
+                # their original Arabic name, so suggest that one
+                if result.get("original_language") == "ar":
+                    title = (result.get("original_title") or result.get("original_name") or title).strip()
                 if not title:
                     continue
                 norm = _normalize_query(title)
