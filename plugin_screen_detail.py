@@ -788,19 +788,40 @@ class NovaPlayDetail(Screen):
             self._initiateTransmissionDownload(magnet_link, title)
 
     def _initiateTransmissionDownload(self, magnet_link, title):
+        """Transmission on demand (novaplay_transmission): start the daemon
+        with safe settings if needed and add the magnet over RPC. Global
+        speed limits are left as set (the old transmission-remote call
+        passed -d 1000000, which lifted the download cap for everything)."""
         try:
+            from Plugins.Extensions.Transmission.torrmgr import config as tconfig
+            download_path = '%s/transmission' % tconfig.plugins.torreplayer.poster_path.value
+        except Exception:
+            download_path = '/media/hdd/transmission'
+        self["status"].setText("Starting Transmission...")
+        self["status"].show()
+
+        def _worker():
             try:
-                from Plugins.Extensions.Transmission.torrmgr import config as tconfig
-                download_path = '%s/transmission' % tconfig.plugins.torreplayer.poster_path.value
-            except:
-                download_path = '/media/hdd/transmission'
-            rpc_url = 'http://127.0.0.1:9091/transmission/rpc'
-            command = 'transmission-remote %s -a "%s" -w "%s" -d 1000000 -u 100' % (rpc_url, magnet_link, download_path)
-            self["status"].setText("Sending to Transmission...")
-            self.session.open(Console, 'Downloading: %s' % title[:30], [command])
-        except Exception as e:
-            my_log("Transmission download error: {}".format(e))
-            self.session.open(MessageBox, "Failed to send to Transmission.\nIs it installed and running?", MessageBox.TYPE_ERROR, timeout=5)
+                import novaplay_transmission
+                ok, msg = novaplay_transmission.add(magnet_link, download_path)
+            except Exception as e:
+                ok, msg = False, str(e)
+            my_log("Transmission add '{}': {} {}".format(title[:40], ok, msg))
+
+            def _done():
+                if getattr(self, "_closed", False):
+                    return
+                if ok:
+                    self["status"].setText(msg[:80])
+                    self.session.open(MessageBox, "{}\n\nSaved to: {}\nTorrents pause while you watch and Transmission "
+                                      "stops by itself when nothing is left to download.".format(msg[:120], download_path),
+                                      MessageBox.TYPE_INFO, timeout=8)
+                else:
+                    self["status"].setText("Transmission failed")
+                    self.session.open(MessageBox, "Could not send to Transmission.\n{}".format(msg[:160]),
+                                      MessageBox.TYPE_ERROR, timeout=8)
+            callInMainThread(_done)
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _load(self):
         item_snapshot = self._item

@@ -61,6 +61,14 @@ import novaplay_proxy
 from novaplay_proxy import start_proxy, _PROXY_PORT
 import plugin_imagecache
 from plugin_common import my_log
+
+
+def _tr_call(name, *a):
+    try:
+        import novaplay_transmission
+        return getattr(novaplay_transmission, name)(*a)
+    except Exception as e:
+        my_log("transmission {}: {}".format(name, e))
 from plugin_state import (_get_config, _set_config, _get_saved_position,
                           _save_position)
 from plugin_util import SAFE_UA, _single_line_text
@@ -833,6 +841,9 @@ class NovaPlaySimplePlayer(Screen):
         self.onLayoutFinish.append(self.__initOSD)
         self.onLayoutFinish.append(self.__playNext)
         self.onClose.append(self.__stop)
+        # Transmission on demand: torrents pause while something plays (they
+        # share the HDD with playback and swap), resumed after exit.
+        threading.Thread(target=_tr_call, args=("pause_all",), daemon=True).start()
 
     # ── [A3] next-episode delay, from config ────────────────────────────
     def _nextDelaySecs(self):
@@ -2779,6 +2790,7 @@ class NovaPlaySimplePlayer(Screen):
 
     def __stop(self):
         self._closed_flag = True
+        _tr_call("resume_later")
         self.__hideOSD()
         try:
             self._restoreSystemAspect()

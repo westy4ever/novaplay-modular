@@ -55,6 +55,14 @@ except Exception:
 
 
 def main(session, **kwargs):
+    # Transmission on demand: a daemon left running (e.g. started at boot)
+    # with nothing left to download is closed in the background.
+    try:
+        import threading
+        import novaplay_transmission
+        threading.Thread(target=novaplay_transmission.stop_if_idle, daemon=True).start()
+    except Exception:
+        pass
     session.open(NovaPlaySplash)
 
 
