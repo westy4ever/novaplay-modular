@@ -375,16 +375,20 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="subShadow1_7" position="210,916" size="1500,100" font="Regular;38" halign="center" valign="center" foregroundColor="#00000000" backgroundColor="transparent" zPosition="7" transparent="1" />
         <widget name="studioPanel" position="0,36" size="1920,262" zPosition="85" backgroundColor="#0A0E14" transparent="0" />
         <widget name="studioAccent" position="0,36" size="1920,8" zPosition="86" backgroundColor="#00E5FF" transparent="0" />
-        <widget name="studioTitle" position="45,52" size="1145,32" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="87" />
-        <widget name="studioStatus" position="1270,52" size="600,30" font="Regular;24" halign="right" foregroundColor="#8B949E" transparent="1" zPosition="87" />
-        <widget name="studioHelp" position="45,178" size="1830,31" font="Regular;24" halign="center" foregroundColor="#8B949E" transparent="1" zPosition="87" />
-        <widget name="studioCard0" position="60,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioCard1" position="420,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioCard2" position="790,90" size="340,76" font="Regular;24" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#2265C4" transparent="0" cornerRadius="18" zPosition="88" />
-        <widget name="studioCard3" position="1170,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioCard4" position="1530,94" size="330,68" font="Regular;22" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="14" zPosition="87" />
-        <widget name="studioPreviewBg" position="460,212" size="1000,74" zPosition="87" backgroundColor="#171718" transparent="0" cornerRadius="12" />
-        <widget name="studioPreview" position="470,216" size="980,66" font="Regular;30" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="transparent" zPosition="88" transparent="1" />
+        <widget name="studioTitle" position="45,52" size="480,34" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="87" />
+        <widget name="studioTab0" position="560,48" size="210,40" font="Regular;24" halign="center" valign="center" foregroundColor="#8B949E" backgroundColor="#171718" transparent="0" cornerRadius="20" zPosition="87" />
+        <widget name="studioTab1" position="790,48" size="210,40" font="Regular;24" halign="center" valign="center" foregroundColor="#8B949E" backgroundColor="#171718" transparent="0" cornerRadius="20" zPosition="87" />
+        <widget name="studioTab2" position="1020,48" size="210,40" font="Regular;24" halign="center" valign="center" foregroundColor="#8B949E" backgroundColor="#171718" transparent="0" cornerRadius="20" zPosition="87" />
+        <widget name="studioTab3" position="1250,48" size="210,40" font="Regular;24" halign="center" valign="center" foregroundColor="#8B949E" backgroundColor="#171718" transparent="0" cornerRadius="20" zPosition="87" />
+        <widget name="studioStatus" position="1490,54" size="380,32" font="Regular;26" halign="right" foregroundColor="#8B949E" transparent="1" zPosition="87" />
+        <widget name="studioHelp" position="45,252" size="1830,30" font="Regular;22" halign="center" foregroundColor="#8B949E" transparent="1" zPosition="87" />
+        <widget name="studioCard0" position="60,100" size="340,82" font="Regular;26" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="16" zPosition="87" />
+        <widget name="studioCard1" position="425,100" size="340,82" font="Regular;26" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="16" zPosition="87" />
+        <widget name="studioCard2" position="790,100" size="340,82" font="Regular;26" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="16" zPosition="87" />
+        <widget name="studioCard3" position="1155,100" size="340,82" font="Regular;26" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="16" zPosition="87" />
+        <widget name="studioCard4" position="1520,100" size="340,82" font="Regular;26" halign="center" valign="center" foregroundColor="#D0D0D0" backgroundColor="#171718" transparent="0" cornerRadius="16" zPosition="87" />
+        <widget name="studioPreviewBg" position="460,192" size="1000,1" zPosition="86" backgroundColor="#0A0E14" transparent="0" />
+        <widget name="studioPreview" position="45,194" size="1830,50" font="Regular;28" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="transparent" zPosition="88" transparent="1" />
         <widget name="safeTop" position="0,90" size="1920,2" backgroundColor="#00E5FF" zPosition="86" transparent="0" />
         <widget name="safeBottom" position="0,990" size="1920,2" backgroundColor="#00E5FF" zPosition="86" transparent="0" />
         <widget name="safeLeft" position="96,90" size="2,900" backgroundColor="#00E5FF" zPosition="86" transparent="0" />
@@ -433,14 +437,44 @@ class NovaPlaySimplePlayer(Screen):
     _STUDIO_KEYS = ("studioPanel","studioAccent","studioTitle","studioStatus",
                     "studioHelp","studioCard0","studioCard1","studioCard2",
                     "studioCard3","studioCard4",
+                    "studioTab0","studioTab1","studioTab2","studioTab3",
                     "studioPreviewBg","studioPreview")
+    _STUDIO_TABS = ("studioTab0","studioTab1","studioTab2","studioTab3")
+    _STUDIO_SLOTS_X = (60, 425, 790, 1155, 1520)
+    # [studio-ui] settings grouped into 4 tabs (CH+/CH- or 1-4 switch tabs)
+    _STUDIO_GROUPS = (
+        (u"TEXT · النص", ("size", "font", "color", "spacing", "autowrap")),
+        (u"LOOK · الشكل", ("outline", "ocolor", "bg", "bg_alpha")),
+        (u"POSITION · الموضع", ("offset_y", "align", "cuepos")),
+        (u"SYNC · المزامنة", ("delay", "pickline", "presets", "reset", "remove")),
+    )
+    _STUDIO_HINTS = {
+        "size": u"▲ bigger   ▼ smaller",
+        "font": u"OK — choose a font",
+        "color": u"▲ ▼ change the text colour",
+        "spacing": u"▲ ▼ space between the two lines",
+        "autowrap": u"▲ ▼ on / off — split long lines automatically",
+        "outline": u"▲ ▼ on / off — dark edge around the letters",
+        "ocolor": u"▲ ▼ change the edge colour",
+        "bg": u"▲ ▼ on / off — box behind the text",
+        "bg_alpha": u"▲ more see-through   ▼ more solid",
+        "offset_y": u"▲ ▼ move the subtitle up / down",
+        "align": u"▲ ▼ top / bottom / centre of the screen",
+        "cuepos": u"▲ ▼ on / off — use positions written in the subtitle file",
+        "delay": u"▲ +250 ms   ▼ −250 ms   (text too early → +, too late → −)",
+        "pickline": u"OK — pick the line you hear now to sync",
+        "presets": u"OK — save / load styles A, B, C",
+        "reset": u"OK — back to the default style",
+        "remove": u"OK — turn the subtitles off",
+    }
     _STUDIO_CARDS = ("studioCard0","studioCard1","studioCard2","studioCard3","studioCard4")
     _STUDIO_DESIGN_Y = {
         "studioPanel": 36, "studioAccent": 36,
-        "studioTitle": 52, "studioStatus": 52, "studioHelp": 178,
-        "studioCard0": 94, "studioCard1": 94, "studioCard2": 90,
-        "studioCard3": 94, "studioCard4": 94,
-        "studioPreviewBg": 212, "studioPreview": 216,
+        "studioTitle": 52, "studioStatus": 54, "studioHelp": 252,
+        "studioCard0": 100, "studioCard1": 100, "studioCard2": 100,
+        "studioCard3": 100, "studioCard4": 100,
+        "studioTab0": 48, "studioTab1": 48, "studioTab2": 48, "studioTab3": 48,
+        "studioPreviewBg": 192, "studioPreview": 194,
     }
     _STUDIO_SLIDE_PX = 320
 
@@ -527,7 +561,9 @@ class NovaPlaySimplePlayer(Screen):
         self["studioAccent"] = Label("")
         self["studioTitle"] = Label("Subtitle Studio")
         self["studioStatus"] = Label("")
-        self["studioHelp"] = Label("◀ ▶ اختيار   ▲ ▼ تعديل   OK قائمة   EXIT إغلاق")
+        self["studioHelp"] = Label(u"◀ ▶ setting   ▲ ▼ change   CH+ / CH− or 1-4 tab   OK menu   EXIT close")
+        for _i in range(4):
+            self["studioTab%d" % _i] = Label("")
         for c in self._STUDIO_CARDS:
             self[c] = Label("")
         self["studioPreviewBg"] = Label("")
@@ -784,6 +820,18 @@ class NovaPlaySimplePlayer(Screen):
             "mainMenu":         self._playerMenu,
             "info":             self.__streamInfo,
         }, -1)
+        # [studio-ui] CH+ / CH- switch the studio tabs (ignored otherwise)
+        try:
+            # only the channel-key action names: "switchChannelUp/Down" are
+            # the arrow keys in some keymaps and must not be taken here
+            self["studioChActions"] = ActionMap(["InfobarChannelSelection", "ChannelSelectBaseActions"], {
+                "zapDown": lambda: self._studioChKey(+1),
+                "zapUp": lambda: self._studioChKey(-1),
+                "nextBouquet": lambda: self._studioChKey(+1),
+                "prevBouquet": lambda: self._studioChKey(-1),
+            }, -1)
+        except Exception as e:
+            my_log("studio CH keys: {}".format(e))
         eventmap = {
             iPlayableService.evTuneFailed: self.__onFailed,
             iPlayableService.evEOF: self.__onEOF,
@@ -2607,6 +2655,11 @@ class NovaPlaySimplePlayer(Screen):
             my_log("seek error: {}".format(e))
 
     def __seekPct(self, pct):
+        if getattr(self, "_studioOverlayActive", False):
+            # [studio-ui] 1-4 pick a tab while the studio is open
+            if pct in (10, 20, 30, 40):
+                self._studioGroup(pct // 10 - 1)
+            return
         self._cancelSpeed()
         try:
             now = time.time()
@@ -3867,22 +3920,22 @@ class NovaPlaySimplePlayer(Screen):
             _delay_val = int(STUDIO.get_offset() or 0)
         return [
             ("Delay — التأخير", "%+d ms" % _delay_val, "delay", 250),
-            ("Size — الحجم", str(s["size"]), "size", 2),
-            ("Font — الخط", font_lbl, "font", 1),
+            ("Size — الحجم", "%d px" % s["size"], "size", 2),
+            ("Font — الخط", font_lbl + "  ›", "font", 1),
             ("Color — اللون", ["White","Yellow","Gold","Cyan","Red","Green"][s["color_idx"] % 6], "color", 1),
             ("Outline — الحدود", "On" if s["outline"] else "Off", "outline", 1),
             ("Outline color — لون الحدود", ["White","Yellow","Gold","Cyan","Red","Green"][s["outline_color_idx"] % 6], "ocolor", 1),
             ("Background — الخلفية", "On" if s["bg"] else "Off", "bg", 1),
-            ("BG Alpha — الشفافية", str(s["bg_alpha"]), "bg_alpha", 16),
-            ("Position — الموضع", str(s["offset_y"]), "offset_y", 10),
+            ("Opacity — العتامة", "%d%%" % int(round((255 - int(s["bg_alpha"])) * 100 / 255.0)), "bg_alpha", 16),
+            ("Position — الموضع", "%+d px" % int(s["offset_y"]), "offset_y", 10),
             ("Align — المحاذاة", align_lbl, "align", 1),
             ("Spacing — التباعد", str(s["spacing"]), "spacing", 2),
             ("Auto-wrap — التفاف تلقائي", "On" if s.get("auto_wrap", True) else "Off", "autowrap", 1),
             ("Cue position — موضع الملف", "On" if s.get("use_cue_pos", True) else "Off", "cuepos", 1),
-            ("Presets — قوالب", "A / B / C", "presets", 0),
-            ("Pick line to sync — مزامنة بالسطر", "", "pickline", 0),
-            ("Reset — افتراضي", "", "reset", 0),
-            ("Remove — إيقاف", "", "remove", 0),
+            ("Presets — قوالب", "A / B / C  ›", "presets", 0),
+            ("Pick line to sync — مزامنة بالسطر", "OK  ›", "pickline", 0),
+            ("Reset — افتراضي", "OK  ›", "reset", 0),
+            ("Remove — إيقاف", "OK  ›", "remove", 0),
         ]
 
     def _showStudioOverlay(self):
@@ -3936,45 +3989,96 @@ class NovaPlaySimplePlayer(Screen):
             except Exception:
                 pass
 
+    # ── [studio-ui] tabs ────────────────────────────────────────────────
+    def _studioGroupIdx(self, idx=None):
+        idx = self._studioIdx if idx is None else idx
+        try:
+            key = self._studioItems[idx][2]
+        except Exception:
+            return 0
+        for g, (_t, keys) in enumerate(self._STUDIO_GROUPS):
+            if key in keys:
+                return g
+        return 0
+
+    def _studioMembers(self, g):
+        keys = self._STUDIO_GROUPS[g][1]
+        pos = dict((it[2], i) for i, it in enumerate(self._studioItems))
+        return [pos[k] for k in keys if k in pos]
+
+    def _studioGroup(self, g):
+        g %= len(self._STUDIO_GROUPS)
+        members = self._studioMembers(g)
+        if members:
+            self._studioIdx = members[0]
+        self._studioRefresh()
+
     def _studioRefresh(self):
         total = len(self._studioItems)
         if not total:
             return
         idx = max(0, min(self._studioIdx, total - 1))
-        self._studioWin = idx - 2
+        self._studioIdx = idx
+        g = self._studioGroupIdx(idx)
+        members = self._studioMembers(g)
+        # tabs
+        for t, tab in enumerate(self._STUDIO_TABS):
+            try:
+                self[tab].setText(self._STUDIO_GROUPS[t][0])
+                inst = self[tab].instance
+                if inst and parseColor is not None:
+                    inst.setBackgroundColor(parseColor("#2265C4" if t == g else "#171718"))
+                    inst.setForegroundColor(parseColor("#F0F6FC" if t == g else "#8B949E"))
+                    inst.invalidate()
+            except Exception:
+                pass
+        # cards: this tab's settings, centred, the chosen one in blue
+        n = len(members)
+        start = (len(self._STUDIO_CARDS) - n) // 2
+        from novaplay_substudio import STUDIO, _COLORS
         for slot, card in enumerate(self._STUDIO_CARDS):
-            item_i = self._studioWin + slot
-            txt = ""
-            if 0 <= item_i < total:
-                label, value, _k, _s = self._studioItems[item_i]
-                txt = "%s\n%s" % (label, value) if value else label
+            j = slot - start
+            if not (0 <= j < n):
+                try:
+                    self[card].hide()
+                except Exception:
+                    pass
+                continue
+            item_i = members[j]
+            label, value, key, _s = self._studioItems[item_i]
+            sel = item_i == idx
+            txt = u"%s\n%s" % (label, value) if value else label
+            fg = "#F0F6FC" if sel else "#D0D0D0"
+            if key in ("color", "ocolor"):
+                ci = STUDIO.style["color_idx" if key == "color" else "outline_color_idx"] % len(_COLORS)
+                fg = "#" + _COLORS[ci][0][-6:]
             try:
                 self[card].setText(txt)
-                if txt:
-                    self[card].show()
-                else:
-                    self[card].hide()
+                inst = self[card].instance
+                if inst:
+                    pos = inst.position()
+                    inst.move(ePoint(self._STUDIO_SLOTS_X[slot], int(pos.y())))
+                    if parseColor is not None:
+                        inst.setBackgroundColor(parseColor("#2265C4" if sel else "#171718"))
+                        inst.setForegroundColor(parseColor(fg))
+                        inst.invalidate()
+                self[card].show()
             except Exception:
                 pass
         try:
-            self["studioStatus"].setText("بث مباشر للتعديلات")
+            pos_in = members.index(idx) + 1 if idx in members else 1
+            self["studioStatus"].setText(u"%d / %d" % (pos_in, max(1, n)))
+        except Exception:
+            pass
+        cur_key = self._studioItems[idx][2]
+        try:
+            self["studioPreview"].setText(self._STUDIO_HINTS.get(cur_key, u""))
         except Exception:
             pass
         try:
-            from novaplay_substudio import STUDIO
-            body = STUDIO.get_preview()
-            text = body[0] if body else ""
-            if len(body) > 1 and body[1]:
-                text = text + "\n" + body[1][:70]
-            self["studioPreview"].setText(text or "لا توجد ترجمة نشطة")
-            try:
-                self["studioPreview"].instance.setFont(
-                    gFont("Regular", max(22, min(int(STUDIO.style["size"]), 34))))
-            except Exception:
-                pass
+            self["studioPreviewBg"].hide()
         except Exception:
             pass
-        cur_key = self._studioItems[idx][2] if self._studioItems else ""
         show_safe = cur_key in ("offset_y", "align")
         for k in ("safeTop", "safeBottom", "safeLeft", "safeRight"):
             try:
@@ -3985,11 +4089,28 @@ class NovaPlaySimplePlayer(Screen):
             except Exception:
                 pass
 
+    def _studioChKey(self, d):
+        if getattr(self, "_studioOverlayActive", False):
+            self._studioGroup(self._studioGroupIdx() + d)
+
     def _studioMove(self, step):
-        total = len(self._studioItems)
-        if not total:
+        """◀ ▶ inside the current tab; past either end goes to the next /
+        previous tab."""
+        if not self._studioItems:
             return
-        self._studioIdx = max(0, min(self._studioIdx + step, total - 1))
+        g = self._studioGroupIdx()
+        members = self._studioMembers(g)
+        if self._studioIdx not in members:
+            self._studioGroup(g)
+            return
+        j = members.index(self._studioIdx) + step
+        if 0 <= j < len(members):
+            self._studioIdx = members[j]
+        else:
+            ng = (g + (1 if step > 0 else -1)) % len(self._STUDIO_GROUPS)
+            nm = self._studioMembers(ng)
+            if nm:
+                self._studioIdx = nm[0] if step > 0 else nm[-1]
         self._studioRefresh()
 
     def _studioDelayTotal(self):
