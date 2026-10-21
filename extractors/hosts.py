@@ -3019,7 +3019,8 @@ def resolve_vidapi(url, referer=None):
         html = html_module.unescape(html or "")
         codes = list(dict.fromkeys(re.findall(r'vidapi\.xyz/swish\?id=([A-Za-z0-9]+)', html)))
         if not codes:
-            log("resolve_vidapi: no swish player on {} ({} bytes)".format(url[:90], len(html)))
+            log("resolve_vidapi: no swish player on {} ({} bytes): {}".format(
+                url[:90], len(html), re.sub(r"\s+", " ", html[:300])))
         for code in codes:
             emb = "https://vscdn.xyz/e/{}".format(code)
             r = resolve_streamwish(emb) or _streamwish_from_html(_zm_relay_fetch(emb))
@@ -3980,21 +3981,53 @@ def resolve_vidsrc_family(url, referer=None):
 # menu (forbidden_quality) -- every quality carries its own signed link.
 # Series: the decoded value is a PlayerJS JSON playlist (folders of episodes).
 
+_PJS_TRASH = (  # PlayerJS "bk" keys as seen base64'd on cdnmovies (identical in every capture)
+    "d05wMndCVE5jUFJRdlRDMF9DcHhDc3FfOFQxdTlR", "bWQtT2QyRzlSV09nU2E1SG9CU1NiV3JDeUlxUXlZ",
+    "UnlUd3RmMTVfR0xFc1h4bnBVNExqamQwUmVZLVZI", "a3p1T1lRcUJfUVNPTC14ek5fS3oza2tna0hoSGl0",
+    "Ni14UVdNaDdlcnRMcDh0X005aHVVRGsxTTBWcllK")
+
+
+def _pjs_try(t):
+    try:
+        out = base64.b64decode(t + "=" * (-len(t) % 4)).decode("utf-8")
+    except Exception:
+        return ""
+    if "http" in out and all(31 < ord(c) < 127 or c in "\r\n\t" or ord(c) > 159 for c in out):
+        return out
+    return ""
+
+
 def _pjs_decode(enc):
-    """PlayerJS '#2' file: strip the '//'+base64(trash) chunks, base64-decode."""
+    """PlayerJS '#2' file: strip the '//'+base64(trash) chunks, base64-decode.
+    Chunks can be nested (a chunk spliced into the middle of another, seen on
+    series pages), so they are removed innermost-first until none is left."""
     s = (enc or "").strip()
     if s.startswith("#2"):
         s = s[2:]
     elif s.startswith("#"):
         return ""
-    for n in (40, 32, 44, 36, 48, 28):
-        t = re.sub(r'//[A-Za-z0-9+/=]{%d}' % n, "", s)
-        try:
-            out = base64.b64decode(t + "=" * (-len(t) % 4)).decode("utf-8")
-        except Exception:
-            continue
-        if "http" in out and all(31 < ord(c) < 127 or c in "\r\n\t" or ord(c) > 159 for c in out):
-            return out
+    t = s
+    while True:
+        u = t
+        for k in _PJS_TRASH:
+            u = u.replace("//" + k, "")
+        if u == t:
+            break
+        t = u
+    out = _pjs_try(t)
+    if out:
+        return out
+    for n in (40, 32, 44, 36, 48, 28):           # unknown keys: same length, innermost first
+        t = s
+        rx = re.compile(r'//(?:(?!//)[A-Za-z0-9+/=]){%d}' % n)
+        for _ in range(64):
+            u = rx.sub("", t, count=1)
+            if u == t:
+                break
+            t = u
+            out = _pjs_try(t)
+            if out:
+                return out
     return ""
 
 
@@ -4039,6 +4072,11 @@ def _pjs_pick_episode(playlist, season, episode):
     return ""
 
 
+_IFRAME_HDRS = {"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "cross-site", "Upgrade-Insecure-Requests": "1",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+
+
 def resolve_cdnm(url, referer=None):
     try:
         parsed = urlparse(url)
@@ -4047,18 +4085,31 @@ def resolve_cdnm(url, referer=None):
         episode = (q.get("episode") or q.get("e") or [""])[0]
         page_url, page_ref = url, (referer or "https://onlyflix.to/")
         if "cdnm.ink" in parsed.netloc:
-            html, _f = fetch(url, referer=page_ref, timeout=12, max_retries=1)
+            try:
+                html, _f = fetch(url, referer=page_ref, timeout=12, max_retries=1,
+                                 extra_headers=_IFRAME_HDRS)
+            except Exception:
+                html = ""
             m = re.search(r'<iframe[^>]+(?:data-src|src)="(https?://[^"]*cdnmovies[^"]+)"',
                           html or "", re.I)
-            if not m:
-                log("resolve_cdnm: no cdnmovies player on {} ({} bytes)".format(
-                    url[:90], len(html or "")))
-                return None
-            page_url = html_module.unescape(m.group(1))
+            if m:
+                page_url = html_module.unescape(m.group(1))
+            else:
+                # the wrapper is optional: its player URL is fixed apart from the ids
+                tt = re.search(r'(tt\d+)', parsed.path)
+                if not tt:
+                    log("resolve_cdnm: no cdnmovies player on {} ({} bytes)".format(
+                        url[:90], len(html or "")))
+                    return None
+                page_url = "https://ugly-turkey.cdnmovies-stream.online/imdb/{}/iframe?{}translation_id=145&ftp_server_id=5".format(
+                    tt.group(1), "season={}&episode={}&".format(season, episode) if season else "")
+                log("resolve_cdnm: wrapper gave no player ({} bytes), opening {} directly".format(
+                    len(html or ""), page_url[:90]))
             if season and "season=" not in page_url:
                 page_url += "&season={}&episode={}".format(season, episode)
             page_ref = "https://{}/".format(parsed.netloc)
-        html, final = fetch(page_url, referer=page_ref, timeout=12, max_retries=1)
+        html, final = fetch(page_url, referer=page_ref, timeout=12, max_retries=1,
+                            extra_headers=_IFRAME_HDRS)
         m = re.search(r'''\bfile\s*:\s*(['"])(.+?)\1''', html or "", re.S)
         if not m:
             log("resolve_cdnm: no PlayerJS file on {} ({} bytes)".format(

@@ -1467,6 +1467,14 @@ class OnlyFlixExtractor(BaseExtractor):
                         vv = v.get(kk)
                         if isinstance(vv, str):
                             urls.append(vv)
+                    # captured 2026-10-21: {"success":true,"data":{"players":[
+                    #   {"number":1,"url":"https://share.cdnm.ink/embed/imdb/tt..","name":"CDNM"}, ...]}}
+                    pl = v.get("players")
+                    if isinstance(pl, list):
+                        for item in sorted((p for p in pl if isinstance(p, dict)),
+                                           key=lambda p: p.get("number") or 0):
+                            if isinstance(item.get("url"), str):
+                                urls.append(item["url"])
                 elif isinstance(v, list):
                     for item in v:
                         if isinstance(item, dict):

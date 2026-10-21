@@ -610,7 +610,9 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
     # impersonation; the plain urllib path is faster and lighter.
     cf_domains = ("egydead", "wecima", "mycima", "topcinema", "arabseed",
                   "shaheed", "shahid", "fasel", "akwam", "akoam",
-                  "egybestvid")  # [FIX] confirmed directly: plain urllib gets
+                  "egybestvid",
+                  "cdnm.ink", "cdnmovies")  # [2026-10-21] share.cdnm.ink answered the box's urllib with 404, the browser with 200
+                  # [FIX] confirmed directly: plain urllib gets
                   # served a tiny (~38 byte) bot-challenge stub by this CDN's
                   # embed-page host, inconsistently and without tripping
                   # _is_cloudflare_challenge() -- so fetch() treated the stub

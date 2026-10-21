@@ -1866,7 +1866,7 @@ class NovaPlayDetail(Screen):
         # EXIT closes it and leaves the list above on screen.
         try:
             from plugin_player_panel import NovaQualityPanel
-            q_items = [(lbl.split(". ", 1)[-1], False) for (lbl, _a, _b) in quality_labels]
+            q_items = [(str(c["label"]).split(". ", 1)[-1], False) for c in choices]
             s_items = [((sv.get("name") or "Server").split("\n")[0][:46], sv is server)
                        for sv in self._servers]
             self.session.openWithCallback(
