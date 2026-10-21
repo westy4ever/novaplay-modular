@@ -157,16 +157,38 @@ def _single_line_text(text, width=54, fallback=""):
     return _wrap_ui_text(text, width=width, max_lines=1, fallback=fallback)
 
 
-def _search_scope_label(scope):
-    if scope == "all":
-        # Registry-driven: the old hardcoded list had drifted ("Akoam",
-        # 5 of 17 sites). Falls back to a plain label if the registry
-        # is unavailable for any reason.
+def active_search_sites():
+    """Sites "All sources" searches: the registry's search order without
+    sites removed from the Home screen (a removed family tile removes all
+    its members) and without sites currently marked down (red dot)."""
+    try:
+        from extractors import get_search_site_order, get_family_members
+        from plugin_state import _load_state
+        import plugin_health
+    except Exception:
+        return []
+    hidden = set()
+    for k in (_load_state().get("hidden_sites") or []):
         try:
-            from extractors import get_site_names
-            return "All sources ({})".format(len(get_site_names()))
+            hidden.update(get_family_members(k) or [k])
         except Exception:
-            return "All sources"
+            hidden.add(k)
+    out = []
+    for k in get_search_site_order():
+        if k in hidden:
+            continue
+        try:
+            if plugin_health.get(k) == "down":
+                continue
+        except Exception:
+            pass
+        out.append(k)
+    return out
+
+
+def _search_scope_label(scope):
+    if scope in ("all", "", None):
+        return "All sources ({})".format(len(active_search_sites()))
     return "{} only".format(_site_label(scope))
 
 

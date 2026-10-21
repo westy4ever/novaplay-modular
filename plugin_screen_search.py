@@ -154,13 +154,10 @@ class NovaPlaySearch(Screen):
 
     def _scope_keys(self):
         """All sources, this site (if any), then every search site."""
-        try:
-            from extractors import get_search_site_order
-            sites = list(get_search_site_order())
-        except Exception:
-            sites = []
+        from plugin_util import active_search_sites
+        sites = active_search_sites()
         keys = ["all"]
-        if self._current_site and self._current_site in sites:
+        if self._current_site:
             keys.append(self._current_site)
         return keys + [k for k in sites if k != self._current_site]
 
@@ -180,15 +177,10 @@ class NovaPlaySearch(Screen):
 
     def _pick_scope(self):
         """BLUE: choose All sources or any single site."""
-        try:
-            from extractors import get_search_site_order
-            from plugin_util import _site_label
-            sites = list(get_search_site_order())
-        except Exception:
-            sites = []
-            _site_label = str
+        from plugin_util import _site_label, active_search_sites
+        sites = active_search_sites()
         items = [(u"All sources ({})".format(len(sites)), "all")]
-        if self._current_site and self._current_site in sites:
+        if self._current_site:
             items.append((u"{}  (this site)".format(_site_label(self._current_site)), self._current_site))
         items += [(_site_label(k), k) for k in sites if k != self._current_site]
         try:

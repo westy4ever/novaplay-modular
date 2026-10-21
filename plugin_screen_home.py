@@ -2962,7 +2962,8 @@ class NovaPlayHome(Screen):
                 return name, []
 
         items = []
-        sites = list(_SEARCH_SITE_ORDER) if scope in ("all", "", None) else [scope]
+        from plugin_util import active_search_sites
+        sites = active_search_sites() if scope in ("all", "", None) else [scope]
         with ThreadPoolExecutor(max_workers=min(6, len(sites))) as ex:
             futures = [ex.submit(_search_one, name) for name in sites]
             for future in as_completed(futures):

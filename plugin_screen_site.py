@@ -953,7 +953,8 @@ def search_items(query, scope="all"):
             plugin_health.record(name, "down", str(e))
             return []
 
-    sites = list(get_search_site_order()) if scope in ("all", "", None) else [scope]
+    from plugin_util import active_search_sites
+    sites = active_search_sites() if scope in ("all", "", None) else [scope]
     out = []
     with ThreadPoolExecutor(max_workers=max(1, min(6, len(sites)))) as ex:
         for f in as_completed([ex.submit(_one, s) for s in sites]):

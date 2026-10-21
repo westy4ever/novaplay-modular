@@ -576,10 +576,9 @@ def _library_search_suggestions(query="", current_site="", limit=8):
     # [search] with nothing typed only previous searches are suggested, so
     # "Clear history" really empties the list; library titles (favorites /
     # history) are offered once the user types something that matches them
-    for source_name, items, source_rank in ((
-        ("Favorites", _favorite_items(), 0),
-        ("History", _history_items(), 1),
-    ) if q else ()):
+    # [search] suggestions come from previous searches (and TMDb, added by
+    # the search screen) only -- no Favorites / History titles
+    for source_name, items, source_rank in ():
         for item in items or []:
             title = re.sub(r"\s+", " ", item.get("title", "") or "").strip()
             if not title:
