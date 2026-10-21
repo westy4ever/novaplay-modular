@@ -356,16 +356,42 @@ def _capture_previous_service(session):
         return None
 
 
+_restore_timer = [None]
+
+
 def _restore_previous_service(session, previous_service):
+    """[2026-10-21] the TV channel came back with the film's last frame frozen
+    on screen (zapping fixed it). With Fast Channel Change the channel is kept
+    tuned in the background, and asking for it again right away was treated as
+    "already playing", so its picture was never re-attached. Stop the film,
+    then a moment later (the film's player fully shut down) play the channel
+    with forceRestart, the full switch a zap does."""
     if not previous_service: return
     try:
         session.nav.stopService()
     except Exception: pass
+
+    def _play():
+        _restore_timer[0] = None
+        try:
+            try:
+                session.nav.playService(previous_service, forceRestart=True)
+            except TypeError:
+                session.nav.playService(previous_service)
+            my_log("Previous service restored")
+        except Exception as e:
+            my_log("Restore previous service failed: {}".format(e))
+
     try:
-        session.nav.playService(previous_service)
-        my_log("Previous service restored")
-    except Exception as e:
-        my_log("Restore previous service failed: {}".format(e))
+        t = eTimer()
+        try:
+            t.callback.append(_play)
+        except AttributeError:
+            t.timeout.get().append(_play)
+        _restore_timer[0] = t      # keep a reference until it fires
+        t.start(300, True)
+    except Exception:
+        _play()
 
 
 # ─── The player screen ───────────────────────────────────────────────────
