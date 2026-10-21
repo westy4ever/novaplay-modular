@@ -306,6 +306,14 @@ def _upsert_library_item(bucket, entry, limit=100):
                     if not entry.get("_ts"):
                         entry["_ts"] = _old.get("_ts") or 0
                     break
+        # [2026-10-21] the rewrite dropped these, so Continue Watching never
+        # knew the server to resume on (nor the length for its progress bar)
+        for _old in items:
+            if _old.get("url") == key:
+                for _k in ("last_server_url", "last_server_name", "total_duration"):
+                    if _old.get(_k) and not entry.get(_k):
+                        entry[_k] = _old[_k]
+                break
         items = [i for i in items if i.get("url") != key]
         items.insert(0, entry)
         state[bucket] = items[:limit]

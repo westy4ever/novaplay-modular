@@ -2477,7 +2477,8 @@ class NovaPlayHome(Screen):
                 self._applyZoneOffsets()
                 self._hideNavHint()        # [zone-slide-2]
                 if item:
-                    self._openItem(item)
+                    # Continue Watching: straight back to the server it was on
+                    self._openItem(item, resume=True)
                 return
             item = self["home_grid"].getCurrent()
             if not item:
@@ -2982,8 +2983,9 @@ class NovaPlayHome(Screen):
         self._source = "search"
         self._setList(_rank_search_items(items, query))
 
-    def _openItem(self, item):
-        self.session.open(NovaPlayDetail, item=item, site=item.get("_site", self._site), m_type=item.get("type", self._m_type))
+    def _openItem(self, item, resume=False):
+        self.session.open(NovaPlayDetail, item=item, site=item.get("_site", self._site),
+                          m_type=item.get("type", self._m_type), resume=resume)
 
     def _nextPage(self):
         next_url = getattr(self, "_next_page_url", None)

@@ -2193,6 +2193,13 @@ class NovaPlayDetail(Screen):
             _upsert_library_item("history", history_entry, limit=120)
         except Exception as e:
             my_log("_onStreamFound: history write failed (non-fatal): {}".format(e))
+        try:
+            # again after the history write: on a first play the entry didn't
+            # exist yet when it was saved above
+            from plugin_state import _save_last_server
+            _save_last_server(_base_item.get("url", ""), server.get("name", ""), server.get("url", ""))
+        except Exception:
+            pass
 
         title = getattr(self, "_raw_title", None) or re.sub(r"\s+", " ", self["title"].getText()).strip()
 
