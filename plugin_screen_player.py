@@ -1620,6 +1620,27 @@ class NovaPlaySimplePlayer(Screen):
                 return cands
             key = _candidate_pref_key(getattr(self, "_item_url", ""))
             pref = str(_get_config(key, "") or "").strip() if key else ""
+            # [2026-10-21] the remembered method is per SITE, but one site's
+            # servers live on different hosts: TopCinema remembered "5001 direct"
+            # (Streamtape) and used it for VideoTube, whose CDN needs a Referer --
+            # the header-less request hung Enigma2. When this stream comes with
+            # headers, never put a header-less method first; send them first.
+            def _plain(lbl):
+                l = str(lbl)
+                return "headers" not in l and "proxy" not in l
+            needs_headers = any(c and len(c) > 2 and not _plain(c[2]) and "headers" in str(c[2])
+                                for c in cands)
+            if needs_headers:
+                if pref and _plain(pref):
+                    my_log("candidates: not promoting '{}' -- this stream needs its headers".format(pref))
+                    pref = ""
+                # only the "+ headers" ones move up; the proxy keeps its place
+                hdr = [c for c in cands if "headers" in str(c[2]) and "proxy" not in str(c[2])]
+                rest = [c for c in cands if c not in hdr]
+                if hdr and cands[0] not in hdr:
+                    cands[:] = hdr + rest
+                    my_log("candidates: methods with headers first -> {}".format(
+                        ", ".join(str(c[2]) for c in cands[:3])))
             for i, c in enumerate(cands if pref else []):
                 if c and len(c) > 2 and str(c[2]) == pref:
                     if i > 0:
