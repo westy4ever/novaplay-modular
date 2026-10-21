@@ -74,11 +74,11 @@ class NovaPlaySearch(Screen):
         self["suggestions_box"] = Label("")
         self["suggestions_title"] = Label("Quick suggestions")
         self["suggestions"] = MenuList([])
-        self["hint"] = Label("OK  Search / pick    ▲ ▼  Suggestions    ◀ ▶  Scope")
+        self["hint"] = Label("OK  Search / pick    ▲ ▼  Suggestions    EXIT  Back")
         self["key_red"] = Label("Clear")
         self["key_green"] = Label("Search now")
         self["key_yellow"] = Label("Type")
-        self["key_blue"] = Label("Switch scope")
+        self["key_blue"] = Label("Choose sites")
         self._suggestions = []
         self._suggestion_ticket = 0
 
@@ -92,7 +92,7 @@ class NovaPlaySearch(Screen):
             "red": self._clear_query,
             "green": self._submit,
             "yellow": self._edit_query,
-            "blue": self._toggle_scope,
+            "blue": self._pick_scope,
         }, -1)
         self.onLayoutFinish.append(self._init_search)
 
@@ -149,11 +149,38 @@ class NovaPlaySearch(Screen):
         self._refresh_suggestion_list()
 
     def _toggle_scope(self):
-        if not self._current_site:          # opened from Home: all sources only
+        """◀ ▶: flip between all sources and the current site (if any)."""
+        if not self._current_site:
             return
         self._scope = self._current_site if self._scope == "all" else "all"
         self._refresh_suggestions()
         self._refresh()
+
+    def _pick_scope(self):
+        """BLUE: choose All sources or any single site."""
+        try:
+            from extractors import get_search_site_order
+            from plugin_util import _site_label
+            sites = list(get_search_site_order())
+        except Exception:
+            sites = []
+            _site_label = str
+        items = [(u"All sources ({})".format(len(sites)), "all")]
+        if self._current_site and self._current_site in sites:
+            items.append((u"{}  (this site)".format(_site_label(self._current_site)), self._current_site))
+        items += [(_site_label(k), k) for k in sites if k != self._current_site]
+        try:
+            sel = [v for _l, v in items].index(self._scope or "all")
+        except ValueError:
+            sel = 0
+
+        def _picked(choice):
+            if choice:
+                self._scope = choice[1]
+                self._refresh_suggestions()
+                self._refresh()
+        from novaplay_choice import NovaChoiceBox
+        self.session.openWithCallback(_picked, NovaChoiceBox, title=u"Search in…", list=items, selection=sel)
 
     def _clear_query(self):
         self._query = ""

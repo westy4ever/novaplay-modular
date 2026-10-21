@@ -167,7 +167,7 @@ def _search_scope_label(scope):
             return "All sources ({})".format(len(get_site_names()))
         except Exception:
             return "All sources"
-    return "Current source: {}".format(_site_label(scope))
+    return "{} only".format(_site_label(scope))
 
 
 # ─── Search result / list ranking ────────────────────────────────────────────
