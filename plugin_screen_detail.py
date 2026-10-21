@@ -2051,6 +2051,54 @@ class NovaPlayDetail(Screen):
         self._startProgress()          # [detail-progress]
         threading.Thread(target=self._bgExtract, args=(server, token), daemon=True).start()
 
+    def _dropBrokenVariants(self, url):
+        """[2026-10-21] A master playlist can list a broken copy -- TopCinema's
+        VideoTube: 1920x904 at FRAME-RATE=95.948 (a mistimed telesync). The
+        player takes it as the best quality and the box's decoder hangs,
+        freezing Enigma2. Drop qualities above 60 fps; when one is dropped,
+        play the best remaining one directly. Untouched otherwise."""
+        self._bad_variants = set()
+        try:
+            base, frag = (url.split("#", 1) + [""])[:2]
+            if ".m3u8" not in base.lower():
+                return url
+            headers = {}
+            for p in (frag.split("&") if frag else []):
+                if "=" in p:
+                    k, v = p.split("=", 1)
+                    headers[k] = v
+            from extractors.base import fetch
+            text, _final = fetch(base, extra_headers=headers, timeout=8, max_retries=0)
+            if not text or "#EXT-X-STREAM-INF" not in text:
+                return url
+            from urllib.parse import urljoin
+            lines = [l.strip() for l in text.splitlines()]
+            good, bad = [], []
+            for i, line in enumerate(lines):
+                if not line.startswith("#EXT-X-STREAM-INF"):
+                    continue
+                uri = next((l for l in lines[i + 1:] if l and not l.startswith("#")), None)
+                if not uri:
+                    continue
+                m = re.search(r"RESOLUTION=\d+[xX](\d+)", line)
+                f = re.search(r"FRAME-RATE=([\d.]+)", line)
+                h = int(m.group(1)) if m else 0
+                fps = float(f.group(1)) if f else 0.0
+                (bad if fps > 60.5 else good).append((h, fps, urljoin(base, uri)))
+            if not bad:
+                return url
+            self._bad_variants = set(u for _h, _f, u in bad)
+            for h, fps, u in bad:
+                my_log("broken quality dropped: {}p at {:.1f} fps -- {}".format(h, fps, u[-60:]))
+            if not good:
+                return url
+            h, fps, u = max(good, key=lambda g: g[0])
+            my_log("playing {}p ({} broken quality left out)".format(h, len(bad)))
+            return u + ("#" + frag if frag else "")
+        except Exception as e:
+            my_log("variant check error: {} -- playing original URL".format(e))
+            return url
+
     def _applyQualityCap(self, url):
         try:
             cap = str(_get_config("max_quality", "auto") or "auto").strip().lower()
@@ -2179,10 +2227,14 @@ class NovaPlayDetail(Screen):
             header_str = "&".join(["{}={}".format(k, v) for k, v in headers.items()])
             pure_url = main_url.split("|")[0].strip()
             url = pure_url + "#" + header_str if header_str else pure_url
+            url = self._dropBrokenVariants(url)
             url = self._applyQualityCap(url)
 
             if variants is not None:
                 _qv = variants or None
+                _bad = getattr(self, "_bad_variants", set())
+                if _qv and _bad:
+                    _qv = [v for v in _qv if str(v[1]).split("#")[0].split("|")[0] not in _bad] or None
                 if _qv:
                     my_log("quality: passing {} variant(s) to player".format(len(_qv)))
             else:
@@ -2191,6 +2243,9 @@ class NovaPlayDetail(Screen):
                     _qv = get_last_quality_variants() or []
                 except Exception:
                     _qv = []
+                _bad = getattr(self, "_bad_variants", set())
+                if _qv and _bad:
+                    _qv = [v for v in _qv if str(v[1]).split("#")[0].split("|")[0] not in _bad]
                 if _qv:
                     my_log("quality: passing {} variant(s) to player".format(len(_qv)))
                 else:
