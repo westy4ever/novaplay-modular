@@ -1961,9 +1961,9 @@ def resolve_n1mwq(url, referer=None, origin=None, video_id=None):
         pb_headers = {"X-Captcha-Token": captcha_token} if captcha_token else None
         playback_resp = fetch_json(base + "playback", referer=page_referer,
                                     extra_headers=pb_headers)
-        playback = (playback_resp or {}).get("playback")
+        playback = (playback_resp or {}).get("playback") if isinstance(playback_resp, dict) else None
         if not playback:
-            log("n1mwq: no playback payload for {}".format(video_id))
+            log("n1mwq: no playback payload for {}: {}".format(video_id, str(playback_resp)[:400]))
             return None
 
         try:
