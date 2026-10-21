@@ -232,7 +232,7 @@ class NovaPlaySettings(Screen):
         self._items = []
 
         self["title"] = Label("Settings")
-        self["subtitle"] = Label("NovaPlay {}  |  by {}".format(_PLUGIN_VERSION, _get_config("owner", _PLUGIN_OWNER)))
+        self["subtitle"] = Label("NOVA Media Player {}  |  by {}".format(_PLUGIN_VERSION, _get_config("owner", _PLUGIN_OWNER)))
         self["clock_time"] = Label("")
         self["clock_date"] = Label("")
         self["sideEdge"] = Label("")
@@ -449,14 +449,14 @@ class NovaPlaySettings(Screen):
         api_key = (_get_config("tmdb_api_key", "") or "").strip()
         site = self._current_site
         blocks = [
-            (u"◆  NovaPlay Media Center {}".format(_PLUGIN_VERSION),
+            (u"◆  NOVA Media Player {}".format(_PLUGIN_VERSION),
              u"Movies, series and anime from many sites in one place,\nwith TMDb posters and plots, subtitles and resume."),
             (u"◆  Current source" if site else u"◆  Sources",
              u"{}\n{}".format(_site_label(site), _site_tagline(site)[:60]) if site else _sites_summary()),
             (u"◆  Update (PuTTY)",
              u"wget -qO /tmp/install_novaplay.sh https://raw.githubusercontent.com/\n"
              u"westy4ever/novaplay-modular/main/install_novaplay.sh && sh /tmp/install_novaplay.sh"),
-            (u"◆  Note", u"Thank you for using NovaPlay!"),
+            (u"◆  Note", u"Thank you for using NOVA Media Player!"),
             (u"◆  Developer", _get_config("owner", _PLUGIN_OWNER)),
             (u"◆  GitHub", u"github.com/westy4ever/novaplay-modular"),
             (u"◆  TMDb", u"Built-in key" if api_key == _DEFAULT_TMDB_API_KEY else (u"Your key" if api_key else u"Off")),

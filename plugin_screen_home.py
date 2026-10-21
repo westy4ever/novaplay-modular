@@ -146,7 +146,7 @@ def _label_chip_height(is_big=False):
 
 class NovaPlayHome(Screen):
     skin = """
-    <screen name="NovaPlayHome" position="center,center" size="1920,1080" title="NovaPlay Media Center" flags="wfNoBorder" backgroundColor="#0D1117">
+    <screen name="NovaPlayHome" position="center,center" size="1920,1080" title="NOVA Media Player" flags="wfNoBorder" backgroundColor="#0D1117">
         <eLabel position="0,0" size="1920,1080" backgroundColor="#0D1117" zPosition="0" />
         <widget name="staticBackground" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" />
         <widget name="backdropImg" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" scale="1" />
@@ -327,7 +327,7 @@ class NovaPlayHome(Screen):
         self["shade_overlay"] = Label("")
         self._current_backdrop_path = ""
         self["title_bar"]  = Label("")
-        self["title_text"] = Label("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
+        self["title_text"] = Label("NOVA Media Player  v{}".format(_PLUGIN_VERSION))
         self["status"]     = Label("Loading…")
         self["clock_time"]   = Label("")
         self["clock_period"] = Label("")
@@ -969,7 +969,7 @@ class NovaPlayHome(Screen):
         self._page = 1
         self._nav_stack = []
         self._site_pick_origin = None                        # [family-back]
-        self["title_text"].setText("NovaPlay Media Center  v{}".format(_PLUGIN_VERSION))
+        self["title_text"].setText("NOVA Media Player  v{}".format(_PLUGIN_VERSION))
         self["status"].setText("")
 
         raw_sites = list(get_home_sites())

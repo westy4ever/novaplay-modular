@@ -16,7 +16,7 @@ if PLUGIN_PATH not in sys.path:
 from extractors.base import log as _base_log
 
 _PLUGIN_VERSION = "4.1.0"        # bumped: modular build
-_PLUGIN_NAME    = "NovaPlay Media Center"
+_PLUGIN_NAME    = "NOVA Media Player"
 _TYPE_LABELS    = {"movie": "Movie", "series": "Series", "episode": "Episode"}
 
 

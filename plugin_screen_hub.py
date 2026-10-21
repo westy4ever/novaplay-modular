@@ -90,7 +90,7 @@ def _skin():
     <screen name="NovaPlayHub" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="{bg}">
         <eLabel position="0,0" size="1920,1080" backgroundColor="{bg}" zPosition="0" />
         <ePixmap position="40,30" size="84,84" pixmap="{p}/images/plugin.png" alphatest="blend" scale="1" zPosition="2" />
-        <eLabel position="146,30" size="600,52" text="NovaPlay" font="Bold;40" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <eLabel position="146,30" size="600,52" text="NOVA Media Player" font="Bold;40" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="subtitle" position="146,86" size="1100,32" font="Regular;22" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="clock_time" position="1380,18" size="500,62" font="Bold;54" halign="right" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="clock_greg" position="1280,84" size="600,30" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
@@ -189,7 +189,7 @@ class NovaPlayHub(Screen):
         self._cont = []
         self._swept = False
 
-        self["subtitle"] = Label("Version {}  |  Media Center".format(_PLUGIN_VERSION))
+        self["subtitle"] = Label("Version {}  |  Immersive Media Experience".format(_PLUGIN_VERSION))
         self["clock_time"] = Label("")
         self["clock_greg"] = Label("")
         self["clock_hijri"] = Label("")
