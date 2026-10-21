@@ -3009,10 +3009,23 @@ def resolve_vidapi(url, referer=None):
     so its page (and vscdn's, if needed) is read through ZetMoon's relay."""
     try:
         html = ""
-        try:
-            html, _f = fetch(url, referer=referer or "https://zetmoon.live/", timeout=12, max_retries=0)
-        except Exception:
-            html = ""
+        # vidapi.xyz's Apache answers 403 unless the Referer is a site it
+        # serves (the browser got 200 with onlyflix.to; the relay, with no
+        # usable referer, gets the same 403 page) -- try the embedding sites.
+        refs = []
+        for r in (referer, "https://onlyflix.to/", "https://zetmoon.live/"):
+            if r and r not in refs:
+                refs.append(r)
+        for r in refs:
+            try:
+                html, _f = fetch(url, referer=r, timeout=12, max_retries=0,
+                                 extra_headers=_IFRAME_HDRS)
+            except Exception:
+                html = ""
+            if html and "swish" in html:
+                log("resolve_vidapi: page OK with Referer {}".format(r))
+                break
+            log("resolve_vidapi: Referer {} -> {} bytes".format(r, len(html or "")))
         if not html or "swish" not in html:
             log("resolve_vidapi: direct page blocked, using the ZetMoon relay")
             html = _zm_relay_fetch(url)
