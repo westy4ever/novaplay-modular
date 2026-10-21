@@ -528,14 +528,14 @@ class NovaPlayHub(Screen):
     def _openSite(self, key):
         members = get_family_members(key)
         if len(members) > 1:
-            from plugin_util import _site_label, _site_tagline
+            from plugin_screen_family import NovaFamilyPicker
 
-            def _picked(ans):
-                if ans:
-                    self._openSiteScreen(ans[1])
-            self.session.openWithCallback(_picked, ChoiceBox, title=u"Choose a site",
-                                          list=[(u"{}  —  {}".format(_site_label(m), _site_tagline(m))[:90], m)
-                                                for m in members])
+            def _picked(choice):
+                if choice:
+                    self._openSiteScreen(choice)
+                else:
+                    self._back()          # names / order may have changed
+            self.session.openWithCallback(_picked, NovaFamilyPicker, key)
             return
         self._openSiteScreen(key)
 
