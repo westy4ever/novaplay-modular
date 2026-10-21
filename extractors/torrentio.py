@@ -145,7 +145,15 @@ class TorrentioExtractor(BaseExtractor):
         name = re.sub(r'[\r\n\t]+', ' ', name)
         return re.sub(r'\s+', ' ', name).strip()
 
-    def _build_magnet(self, info_hash, name, file_idx=None):
+    _DEFAULT_TRACKERS = (
+        'udp://tracker.opentrackr.org:1337/announce',
+        'udp://open.stealth.si:80/announce',
+        'udp://tracker.torrent.eu.org:451/announce',
+        'udp://exodus.desync.com:6969/announce',
+        'udp://tracker.openbittorrent.com:6969/announce',
+    )
+
+    def _build_magnet(self, info_hash, name, file_idx=None, trackers=None):
         clean_name = self._clean_magnet_name(name)
         xt = 'urn:btih:%s' % info_hash
         params = []
@@ -153,8 +161,13 @@ class TorrentioExtractor(BaseExtractor):
             params.append(('dn', clean_name))
         if file_idx is not None:
             params.append(('ix', str(file_idx)))
-        params.append(('tr', 'udp://tracker.opentrackr.org:1337/announce'))
-        params.append(('tr', 'udp://tracker.openbittorrent.com:6969/announce'))
+        # [2026-10-21] the torrent's own trackers (Torrentio "sources") first,
+        # then a few public ones -- more trackers, peers found sooner
+        seen = set()
+        for tr in list(trackers or []) + list(self._DEFAULT_TRACKERS):
+            if tr and tr not in seen and len(seen) < 20:
+                seen.add(tr)
+                params.append(('tr', tr))
         qs = urllib.parse.urlencode(params) if params else ''
         return 'magnet:?xt=%s%s%s' % (xt, '&' if qs else '', qs)
 
@@ -194,10 +207,19 @@ class TorrentioExtractor(BaseExtractor):
             if not info_hash or len(info_hash) not in (32, 40) or info_hash.lower() in seen:
                 continue
             seen.add(info_hash.lower())
-            title = str(s.get("title") or s.get("name") or "Unknown Source")
+            # [2026-10-21] Torrentio: name "Torrentio\n4k HDR", title (newer
+            # Stremio add-ons: description) "File.mkv\n👤 52 💾 15.3 GB ⚙️ Site",
+            # sources ["tracker:udp://...", "dht:<hash>"]
+            name_line = str(s.get("name") or "")
+            title = str(s.get("title") or s.get("description") or name_line or "Unknown Source")
             file_idx = s.get("fileIdx")
-            magnet = self._build_magnet(info_hash, title, file_idx)
-            quality = self._extract_quality(title)
+            bh = s.get("behaviorHints") or {}
+            fname = (bh.get("filename") if isinstance(bh, dict) else "") or title.split("\n", 1)[0]
+            trackers = [x[len("tracker:"):] for x in (s.get("sources") or [])
+                        if isinstance(x, str) and x.startswith("tracker:")]
+            magnet = self._build_magnet(info_hash, fname, file_idx, trackers)
+            quality = self._extract_quality(title + " " + name_line.replace("\n", " ")
+                                            .replace("4k", "2160p").replace("4K", "2160p"))
             # [PATCH 30d] light up the StreamList size/seeders columns
             seeds_m = re.search(r'👤\s*(\d+)', title)
             size_m = re.search(r'(\d+(?:[.,]\d+)?\s*(?:GB|MB))', title, re.I)
@@ -289,8 +311,10 @@ class TorrentioExtractor(BaseExtractor):
             if not tmdb_id:
                 return None
             imdb_id = _imdb()
+            if not imdb_id:
+                log("Torrentio: TMDb has no IMDb id for {} -- nothing to ask Torrentio".format(url))
             torr_url = "{}/stream/series/{}:{}:{}.json".format(self.main_url, imdb_id, season_num, ep_num)
-            data = fetch_json(torr_url) or {}
+            data = (fetch_json(torr_url) or {}) if imdb_id else {}
             servers = self._parse_streams(data)
             details = self._tmdb_request("/tv/{}/season/{}/episode/{}".format(tmdb_id, season_num, ep_num))
             return {
@@ -307,8 +331,10 @@ class TorrentioExtractor(BaseExtractor):
             if not tmdb_id:
                 return None
             imdb_id = _imdb()
+            if not imdb_id:
+                log("Torrentio: TMDb has no IMDb id for {} -- nothing to ask Torrentio".format(url))
             torr_url = "{}/stream/movie/{}.json".format(self.main_url, imdb_id)
-            data = fetch_json(torr_url) or {}
+            data = (fetch_json(torr_url) or {}) if imdb_id else {}
             servers = self._parse_streams(data)
             details = self._tmdb_request("/movie/{}".format(tmdb_id))
             return {
