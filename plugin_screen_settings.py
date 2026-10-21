@@ -355,11 +355,10 @@ class NovaPlaySettings(Screen):
                 ("downloads", "download", "Downloads", "Open  ›",
                  "Downloads and recordings in progress"),
             ]
-            if _get_config("home_style", "panel") == "classic":
-                # carousel / grid only exists in the classic home's poster view
-                lib.insert(1, ("layout", "grid", "Poster Layout",
-                 "Grid" if _get_config("layout_style", "carousel") == "grid" else "Carousel",
-                 "Carousel or grid view for site posters"))
+            _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
+            lib.insert(1, ("layout", "grid", "Poster Layout",
+                           "Carousel" if _get_config("layout_style", _dflt) == "carousel" else "Grid",
+                           "Grid with info panel, or carousel over a big backdrop (GREEN on a site switches)"))
             return lib
         if sec == "tools":
             return [
@@ -546,7 +545,8 @@ class NovaPlaySettings(Screen):
             _set_config("home_style", "panel" if _get_config("home_style", "panel") == "classic" else "classic")
             self._refresh()
         elif key == "layout":
-            _set_config("layout_style", "carousel" if _get_config("layout_style", "carousel") == "grid" else "grid")
+            _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
+            _set_config("layout_style", "grid" if _get_config("layout_style", _dflt) == "carousel" else "carousel")
             self._refresh()
         elif key == "watchedbw":
             _set_config("watched_poster_bw", not bool(_get_config("watched_poster_bw", False)))
