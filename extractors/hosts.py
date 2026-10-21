@@ -914,9 +914,10 @@ def _with_page_referer(stream, page_url):
     return stream + "|Referer={0}/&Origin={0}".format(origin)
 
 
-def resolve_hanerix_style(url):
+def resolve_hanerix_style(url, referer=None):
     try:
-        html, final = fetch(url, referer=url)
+        # as a frame of the embedding site (see resolve_iframe_chain)
+        html, final = fetch(url, referer=referer or url, extra_headers=_IFRAME_HDRS)
         if not html:
             return None
         result = _hanerix_extract(html)
@@ -930,7 +931,7 @@ def resolve_hanerix_style(url):
         # (e.g. luluvdo.com's landing page embeds luluvido.com).
         iframe_url = _follow_landing_iframe(html, final or url)
         if iframe_url:
-            html2, final2 = fetch(iframe_url, referer=final or url)
+            html2, final2 = fetch(iframe_url, referer=final or url, extra_headers=_IFRAME_HDRS)
             result = _hanerix_extract(html2)
             if result:
                 return _with_page_referer(result, final2 or iframe_url)
@@ -5331,7 +5332,12 @@ def resolve_host(url, referer=None):
 def resolve_iframe_chain(url, referer=None, depth=0, max_depth=8):
     if depth > max_depth:
         return None, ""
-    html, final_url = fetch(url, referer=referer, timeout=8, max_retries=0)
+    # [2026-10-21] load each player page the way a browser loads a frame:
+    # LuluStream (luluvdo.com) handed out a token its CDN 403'd when the page
+    # was fetched plainly, and a working one with these headers + the site as
+    # Referer (box test: 403 -> 200)
+    html, final_url = fetch(url, referer=referer, timeout=8, max_retries=0,
+                            extra_headers=_IFRAME_HDRS)
     if not html:
         return None, ""
     active_url = final_url or url
