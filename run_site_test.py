@@ -229,7 +229,16 @@ def check_stream(stream_url, referer=None):
         h = dict(headers)
         h["Range"] = "bytes=0-{}".format(nbytes - 1)
         import ssl as _ssl     # like NovaPlay: hosts with incomplete certificate chains play
-        resp = urlopen(Request(u, headers=h), timeout=STREAM_TIMEOUT, context=_ssl._create_unverified_context())
+        ctx = _ssl._create_unverified_context()
+        try:
+            resp = urlopen(Request(u, headers=h), timeout=STREAM_TIMEOUT, context=ctx)
+        except Exception as e:
+            # like the playback proxy ([PATCH 105], mxcontent.net): some CDNs
+            # 403 any Range request but serve a plain GET -- retry without it
+            if getattr(e, "code", None) != 403:
+                raise
+            h.pop("Range", None)
+            resp = urlopen(Request(u, headers=h), timeout=STREAM_TIMEOUT, context=ctx)
         try:
             return resp.getcode(), resp.headers.get("Content-Type", ""), resp.read(nbytes), resp.geturl()
         finally:
