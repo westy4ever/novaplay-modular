@@ -2893,7 +2893,10 @@ class NovaPlaySimplePlayer(Screen):
                     if _tot > 0:
                         secs = min(secs, _tot - 5)
                     secs = max(0, secs)
-                    if secs > 30:
+                    _floor = getattr(novaplay_tracker, "_GLOBAL_SAVE_FLOOR", 0)
+                    if 30 < secs < _floor:
+                        my_log("Exit save: kept {}s (resume jump failed, at {}s)".format(_floor, int(secs)))
+                    elif secs > 30:
                         _save_position(self._item_url, secs, force=True)
                         _saved_secs = int(secs)
                         my_log("Exit save: {}s".format(secs))
@@ -2992,7 +2995,9 @@ class NovaPlaySimplePlayer(Screen):
                         actual_pos = int(r[1] // 90000)
                 except Exception: pass
             if actual_pos >= 0:
-                if actual_pos >= max(0, self._resume_pos - 60):
+                # [2026-10-21] "-60" called 10 s a success for a 68 s target;
+                # the tolerance now scales with the target (max 60 s)
+                if actual_pos >= max(0, self._resume_pos - min(60, max(10, self._resume_pos // 3))):
                     with novaplay_tracker._GLOBAL_POS_LOCK:
                         novaplay_tracker._GLOBAL_PLAY_START_POS = actual_pos
                         novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
@@ -3011,6 +3016,9 @@ class NovaPlaySimplePlayer(Screen):
                             novaplay_tracker._GLOBAL_PLAY_START_POS = max(0, int(actual_pos))
                             novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
                             novaplay_tracker._GLOBAL_LAST_SEEK_TARGET = int(actual_pos)
+                            # keep the saved place: until playback really passes it,
+                            # don't overwrite 229 s with 19 s (box 2026-10-21)
+                            novaplay_tracker._GLOBAL_SAVE_FLOOR = int(self._resume_pos)
                         my_log("verifySeek giving up — TRUSTING DEMUXER at {}s (target {}s not reached)".format(
                             actual_pos, self._resume_pos))
             else:

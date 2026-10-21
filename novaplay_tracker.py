@@ -26,6 +26,9 @@ _GLOBAL_PLAY_START_POS = 0
 _GLOBAL_SPEED = 1.0   # [speed] playback rate set from the player's Speed column
 _GLOBAL_LAST_SEEK_TARGET = -1
 _GLOBAL_IS_PAUSED = False
+# [2026-10-21] the saved place a failed resume jump must not overwrite
+# (positions below it are not saved; reset per playback)
+_GLOBAL_SAVE_FLOOR = 0
 
 
 def current_play_secs():
@@ -68,6 +71,8 @@ def _global_pos_tick():
             if secs < 5:
                 my_log("Pos tracker: skipping suspicious pos {}s".format(secs))
                 return
+            if secs < _GLOBAL_SAVE_FLOOR:
+                return
             _save_position(_GLOBAL_POS_ITEM, secs)
             my_log("Pos tracker saved: {}s for {}".format(secs, _GLOBAL_POS_ITEM[:50]))
         except Exception as e:
@@ -89,8 +94,9 @@ def set_play_speed(speed):
 def start_pos_tracker(session, item_url, start_pos=0):
     global _GLOBAL_POS_TIMER, _GLOBAL_POS_SESSION, _GLOBAL_POS_ITEM
     global _GLOBAL_PLAY_START_WALL, _GLOBAL_PLAY_START_POS
-    global _GLOBAL_LAST_SEEK_TARGET, _GLOBAL_IS_PAUSED, _GLOBAL_SPEED
+    global _GLOBAL_LAST_SEEK_TARGET, _GLOBAL_IS_PAUSED, _GLOBAL_SPEED, _GLOBAL_SAVE_FLOOR
     with _GLOBAL_POS_LOCK:
+        _GLOBAL_SAVE_FLOOR = 0
         _GLOBAL_SPEED = 1.0
         _GLOBAL_LAST_SEEK_TARGET = -1
         _GLOBAL_IS_PAUSED       = False
@@ -123,7 +129,7 @@ def stop_pos_tracker():
                     _secs = int(_GLOBAL_PLAY_START_POS)
                 else:
                     _secs = int(_GLOBAL_PLAY_START_POS + (time.time() - _GLOBAL_PLAY_START_WALL))
-                if _secs >= 5:
+                if _secs >= 5 and _secs >= _GLOBAL_SAVE_FLOOR:
                     _save_position(_GLOBAL_POS_ITEM, _secs, force=True)
         except Exception:
             pass

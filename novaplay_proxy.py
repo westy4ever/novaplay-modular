@@ -1012,7 +1012,8 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-            _log("Proxy: {} {}".format(method, stream_url[:120]))
+            _log("Proxy: {} {}{}".format(method, stream_url[:120],
+                                        "  [Range {}]".format(range_hdr) if range_hdr else ""))
             _PROXY_LAST_HIT = time.time()
             # [PATCH 87] no per-request reset: the player resets the counters per candidate
             _PROXY_LAST_URL = stream_url
