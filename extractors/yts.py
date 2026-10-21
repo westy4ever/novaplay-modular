@@ -93,6 +93,9 @@ class YTSExtractor(BaseExtractor):
         # the torrent's own trackers + 5 public ones
         return self._torrentio()._build_magnet(info_hash, name, file_idx, trackers)
 
+    # ask Torrentio only when en.yts.lu's own search finds fewer torrents than this
+    _TORRENTIO_BELOW = 5
+
     def _torrentio(self, cap=40):
         from .torrentio import TorrentioExtractor
         t = getattr(self, "_torrentio_x", None)
@@ -576,8 +579,11 @@ class YTSExtractor(BaseExtractor):
             _title = movie_data.get("title") or movie_data.get("name") or ""
             _year = (movie_data.get("release_date") or "")[:4]
             servers = self._native_yts_torrents(_title, _year, mode="movie")
-            imdb = self._imdb_id(tmdb_id, "movie")
+            # [2026-10-21] YTS is its own site's torrents; Torrentio (a source
+            # of its own in NovaPlay) only fills in when the site finds few
+            imdb = self._imdb_id(tmdb_id, "movie") if len(servers) < self._TORRENTIO_BELOW else ""
             if imdb:
+                log("YTS: site found {} torrent(s), adding Torrentio's".format(len(servers)))
                 seen = set(self._magnet_hash(s["url"]) for s in servers)
                 for s in self._torr_servers(imdb):
                     h = self._magnet_hash(s["url"])
@@ -622,8 +628,9 @@ class YTSExtractor(BaseExtractor):
             _year = (show_data.get("first_air_date") or "")[:4]
             servers = self._native_yts_torrents(
                 _title, _year, mode="tv", season=season_num, episode=ep_num)
-            imdb = self._imdb_id(tmdb_id, "tv")
+            imdb = self._imdb_id(tmdb_id, "tv") if len(servers) < self._TORRENTIO_BELOW else ""
             if imdb:
+                log("YTS: site found {} torrent(s), adding Torrentio's".format(len(servers)))
                 seen = set(self._magnet_hash(s["url"]) for s in servers)
                 for s in self._torr_servers(imdb, int(season_num), int(ep_num)):
                     h = self._magnet_hash(s["url"])
