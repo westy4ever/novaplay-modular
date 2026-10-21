@@ -20,8 +20,10 @@ from Screens.MessageBox import MessageBox
 from Screens.ChoiceBox import ChoiceBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
-from Components.MenuList import MenuList
-from enigma import eTimer
+from Components.GUIComponent import GUIComponent
+from Components.MultiContent import MultiContentEntryText
+from enigma import (eTimer, eListbox, eListboxPythonMultiContent, gFont,
+                    RT_HALIGN_LEFT, RT_HALIGN_CENTER, RT_HALIGN_RIGHT, RT_VALIGN_CENTER)
 
 from plugin_common import PLUGIN_PATH
 from plugin_gridlist import scale_skin_xml
@@ -37,6 +39,73 @@ _STATUS_LABELS = {
 }
 
 
+# [panel 2026-10-21] one card-like row per download: status chip, title,
+# size / percent, a detail line and a progress bar for active downloads
+_CHIP = {
+    "queued": ("Queued", 0x2E3A4D, 0xD6DCE5),
+    "downloading": ("Downloading", 0x5C4A12, 0xF2C230),
+    "done": ("Done", 0x1E6B45, 0xFFFFFF),
+    "error": ("Failed", 0x7A1E24, 0xFFFFFF),
+    "cancelled": ("Cancelled", 0x3A4252, 0xC9D0DA),
+}
+_ROW_H = 92
+_LIST_W = 1804
+
+
+class DownloadList(GUIComponent):
+    GUI_WIDGET = eListbox
+
+    def __init__(self):
+        GUIComponent.__init__(self)
+        self.l = eListboxPythonMultiContent()
+        self.l.setFont(0, gFont("Regular", 27))
+        self.l.setFont(1, gFont("Regular", 21))
+        self.l.setFont(2, gFont("Regular", 19))
+        self.l.setItemHeight(_ROW_H)
+
+    def postWidgetCreate(self, instance):
+        instance.setContent(self.l)
+        instance.setItemHeight(_ROW_H)
+
+    def preWidgetDelete(self, instance):
+        instance.setContent(None)
+
+    def getSelectedIndex(self):
+        return self.l.getCurrentSelectionIndex()
+
+    def moveToIndex(self, i):
+        if self.instance:
+            self.instance.moveSelectionTo(i)
+
+    def setList(self, rows):
+        W = _LIST_W - 20
+        out = []
+        for r in rows:
+            if isinstance(r, str):
+                out.append([r, MultiContentEntryText(pos=(20, 0), size=(W - 40, _ROW_H), font=0,
+                                                     flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER, text=r, color=0xA3ADBB)])
+                continue
+            status, title, right, detail, pct = r
+            label, bg, fg = _CHIP.get(status, (status, 0x2E3A4D, 0xD6DCE5))
+            e = [r,
+                 MultiContentEntryText(pos=(14, 16), size=(160, 34), font=2, flags=RT_HALIGN_CENTER | RT_VALIGN_CENTER,
+                                       text=label, color=fg, color_sel=fg, backcolor=bg, backcolor_sel=bg),
+                 MultiContentEntryText(pos=(196, 10), size=(W - 470, 40), font=0, flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                       text=title, color=0xFFFFFF, color_sel=0xF2C230),
+                 MultiContentEntryText(pos=(W - 260, 10), size=(250, 40), font=1, flags=RT_HALIGN_RIGHT | RT_VALIGN_CENTER,
+                                       text=right, color=0xF2C230 if status == "downloading" else 0xC9D0DA),
+                 MultiContentEntryText(pos=(196, 50), size=(W - 220, 28), font=2, flags=RT_HALIGN_LEFT | RT_VALIGN_CENTER,
+                                       text=detail, color=0xFF8A8A if status == "error" else 0xA3ADBB)]
+            if status == "downloading":
+                bw = W - 220
+                e.append(MultiContentEntryText(pos=(196, 80), size=(bw, 6), font=2, text="", backcolor=0x2A3240, backcolor_sel=0x2A3240))
+                if pct > 0:
+                    e.append(MultiContentEntryText(pos=(196, 80), size=(max(6, int(bw * min(100, pct) / 100.0)), 6), font=2,
+                                                   text="", backcolor=0xF2C230, backcolor_sel=0xF2C230))
+            out.append(e)
+        self.l.setList(out)
+
+
 class NovaPlayDownloads(Screen):
     # [panel 2026-10-21] full-screen, same style as the other screens
     skin = scale_skin_xml("""
@@ -46,7 +115,7 @@ class NovaPlayDownloads(Screen):
         <eLabel position="146,30" size="800,52" text="Downloads" font="Bold;40" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="1" zPosition="2" />
         <widget name="header" position="146,86" size="1700,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
         <eLabel position="40,150" size="1840,810" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
-        <widget name="list" position="58,170" size="1804,700" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;28" itemHeight="58" zPosition="2" />
+        <widget name="list" position="58,170" size="1804,700" scrollbarMode="showOnDemand" backgroundColor="#121822" backgroundColorSelected="#2B3648" transparent="0" zPosition="2" />
         <eLabel position="58,888" size="1804,1" backgroundColor="#2A3240" zPosition="2" />
         <widget name="footer" position="74,900" size="1770,44" font="Regular;22" valign="center" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
         <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
@@ -62,7 +131,7 @@ class NovaPlayDownloads(Screen):
         self.skinName = ["NovaPlayDownloads"]
         self["header"] = Label("Downloads")
         self["footer"] = Label("")
-        self["list"] = MenuList([])
+        self["list"] = DownloadList()
         self["key_red"] = Label("Cancel download")
         self["key_blue"] = Label("Clear finished")
         self["key_exit"] = Label("OK  Options    EXIT  Close")
@@ -107,23 +176,24 @@ class NovaPlayDownloads(Screen):
             self["footer"].setText("Folder: {}".format(plugin_downloads.download_dir()))
 
     def _format_task(self, t):
-        status = _STATUS_LABELS.get(t.status, t.status)
-        title = (t.title or "Untitled")[:60]
+        """-> (status, title, right, detail, percent) for DownloadList."""
+        title = (t.title or "Untitled")[:70]
+        mb = lambda v: v / 1048576.0
         if t.status == "downloading":
             pct = t.progress_pct()
             if pct > 0:
-                size = "{:.1f}/{:.1f} MB".format(t.bytes_done / 1048576.0, t.bytes_total / 1048576.0)
-                return "{}  {}  {:.0f}%  ({})".format(status, title, pct, size)
-            return "{}  {}  {:.1f} MB".format(status, title, t.bytes_done / 1048576.0)
+                return (t.status, title, "{:.0f}%".format(pct),
+                        "{:.1f} / {:.1f} MB".format(mb(t.bytes_done), mb(t.bytes_total)), pct)
+            return (t.status, title, "{:.1f} MB".format(mb(t.bytes_done)), "Starting…", 0)
         if t.status == "done" and t.dest_path:
             try:
-                sz = os.path.getsize(t.dest_path) / 1048576.0
-                return "{}  {}  ({:.1f} MB)".format(status, title, sz)
+                size = "{:.1f} MB".format(os.path.getsize(t.dest_path) / 1048576.0)
             except Exception:
-                return "{}  {}".format(status, title)
-        if t.status == "error" and t.error:
-            return "{}  {}  — {}".format(status, title, t.error[:60])
-        return "{}  {}".format(status, title)
+                size = ""
+            return (t.status, title, size, os.path.basename(t.dest_path), 0)
+        if t.status == "error":
+            return (t.status, title, "", (t.error or "")[:120], 0)
+        return (t.status, title, "", "", 0)
 
     # ── actions ───────────────────────────────────────────────────────
     # [FIX-DL] helpers
