@@ -1777,6 +1777,36 @@ def _n1mwq_leading_zero_bits(words):
     return total
 
 
+def _native_byse_pow(nonce, difficulty, timeout_ms):
+    import os
+    import platform
+    import subprocess
+    arch = platform.machine().lower()
+    name = {"armv7l": "armv7", "armv7": "armv7", "armv8l": "armv7",
+            "aarch64": "aarch64", "arm64": "aarch64"}.get(arch)
+    if not name:
+        return None
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "bin", "byse_pow_" + name)
+    if not os.path.exists(path):
+        return None
+    try:
+        if not os.access(path, os.X_OK):
+            os.chmod(path, 0o755)
+        t0 = time.time()
+        r = subprocess.run([path, str(nonce), str(int(difficulty)), str(int(timeout_ms))],
+                           capture_output=True, text=True, timeout=timeout_ms / 1000.0 + 5)
+        out = (r.stdout or "").strip()
+        if r.returncode == 0 and out.isdigit():
+            log("byse pow (native): difficulty {} -> {} in {:.1f} s".format(
+                difficulty, out, time.time() - t0))
+            return out
+        log("byse pow (native): failed rc={} {}".format(r.returncode, (r.stderr or "").strip()[:80]))
+    except Exception as e:
+        log("byse pow (native) error: {}".format(e))
+    return None
+
+
 def _n1mwq_solve_pow(nonce, difficulty, timeout_ms=20000):
     """Port of `Er()`/`no()` -- brute-forces an integer suffix appended to
     "<nonce>:" until the custom hash's leading-zero-bit count meets
@@ -1785,8 +1815,13 @@ def _n1mwq_solve_pow(nonce, difficulty, timeout_ms=20000):
         return None
     if not difficulty or difficulty <= 0:
         return "0"
-    # [2026-10-21] numpy: ~130x faster (the scalar loop below managed only a
-    # few hundred hashes/s; difficulty 16 needs ~65,000 tries)
+    # [2026-10-21] native solver first (bin/byse_pow_<arch>, static, built from
+    # tools/byse_pow.c): ~480x the scalar loop below, which managed only a few
+    # hundred hashes/s on the box (difficulty 16 needs ~65,000 tries)
+    sol = _native_byse_pow(nonce, difficulty, timeout_ms)
+    if sol is not None:
+        return sol
+    # then numpy (~130x), then the plain-Python loop
     try:
         from . import byse_pow
         return byse_pow.solve(nonce, difficulty, timeout_ms=timeout_ms, log=log)
