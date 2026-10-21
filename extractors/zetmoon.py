@@ -53,8 +53,9 @@ _SERVERS = (
     ("Nest", "https://vidnest.fun/movie/{i}", "https://vidnest.fun/tv/{i}/{s}/{e}"),
     ("MoviesAPI", "https://moviesapi.to/movie/{i}", "https://moviesapi.to/tv/{i}/{s}/{e}"),
     ("Vidplay", "https://vaplayer.ru/embed/movie/{i}", "https://vaplayer.ru/embed/tv/{i}/{s}/{e}"),
-    # Main Player "Zeon": vidapi.xyz -> vscdn.xyz (packed JW player, hls3 .txt playlist)
-    ("Zeon", "https://vidapi.xyz/embed/movie/{i}", "https://vidapi.xyz/embed/tv/{i}/{s}/{e}"),
+    # Main Player "Zeon" (vidapi.xyz -> vscdn.xyz) left out: on 2026-10-21 vidapi.xyz's
+    # Apache answered 403 both to the box and through ZetMoon's relay
+    # (hosts.resolve_vidapi still handles it if that changes).
 )
 
 
