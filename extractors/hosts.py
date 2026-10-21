@@ -3044,7 +3044,18 @@ def _vscdn_pick_link(html, page_url):
             body = None
         if body and "#EXTM3U" in body:
             log("resolve_vidapi: vscdn {} serves the playlist".format(k))
-            return u + "|Referer={}/&Origin={}&User-Agent={}".format(base, base, ua)
+            # hls4 lists its pieces as tiktokcdn "images": proxy only (it strips that)
+            disguised = ("tiktokcdn" in body) or (k == "hls4")
+            if disguised and "EXT-X-STREAM-INF" in body:
+                try:
+                    v = [l for l in body.splitlines() if l.strip() and not l.startswith("#")]
+                    sub, _f = fetch(urljoin(u, v[0]), referer=base + "/", timeout=10,
+                                    max_retries=0, extra_headers=hdrs) if v else ("", "")
+                    disguised = "tiktokcdn" in (sub or "") or ".image" in (sub or "") or k == "hls4"
+                except Exception:
+                    pass
+            return u + "|Referer={}/&Origin={}&User-Agent={}{}".format(
+                base, base, ua, "&X-NP-Proxy=1" if disguised else "")
         log("resolve_vidapi: vscdn {} gave no playlist ({} bytes)".format(k, len(body or "")))
     return None
 

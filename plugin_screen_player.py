@@ -165,6 +165,12 @@ def _build_remote_play_candidates(url):
     seen = set()
     # XOR-obfuscated playlists (extractors/hlsobf.py): only the local proxy can decode them
     xor_key = next((v for k, v in headers.items() if k.lower() == "x-np-xor"), "")
+    # [2026-10-21] a resolver can mark a stream proxy-only (X-NP-Proxy=1): e.g.
+    # vscdn.xyz's hls4 playlist lists its video pieces as tiktokcdn "images" --
+    # only the proxy strips that disguise, and a direct player just spins.
+    proxy_only = any(k.lower() == "x-np-proxy" for k in headers)
+    for _k in [k for k in headers if k.lower() == "x-np-proxy"]:
+        headers.pop(_k, None)
 
     def add_candidate(p_type, svc_url, label, uses_proxy=False):
         key = (p_type, svc_url)
@@ -204,12 +210,13 @@ def _build_remote_play_candidates(url):
             legacy_raw = url.replace("#", "|") if "#" in url else url
             legacy_proxied = "http://127.0.0.1:{}/{}".format(_PROXY_PORT, legacy_raw)
 
-    if xor_key:
+    if xor_key or proxy_only:
+        _tag = "XOR" if xor_key else "proxy only"
         if proxied:
-            add_candidate(4097, proxied, "4097 + proxy HLS (XOR)", True)
-            add_candidate(5001, proxied, "5001 + proxy (XOR)", True)
+            add_candidate(4097, proxied, "4097 + proxy HLS ({})".format(_tag), True)
+            add_candidate(5001, proxied, "5001 + proxy ({})".format(_tag), True)
             if os.path.exists("/usr/bin/exteplayer3"):
-                add_candidate(5002, proxied, "5002 exteplayer3 + proxy (XOR)", True)
+                add_candidate(5002, proxied, "5002 exteplayer3 + proxy ({})".format(_tag), True)
         return candidates
 
     is_hls = any(x in plain_url.lower() for x in (".m3u8", "master.txt", "/hls", "/playlist"))
