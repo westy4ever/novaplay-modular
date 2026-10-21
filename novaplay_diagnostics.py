@@ -157,7 +157,7 @@ class NovaDiagnosticsScreen(Screen):
     <screen name="NovaDiagnosticsScreen" position="center,center" size="1500,860" title="Diagnostics" flags="wfNoBorder">
         <eLabel position="0,0" size="1500,860" backgroundColor="#0D1117" zPosition="0" />
         <eLabel position="0,0" size="1500,80" backgroundColor="#161B22" zPosition="1" />
-        <widget name="header" position="40,18" size="1420,44" font="Regular;32" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
+        <widget name="header" position="40,18" size="1420,44" font="Regular;32" foregroundColor="#F2C230" transparent="1" zPosition="2" />
         <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" zPosition="2" />
         <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="2" />
     </screen>""")

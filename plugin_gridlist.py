@@ -109,15 +109,15 @@ _G_CLR = {
     "surface2":    "#1C2333",
     "surface_dim": "#161B22",   # [UX-20] dim surface for visited tiles
     "border":      "#30363D",
-    "cyan":        "#00E5FF",
+    "cyan":        "#F2C230",
     "text":        "#F0F6FC",
     "text2":       "#8B949E",
-    "gold":        "#FFD740",
+    "gold":        "#F2C230",
     "badge_bg":    "#000000",
 }
 
 # ─── Per-site health dot colors ────────────────────────────────────────────
-_HEALTH_DOT_COLORS = {"ok": "#39D98A", "down": "#F85149", "blocked": "#FFD740"}
+_HEALTH_DOT_COLORS = {"ok": "#39D98A", "down": "#F85149", "blocked": "#F2C230"}
 # [UX-19] dim variant used when the pulse is in its "off" phase
 _HEALTH_DOT_DIM  = {"blocked": "#4A3A00"}
 
@@ -623,13 +623,13 @@ def build_poster_badge_widgets_xml(x0, y0, name_prefix="pbadge"):
         for c in range(POSTER_GRID_COLS):
             px = x0 + c * POSTER_CELL_W + POSTER_CELL_MARGIN_H
             py = y0 + r * POSTER_CELL_H + POSTER_CELL_MARGIN_V
-            parts.append('\n\t\t<widget name="%s_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="%d" />'
+            parts.append('\n\t\t<widget name="%s_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#F2C230" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#0D1117" halign="center" valign="center" cornerRadius="%d" />'
                          % (name_prefix, r, c, px, py + POSTER_H - POSTER_BADGE_H, POSTER_W, POSTER_BADGE_H, _f, _cr))
-            parts.append('\n\t\t<widget name="pbar_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#FFD740" transparent="0" zPosition="4" cornerRadius="2" />'
+            parts.append('\n\t\t<widget name="pbar_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#F2C230" transparent="0" zPosition="4" cornerRadius="2" />'
                          % (r, c, px, py + POSTER_H - POSTER_BADGE_H - sc(12), 0, sc(10)))
             parts.append('\n\t\t<widget name="pyear_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#C0392B" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#F0F6FC" halign="center" valign="center" cornerRadius="%d" />'
                          % (r, c, px + _pad, py + _pad, POSTER_YEAR_W, POSTER_YEAR_H, _f, _cr))
-            parts.append('\n\t\t<widget name="prat_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#000000" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#FFD740" halign="center" valign="center" cornerRadius="%d" />'
+            parts.append('\n\t\t<widget name="prat_%d_%d" position="%d,%d" size="%d,%d" backgroundColor="#000000" transparent="0" zPosition="4" font="Regular;%d" foregroundColor="#F2C230" halign="center" valign="center" cornerRadius="%d" />'
                          % (r, c, px + POSTER_W - POSTER_RATE_W - _pad, py + _pad, POSTER_RATE_W, POSTER_RATE_H, _f, _cr))
     return "".join(parts)
 
@@ -648,14 +648,14 @@ def build_carousel_xml():
     _bf = max(11, sc(18))
     _cr = max(4, sc(12))
     for i in range(7):
-        parts.append('<widget name="cfocus{i}" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="{cr}" zPosition="3" transparent="0" />'.format(i=i, cr=_cr))
-        parts.append('<widget name="cposter{i}" position="0,0" size="1,1" backgroundColor="#161B22" cornerRadius="{cr}" zPosition="4" transparent="0" halign="center" valign="center" font="Regular;{f}" foregroundColor="#00E5FF" />'.format(i=i, cr=_cr, f=_cf))
+        parts.append('<widget name="cfocus{i}" position="0,0" size="1,1" backgroundColor="#F2C230" cornerRadius="{cr}" zPosition="3" transparent="0" />'.format(i=i, cr=_cr))
+        parts.append('<widget name="cposter{i}" position="0,0" size="1,1" backgroundColor="#161B22" cornerRadius="{cr}" zPosition="4" transparent="0" halign="center" valign="center" font="Regular;{f}" foregroundColor="#F2C230" />'.format(i=i, cr=_cr, f=_cf))
         parts.append('<widget name="cposterImg{i}" position="0,0" size="1,1" zPosition="5" alphatest="blend" scale="1" />'.format(i=i))
-        parts.append('<widget name="cfavMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#FFD740" transparent="1" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_cf))
-        parts.append('<widget name="cratingBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#FFD740" backgroundColor="#000000" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
+        parts.append('<widget name="cfavMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#F2C230" transparent="1" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_cf))
+        parts.append('<widget name="cratingBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#F2C230" backgroundColor="#000000" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
         parts.append('<widget name="cyearBadge{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#F0F6FC" backgroundColor="#C0392B" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
-        parts.append('<widget name="clabel{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
-        parts.append('<widget name="cresumeMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#FFD740" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
+        parts.append('<widget name="clabel{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#F2C230" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
+        parts.append('<widget name="cresumeMark{i}" position="0,0" size="1,1" font="Regular;{f}" foregroundColor="#0D1117" backgroundColor="#F2C230" transparent="0" cornerRadius="{cr2}" zPosition="6" halign="center" valign="center" />'.format(i=i, f=_bf, cr2=max(3, sc(8))))
     return "\n".join(parts)
 
 
@@ -676,12 +676,12 @@ def build_continue_row_xml():
     parts = [
         '<widget name="cont_title" '
         'position="0,65" size="1920,30" '
-        'font="Regular;26" foregroundColor="#FFD740" '
+        'font="Regular;26" foregroundColor="#F2C230" '
         'transparent="1" halign="center" zPosition="7" />'
     ]
     parts.append(
         '<widget name="contSel" position="0,0" size="1,1" '
-        'backgroundColor="#00E5FF" cornerRadius="3" '
+        'backgroundColor="#F2C230" cornerRadius="3" '
         'zPosition="6" transparent="0" />'
     )
     _bar_h = sc(6)
@@ -702,13 +702,13 @@ def build_continue_row_xml():
         )
         parts.append(
             '<widget name="contbar%d" position="%d,%d" size="%d,%d" '
-            'backgroundColor="#FFD740" transparent="0" '
+            'backgroundColor="#F2C230" transparent="0" '
             'zPosition="7" cornerRadius="2" />'
             % (i, slot_x + sc(6), _bar_y, 0, _bar_h)
         )
         parts.append(
             '<widget name="contbadge%d" position="%d,%d" size="%d,%d" '
-            'backgroundColor="#FFD740" transparent="0" '
+            'backgroundColor="#F2C230" transparent="0" '
             'zPosition="8" font="Regular;16" foregroundColor="#0D1117" '
             'halign="center" valign="center" cornerRadius="4" />'
             % (i, slot_x, CONT_Y + CONT_H - 26, CONT_W, 26)

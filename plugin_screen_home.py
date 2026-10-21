@@ -152,30 +152,30 @@ class NovaPlayHome(Screen):
         <widget name="backdropImg" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" scale="1" />
         <widget name="shade_overlay" position="0,0" size="1920,1080" backgroundColor="#0D1117" transparency="150" zPosition="2" />
         <widget name="title_bar"  position="0,0"     size="1920,80" backgroundColor="#0D1117" zPosition="6" />
-        <widget name="title_text" position="45,6"    size="600,36"  font="Regular;28" foregroundColor="#00E5FF" transparent="1" zPosition="7" />
+        <widget name="title_text" position="45,6"    size="600,36"  font="Regular;28" foregroundColor="#F2C230" transparent="1" zPosition="7" />
 
         <widget name="clock_time"   position="1440,4"  size="110,34" font="Regular;30" halign="right" valign="center" foregroundColor="#F0F6FC" transparent="1" zPosition="7" />
         <widget name="clock_period" position="1555,10" size="60,26"  font="Regular;18" halign="left"  valign="center" foregroundColor="#8B949E" transparent="1" zPosition="7" />
         <widget name="clock_sep"    position="1625,8"  size="2,34"   backgroundColor="#30363D" zPosition="7" />
         <widget name="clock_greg"   position="1637,4"  size="268,34" font="Regular;20" halign="right" valign="center" foregroundColor="#F0F6FC" transparent="1" zPosition="7" />
-        <widget name="clock_hijri"  position="1637,42" size="268,32" font="Regular;20" halign="right" valign="center" foregroundColor="#FFD740" transparent="1" zPosition="7" />
+        <widget name="clock_hijri"  position="1637,42" size="268,32" font="Regular;20" halign="right" valign="center" foregroundColor="#F2C230" transparent="1" zPosition="7" />
 
-        <widget name="status"     position="660,8"   size="520,30"  font="Regular;22" foregroundColor="#FFD740" transparent="1" halign="right" zPosition="7" />
-        <widget name="content_title" position="40,95"  size="1200,50"  font="Bold;38" foregroundColor="#00E5FF" transparent="1" zPosition="5" halign="left" valign="top" />
-        <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#FFD740" transparent="1" zPosition="5" halign="left" />
+        <widget name="status"     position="660,8"   size="520,30"  font="Regular;22" foregroundColor="#F2C230" transparent="1" halign="right" zPosition="7" />
+        <widget name="content_title" position="40,95"  size="1200,50"  font="Bold;38" foregroundColor="#F2C230" transparent="1" zPosition="5" halign="left" valign="top" />
+        <widget name="info_meta"     position="40,150" size="1200,35"  font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="5" halign="left" />
         <widget name="info_plot"     position="40,190" size="1200,230" font="Regular;22" foregroundColor="#F0F6FC" transparent="1" zPosition="5" halign="left" valign="top" />
-        <widget name="homeSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="2" transparent="0" />
+        <widget name="homeSel" position="0,0" size="1,1" backgroundColor="#F2C230" cornerRadius="3" zPosition="2" transparent="0" />
         <widget name="home_grid" position="20,100" size="1880,860" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {home_grid_pics}
         <widget name="poster_grid" position="50,90" size="1820,864" scrollbarMode="showNever" transparent="1" zPosition="3" />
         <widget name="text_list" position="40,95" size="1840,830" scrollbarMode="showNever" transparent="1" zPosition="3" />
         {poster_grid_pics}
         {poster_badge_xml}
-        <widget name="pgridSel" position="0,0" size="1,1" backgroundColor="#00E5FF" cornerRadius="3" zPosition="5" transparent="0" />
+        <widget name="pgridSel" position="0,0" size="1,1" backgroundColor="#F2C230" cornerRadius="3" zPosition="5" transparent="0" />
         {carousel_xml}
         {continue_xml}
-        <widget name="navHint" position="0,600" size="1920,38" font="Regular;26" foregroundColor="#FFD740" transparent="1" halign="center" valign="center" zPosition="8" />
-        <widget name="catAccent"   position="34,101"   size="6,71"  backgroundColor="#FFD740" zPosition="6" transparent="0" cornerRadius="3" />
+        <widget name="navHint" position="0,600" size="1920,38" font="Regular;26" foregroundColor="#F2C230" transparent="1" halign="center" valign="center" zPosition="8" />
+        <widget name="catAccent"   position="34,101"   size="6,71"  backgroundColor="#F2C230" zPosition="6" transparent="0" cornerRadius="3" />
         <widget name="catScrollUp" position="1884,110" size="32,26" font="Regular;20" foregroundColor="#8B949E" transparent="1" halign="center" valign="center" zPosition="6" />
         <widget name="catScrollDn" position="1884,900" size="32,26" font="Regular;20" foregroundColor="#8B949E" transparent="1" halign="center" valign="center" zPosition="6" />
         <widget name="grid_status_left"  position="40,965"  size="900,32" font="Regular;22" foregroundColor="#8B949E" transparent="1" halign="left" zPosition="7" />
@@ -183,7 +183,7 @@ class NovaPlayHome(Screen):
         <widget name="btn_bar"    position="0,1015"  size="1920,65" backgroundColor="#0D1117" zPosition="6" />
         <widget name="key_red"    position="45,1028" size="420,32" font="Regular;22" foregroundColor="#FF6B6B" transparent="1" halign="center" zPosition="7" />
         <widget name="key_green"  position="510,1028" size="420,32" font="Regular;22" foregroundColor="#39D98A" transparent="1" halign="center" zPosition="7" />
-        <widget name="key_yellow" position="975,1028" size="420,32" font="Regular;22" foregroundColor="#FFD740" transparent="1" halign="center" zPosition="7" />
+        <widget name="key_yellow" position="975,1028" size="420,32" font="Regular;22" foregroundColor="#F2C230" transparent="1" halign="center" zPosition="7" />
         <widget name="key_blue"   position="1440,1028" size="420,32" font="Regular;22" foregroundColor="#58A6FF" transparent="1" halign="center" zPosition="7" />
     </screen>
     """

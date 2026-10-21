@@ -31,7 +31,7 @@ _RH = 50         # row height
 # enigma2 doesn't blend widgets with each other: a widget's pixels REPLACE the
 # panel under it, so a see-through colour punches a hole to the video/TV
 # picture. Every colour here uses the panel's own alpha (1A).
-_FOCUS = "#1A00707F"     # focused column highlight (dark cyan)
+_FOCUS = "#1A5C4A12"     # focused column highlight (dark gold)
 _IDLE = "#1A2D333B"      # remembered row in the other columns (dark grey)
 _HELP = u"◀ ▶ column    ▲ ▼ choose    OK apply    EXIT close"
 
@@ -57,9 +57,9 @@ def _skin(name, cols):
     x0 = cols[0][1] - 30
     x1 = cols[-1][1] + cols[-1][2] + 30
     w = []
-    w.append('<widget name="panelBg" position="{x},100" size="{w},{h}" backgroundColor="#1A0D1117" '
+    w.append('<widget name="panelBg" position="{x},100" size="{w},{h}" backgroundColor="#1A0C1017" '
              'cornerRadius="22" zPosition="1" />'.format(x=x0, w=x1 - x0, h=150 + ROWS * _RH))
-    w.append('<widget name="panelTop" position="{x},100" size="{w},6" backgroundColor="#00E5FF" '
+    w.append('<widget name="panelTop" position="{x},100" size="{w},6" backgroundColor="#F2C230" '
              'zPosition="2" />'.format(x=x0, w=x1 - x0))
     for key, x, wd, _t in cols:
         w.append('<widget name="h_{k}" position="{x},126" size="{w},40" font="Regular;24" '
@@ -210,7 +210,7 @@ class _ColumnPanel(Screen):
             try:
                 if parseColor is not None:
                     self["h_" + key].instance.setForegroundColor(
-                        parseColor("#00E5FF" if key == self._col else "#8B949E"))
+                        parseColor("#F2C230" if key == self._col else "#8B949E"))
             except Exception:
                 pass
 

@@ -1792,10 +1792,10 @@ class NovaOnlineSubsScreen(Screen):
 
     skin = """
     <screen name="NovaOnlineSubsScreen" position="center,center" size="1700,940" title="Online subtitles" flags="wfNoBorder">
-        <eLabel position="0,0" size="1700,940" backgroundColor="#0D1117" zPosition="0" />
-        <eLabel position="0,0" size="1700,90" backgroundColor="#161B22" zPosition="1" />
-        <widget name="header" position="50,20" size="1600,50" font="Regular;38" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
-        <widget name="list" position="40,110" size="1620,720" scrollbarMode="showOnDemand" foregroundColor="#F0F6FC" foregroundColorSelected="#00E5FF" backgroundColor="#161B22" backgroundColorSelected="#21262D" font="Regular;40" itemHeight="60" zPosition="2" />
+        <eLabel position="0,0" size="1700,940" backgroundColor="#0C1017" zPosition="0" />
+        <eLabel position="0,0" size="1700,90" backgroundColor="#121822" zPosition="1" />
+        <widget name="header" position="50,20" size="1600,50" font="Regular;38" foregroundColor="#F2C230" transparent="1" zPosition="2" />
+        <widget name="list" position="40,110" size="1620,720" scrollbarMode="showOnDemand" foregroundColor="#F0F6FC" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;40" itemHeight="60" zPosition="2" />
         <widget name="hint" position="50,860" size="1600,40" font="Regular;28" foregroundColor="#8B949E" transparent="1" zPosition="2" />
     </screen>"""
 
@@ -1939,9 +1939,9 @@ class NovaSubtitleBrowser(Screen):
 
     skin = """
     <screen name="NovaSubtitleBrowser" position="center,center" size="1500,860" title="Select subtitle" flags="wfNoBorder">
-        <eLabel position="0,0" size="1500,860" backgroundColor="#0D1117" zPosition="0" />
-        <eLabel position="0,0" size="1500,80" backgroundColor="#161B22" zPosition="1" />
-        <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
+        <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
+        <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
+        <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
         <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" zPosition="2" />
         <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="2" />
     </screen>"""
@@ -2028,9 +2028,9 @@ class NovaFolderBrowser(Screen):
 
     skin = """
     <screen name="NovaFolderBrowser" position="center,center" size="1500,860" title="Select Folder" flags="wfNoBorder">
-        <eLabel position="0,0" size="1500,860" backgroundColor="#0D1117" zPosition="0" />
-        <eLabel position="0,0" size="1500,80" backgroundColor="#161B22" zPosition="1" />
-        <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
+        <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
+        <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
+        <widget name="path" position="40,18" size="1420,44" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
         <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" zPosition="2" />
         <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="2" />
     </screen>"""
@@ -2120,14 +2120,14 @@ class NovaSubtitleSettings(Screen):
 
     skin = """
     <screen name="NovaSubtitleSettings" position="center,center" size="1500,860" title="Subtitle Settings" flags="wfNoBorder">
-        <eLabel position="0,0" size="1500,860" backgroundColor="#0D1117" zPosition="0" />
-        <eLabel position="0,0" size="1500,80" backgroundColor="#161B22" zPosition="1" />
-        <widget name="header" position="40,18" size="1420,44" font="Regular;32" foregroundColor="#00E5FF" transparent="1" zPosition="2" />
+        <eLabel position="0,0" size="1500,860" backgroundColor="#0C1017" zPosition="0" />
+        <eLabel position="0,0" size="1500,80" backgroundColor="#121822" zPosition="1" />
+        <widget name="header" position="40,18" size="1420,44" font="Regular;32" foregroundColor="#F2C230" transparent="1" zPosition="2" />
         <widget name="body" position="40,100" size="1420,660" font="Regular;26" foregroundColor="#F0F6FC" transparent="1" zPosition="2" />
-        <eLabel position="0,790" size="1500,70" backgroundColor="#161B22" zPosition="1" />
+        <eLabel position="0,790" size="1500,70" backgroundColor="#121822" zPosition="1" />
         <widget name="key_red"    position="30,806"  size="350,32" font="Regular;24" foregroundColor="#FF6B6B" transparent="1" halign="center" zPosition="2" />
         <widget name="key_green"  position="390,806" size="350,32" font="Regular;24" foregroundColor="#39D98A" transparent="1" halign="center" zPosition="2" />
-        <widget name="key_yellow" position="750,806" size="350,32" font="Regular;24" foregroundColor="#FFD740" transparent="1" halign="center" zPosition="2" />
+        <widget name="key_yellow" position="750,806" size="350,32" font="Regular;24" foregroundColor="#F2C230" transparent="1" halign="center" zPosition="2" />
         <widget name="key_blue"   position="1110,806" size="360,32" font="Regular;24" foregroundColor="#58A6FF" transparent="1" halign="center" zPosition="2" />
     </screen>"""
 
