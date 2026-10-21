@@ -408,6 +408,25 @@ class NovaPlayDetail(Screen):
     _HDR_W = 1320
     _HDR_BOTTOM = 650
 
+    def _plotTextHeight(self):
+        """Height the plot text needs at its width (36 px a line)."""
+        try:
+            inst = self["plot"].instance
+            if inst:
+                h = int(inst.calculateSize().height())
+                if h > 0:
+                    return min(256, h + 6)
+        except Exception:
+            pass
+        try:
+            t = self["plot"].getText() or ""
+        except Exception:
+            t = ""
+        if not t.strip():
+            return 36
+        lines = sum(max(1, -(-len(par) // 92)) for par in t.split("\n"))
+        return min(256, lines * 36)
+
     def _layoutHeader(self):
         """The skin reserves 2 lines for the title and the details; a one-line
         title left a big gap. Place each block right under the previous one,
@@ -425,10 +444,13 @@ class NovaPlayDetail(Screen):
         pos["meta"] = (y, max(1, ml) * 36)
         y += ml * 36 + (4 if ml else 0)
         pos["source"] = (y, max(1, sl) * 32)
-        # the plot keeps its original place (user preference); only the
-        # title/details/source block is tightened
-        pos["plot_title"] = (355, 30)
-        pos["plot"] = (394, 256)
+        # [plot-low] the plot sits low, ending near the bottom of the
+        # backdrop (616); never higher than its old place (394), so a long
+        # plot keeps all its lines
+        ph = self._plotTextHeight()
+        plot_y = max(394, 616 - ph)
+        pos["plot_title"] = (plot_y - 39, 30)
+        pos["plot"] = (plot_y, max(36, min(256, 650 - plot_y)))
         self._hdr_y = dict((k, v[0]) for k, v in pos.items())
         if getattr(self, "_reveal_running", False):
             # the slide-in places them; just size them now
@@ -1274,6 +1296,10 @@ class NovaPlayDetail(Screen):
         if _ar_count > int(len(_pt[:80]) * 0.3):
             _pt = "\u200f" + _pt
         self["plot"].setText(_pt)
+        try:
+            self._layoutHeader()      # [plot-low] place the plot for its length
+        except Exception as e:
+            my_log("plot layout: {}".format(e))
 
         _title_key = (getattr(self, "_item", None) or {}).get("url", "")
         self._servers = _sort_servers([s for s in data.get("servers", []) if s.get("url")], title_key=_title_key)

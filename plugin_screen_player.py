@@ -2512,16 +2512,14 @@ class NovaPlaySimplePlayer(Screen):
 
     def __navLeftKey(self):
         if self._studioOverlayActive:
-            if not self.__studioDedup(-1):
-                self._studioMove(-1)
+            self._studioMove(-1)
             return
         if not self.__studioDedup(-1):
             self.__seek(-self._stepForHold(-1))
 
     def __navRightKey(self):
         if self._studioOverlayActive:
-            if not self.__studioDedup(+1):
-                self._studioMove(+1)
+            self._studioMove(+1)
             return
         if not self.__studioDedup(+1):
             self.__seek(+self._stepForHold(+1))
@@ -2544,9 +2542,7 @@ class NovaPlaySimplePlayer(Screen):
 
     def __navSeekFwdKey(self):
         if getattr(self, "_studioOverlayActive", False):
-            if not self.__studioDedup(+1):
-                self._studioMove(+1)
-            return
+            return      # ◀ ▶ already arrive as left/right; acting here too skipped a card
         if getattr(self, "_autonext_active", False):
             return
         if not self.__studioDedup(+1):
@@ -2554,9 +2550,7 @@ class NovaPlaySimplePlayer(Screen):
 
     def __navSeekBackKey(self):
         if getattr(self, "_studioOverlayActive", False):
-            if not self.__studioDedup(-1):
-                self._studioMove(-1)
-            return
+            return      # ◀ ▶ already arrive as left/right; acting here too skipped a card
         if getattr(self, "_autonext_active", False):
             return
         if not self.__studioDedup(-1):
@@ -3180,7 +3174,7 @@ class NovaPlaySimplePlayer(Screen):
                 rows.append((u"{} −".format(lbl), False, True))
                 self._pic_pep_rows += [(key, +1), (key, -1)]
             if self._pic_pep_rows:
-                rows.append((u"Reset brightness / colour", False, True))
+                rows.append((u"Reset (normal)", False, True))
                 self._pic_pep_rows.append((None, 0))
         except Exception as e:
             my_log("picture pep: {}".format(e))
@@ -4070,8 +4064,7 @@ class NovaPlaySimplePlayer(Screen):
             self._studioGroup(self._studioGroupIdx() + d)
 
     def _studioMove(self, step):
-        """◀ ▶ inside the current tab; past either end goes to the next /
-        previous tab."""
+        """◀ ▶ inside the current tab."""
         if not self._studioItems:
             return
         g = self._studioGroupIdx()
@@ -4079,14 +4072,9 @@ class NovaPlaySimplePlayer(Screen):
         if self._studioIdx not in members:
             self._studioGroup(g)
             return
-        j = members.index(self._studioIdx) + step
-        if 0 <= j < len(members):
-            self._studioIdx = members[j]
-        else:
-            ng = (g + (1 if step > 0 else -1)) % len(self._STUDIO_GROUPS)
-            nm = self._studioMembers(ng)
-            if nm:
-                self._studioIdx = nm[0] if step > 0 else nm[-1]
+        # stays inside the tab (wraps around); 1-4 change the tab
+        j = (members.index(self._studioIdx) + step) % len(members)
+        self._studioIdx = members[j]
         self._studioRefresh()
 
     def _studioDelayTotal(self):
