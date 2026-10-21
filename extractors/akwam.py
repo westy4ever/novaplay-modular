@@ -29,6 +29,12 @@ except ImportError:
     from urllib import quote, unquote
 
 
+
+def html_module_unescape(t):
+    import html as _h
+    return _h.unescape(t or "")
+
+
 class AkwamExtractor(BaseExtractor):
     """Extractor for Akwam - supports multiple domains"""
 
@@ -546,7 +552,9 @@ class AkwamExtractor(BaseExtractor):
 
         title_match = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html, re.I)
         if title_match:
-            result["title"] = self._clean_title(title_match.group(1))
+            # og:title ends with the site name: "Models vs. Werewolves | اكوام"
+            t = re.sub(r'\s*[|\-–]\s*(?:اكوام|أكوام|akwam)\s*$', '', html_module_unescape(title_match.group(1)), flags=re.I)
+            result["title"] = self._clean_title(t)
 
         poster_match = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html, re.I)
         if poster_match:
