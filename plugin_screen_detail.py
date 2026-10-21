@@ -1681,7 +1681,9 @@ class NovaPlayDetail(Screen):
                 with _ur.urlopen(req, timeout=20) as resp:
                     add_resp = json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
+                my_log("TorrServer: add refused, HTTP {} ({})".format(e.code, ts_url))
                 callInMainThread(self["status"].setText, "TorrServer HTTP Error: {}".format(e.code))
+                callInMainThread(self._stopProgress)
                 return
 
             torrent_hash = add_resp.get("hash")
@@ -1690,8 +1692,17 @@ class NovaPlayDetail(Screen):
                 if m: torrent_hash = m.group(1)
 
             if not torrent_hash:
+                my_log("TorrServer: add gave no hash: {}".format(str(add_resp)[:200]))
                 callInMainThread(self["status"].setText, "TorrServer failed to add torrent.")
+                callInMainThread(self._stopProgress)
                 return
+            my_log("TorrServer: added {} -- waiting for its file list".format(torrent_hash))
+            # [2026-10-21] Torrentio's fileIdx (magnet "ix") names the episode's
+            # file inside a season pack; the largest file is usually ANOTHER episode
+            want_ix = None
+            m_ix = re.search(r'[?&]ix=(\d+)', magnet_link)
+            if m_ix:
+                want_ix = int(m_ix.group(1))
 
             get_url = ts_url + "/torrents"
             get_payload = json.dumps({"action": "get", "hash": torrent_hash}).encode("utf-8")
@@ -1726,6 +1737,19 @@ class NovaPlayDetail(Screen):
                                 my_log("TorrServer: failed to parse nested data field: {}".format(parse_err))
                                 files = []
 
+                    f = None
+                    if files and want_ix is not None:
+                        # TorrServer numbers files from 1, in torrent order
+                        f = next((x for x in files if x.get("id") == want_ix + 1), None)
+                        if f is None and 0 <= want_ix < len(files):
+                            f = files[want_ix]
+                    if f is not None:
+                        if (f.get("path") or "").lower().endswith(video_exts):
+                            file_index = f.get("id", want_ix + 1)
+                            file_path = f.get("path", "stream")
+                            my_log("TorrServer: file {} of {} (from the torrent's file index): {}".format(
+                                want_ix + 1, len(files), file_path[-80:]))
+                            break
                     if files:
                         largest_file = None
                         max_size = 0
@@ -1745,6 +1769,7 @@ class NovaPlayDetail(Screen):
                 callInMainThread(self["status"].setText, "TorrServer: Fetching metadata ({}s)...".format((attempt+1)*2))
                 time.sleep(2)
             else:
+                my_log("TorrServer: no file list after 40 s for {} (no peers yet?)".format(torrent_hash))
                 callInMainThread(self["status"].setText, "TorrServer: Timeout fetching metadata.")
                 callInMainThread(self._stopProgress)      # [detail-progress]
                 return
