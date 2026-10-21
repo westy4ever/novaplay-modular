@@ -76,7 +76,7 @@ class NovaPlaySearch(Screen):
         self["suggestions_box"] = Label("")
         self["suggestions_title"] = Label("Quick suggestions")
         self["suggestions"] = MenuList([])
-        self["hint"] = Label("OK  Search / pick    MENU  Remove one    EXIT  Back")
+        self["hint"] = Label("OK  Search / pick    ◀ ▶  Scope    MENU  Remove one")
         self["key_red"] = Label("Clear")
         self["key_green"] = Label("Search now")
         self["key_yellow"] = Label("Type")
@@ -90,8 +90,8 @@ class NovaPlaySearch(Screen):
             "cancel": self.close,
             "up": self._suggestion_up,
             "down": self._suggestion_down,
-            "left": self._toggle_scope,
-            "right": self._toggle_scope,
+            "left": lambda: self._step_scope(-1),
+            "right": lambda: self._step_scope(1),
             "red": self._clear_query,
             "green": self._submit,
             "yellow": self._edit_query,
@@ -152,13 +152,31 @@ class NovaPlaySearch(Screen):
         self._suggestions = self._suggestions[:10]
         self._refresh_suggestion_list()
 
-    def _toggle_scope(self):
-        """◀ ▶: flip between all sources and the current site (if any)."""
-        if not self._current_site:
-            return
-        self._scope = self._current_site if self._scope == "all" else "all"
+    def _scope_keys(self):
+        """All sources, this site (if any), then every search site."""
+        try:
+            from extractors import get_search_site_order
+            sites = list(get_search_site_order())
+        except Exception:
+            sites = []
+        keys = ["all"]
+        if self._current_site and self._current_site in sites:
+            keys.append(self._current_site)
+        return keys + [k for k in sites if k != self._current_site]
+
+    def _step_scope(self, step):
+        """◀ ▶: previous / next scope (wraps around)."""
+        keys = self._scope_keys()
+        try:
+            i = keys.index(self._scope or "all")
+        except ValueError:
+            i = 0
+        self._scope = keys[(i + step) % len(keys)]
         self._refresh_suggestions()
         self._refresh()
+
+    def _toggle_scope(self):
+        self._step_scope(1)
 
     def _pick_scope(self):
         """BLUE: choose All sources or any single site."""
