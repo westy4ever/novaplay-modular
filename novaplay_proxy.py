@@ -1190,8 +1190,9 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         # [2026-10-19] video pieces disguised as pictures (VidBolt's proxy sends
         # its TS segments as image/jpeg, some CDNs put a real PNG/JPEG header in
         # front): drop everything before the first run of TS sync bytes.
+        # [2026-10-21] VidAPI's CDN labels its pieces "page-N.html" / text/html
         if (method == "GET" and not has_range and status == 200
-                and ctype.startswith("image/")):
+                and (ctype.startswith("image/") or ctype.startswith("text/html"))):
             try:
                 head = pending_head + resp.read(max(0, 65536 - len(pending_head)))
             except Exception:

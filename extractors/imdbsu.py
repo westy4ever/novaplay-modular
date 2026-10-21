@@ -164,7 +164,7 @@ class ImdbSuExtractor(BaseExtractor):
             show_data = self._tmdb_request("/tv/{}".format(tmdb_id))
             imdb_id = show_data.get("imdb_id") or tmdb_id
             servers = [
-                {"name": "IMDB.su", "url": "https://imdb.su/embed/tv/{}/{}/{}".format(imdb_id, season_num, ep_num), "quality": "HD"},
+                {"name": "IMDB.su (VidAPI)", "url": "https://player.imdb.su/embed/tv/{}/{}/{}".format(imdb_id, season_num, ep_num), "quality": "HD"},
             ]
 
             ep_data = self._tmdb_request("/tv/{}/season/{}/episode/{}".format(tmdb_id, season_num, ep_num))
@@ -182,7 +182,7 @@ class ImdbSuExtractor(BaseExtractor):
             movie_data = self._tmdb_request("/movie/{}".format(tmdb_id))
             imdb_id = movie_data.get("imdb_id") or tmdb_id
             servers = [
-                {"name": "IMDB.su", "url": "https://imdb.su/embed/movie/{}".format(imdb_id), "quality": "HD"},
+                {"name": "IMDB.su (VidAPI)", "url": "https://player.imdb.su/embed/movie/{}".format(imdb_id), "quality": "HD"},
             ]
             return {
                 "title": movie_data.get("title") or movie_data.get("name") or "Movie",
@@ -197,6 +197,19 @@ class ImdbSuExtractor(BaseExtractor):
 
     def extract_stream(self, url):
         log("IMDB.su: resolving embed {}".format(url))
+        # [2026-10-21] the real player is player.imdb.su -> nextgencloudfabric
+        # (VidAPI); its stream API is read directly (hosts.resolve_vidapi_player)
+        if "/embed/" in url and ("imdb.su" in url or "nextgencloudfabric" in url):
+            try:
+                from .hosts import resolve_vidapi_player
+                from .base import get_last_quality_variants
+                u = url.replace("://imdb.su/embed/", "://player.imdb.su/embed/")
+                r = resolve_vidapi_player(u)
+                if r:
+                    v = [(lbl, x) for lbl, x in (get_last_quality_variants() or []) if x != r]
+                    return r, "HD", "https://nextgencloudfabric.com/", v
+            except Exception as e:
+                log("IMDB.su: VidAPI resolver failed: {}".format(e))
         html, _ = fetch(url, referer=self.main_url)
         if html:
             stream, label, ref, variants = self._extract_stream_from_html(html, url)

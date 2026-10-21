@@ -3075,6 +3075,76 @@ def _vscdn_pick_link(html, page_url):
     return None
 
 
+# ─── VidAPI player (player.imdb.su -> nextgencloudfabric.com) ─────────────
+# [2026-10-21 capture, imdb.su "Street Fighter 2026"] player.imdb.su/embed/
+# movie/<tt> frames nextgencloudfabric.com/embed/movie/<tt>, whose CONFIG has
+# streamDataApiUrl = https://streamdata.vaplayer.ru/api.php. The player asks
+#   ?imdb=<tt>&type=movie            (or tmdb=<id>)
+#   ?imdb=<tt>&type=tv&season=S&episode=E
+# and gets {"data": {"file_name": ..., "stream_urls": [".../master.m3u8", ...]}}.
+# Referer/Origin https://nextgencloudfabric.com. The pieces are served as
+# "page-N.html" (text/html): play through the proxy, which unwraps them.
+_VAPI = "https://streamdata.vaplayer.ru/api.php"
+_VAPI_ORIGIN = "https://nextgencloudfabric.com"
+
+
+def resolve_vidapi_player(url, referer=None):
+    try:
+        path = urlparse(url).path
+        m = re.search(r'/embed/(movie|tv)/([^/?#]+)(?:/(\d+)/(\d+))?', path)
+        if not m:
+            log("resolve_vidapi_player: no id in {}".format(url[:90]))
+            return None
+        mtype, mid, season, episode = m.groups()
+        q = parse_qs(urlparse(url).query)
+        season = season or (q.get("season") or [""])[0]
+        episode = episode or (q.get("episode") or [""])[0]
+        api = "{}?{}={}".format(_VAPI, "imdb" if mid.startswith("tt") else "tmdb", quote(mid))
+        api += "&type=tv&season={}&episode={}".format(season or 1, episode or 1) if mtype == "tv" else "&type=movie"
+        hdrs = {"Origin": _VAPI_ORIGIN, "User-Agent": _VIDAPI_HDRS["User-Agent"],
+                "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9"}
+        body, _f = fetch(api, referer=_VAPI_ORIGIN + "/", timeout=15, max_retries=1, extra_headers=hdrs)
+        try:
+            data = (json.loads(body or "{}") or {}).get("data") or {}
+        except ValueError:
+            data = {}
+        urls = [u for u in (data.get("stream_urls") or []) if isinstance(u, str) and u.startswith("http")]
+        log("resolve_vidapi_player: {} -> {} link(s) ({})".format(
+            api[len(_VAPI):][:60], len(urls), data.get("file_name") or "no file"))
+        ua = quote(_VIDAPI_HDRS["User-Agent"], safe="")
+        suffix = "|Referer={0}/&Origin={0}&User-Agent={1}&X-NP-Proxy=1".format(_VAPI_ORIGIN, ua)
+        import novaplay_proxy
+        for su in urls:
+            try:
+                mbody, _f = fetch(su, referer=_VAPI_ORIGIN + "/", timeout=12, max_retries=0, extra_headers=hdrs)
+            except Exception:
+                mbody = None
+            if not mbody or "#EXTM3U" not in mbody:
+                log("resolve_vidapi_player: link gave no playlist ({} bytes)".format(len(mbody or "")))
+                continue
+            novaplay_proxy.remember_playlist(su, mbody, su, keep=3 * 3600)
+            variants = _parse_hls_master_variants(su, mbody)
+            if not variants:
+                return su + suffix
+            # each playlist is downloaded ONCE and handed to the proxy (single-use
+            # links were seen on this kind of CDN), best quality first
+            for lbl, vu in variants:
+                try:
+                    vbody, _f = fetch(vu, referer=_VAPI_ORIGIN + "/", timeout=12, max_retries=0, extra_headers=hdrs)
+                except Exception:
+                    vbody = None
+                if vbody and "#EXTM3U" in vbody:
+                    novaplay_proxy.remember_playlist(vu, vbody, vu, keep=3 * 3600)
+                    _quality_tls.variants = [v + suffix for _l, v in variants]
+                    log("resolve_vidapi_player: playing {} ({} quality(ies))".format(lbl, len(variants)))
+                    return vu + suffix
+                log("resolve_vidapi_player: {} gave no playlist".format(lbl))
+        return None
+    except Exception as e:
+        log("resolve_vidapi_player error: {}".format(e))
+        return None
+
+
 def resolve_vidapi(url, referer=None):
     """[2026-10-21] vidapi.xyz/embed/{movie,tv}/<id> (ZetMoon "Zeon"): the page
     keeps its player in <iframe id="iframesrc" data-src=
@@ -4569,6 +4639,8 @@ HOST_RESOLVERS = {
     # ─── OnlyFlix server tabs — vidsrc-family players (2026-09-24) ──────
     "vidfast.vc":   resolve_vidvm_family,
     "vidapi.xyz":   resolve_vidapi,
+    "player.imdb.su":      resolve_vidapi_player,     # 2026-10-21
+    "nextgencloudfabric":  resolve_vidapi_player,
     "vscdn.xyz":    resolve_streamwish,
     "cdnm.ink":     resolve_cdnm,            # share.cdnm.ink → cdnmovies PlayerJS (2026-10-21)
     "cdnmovies-stream": resolve_cdnm,
