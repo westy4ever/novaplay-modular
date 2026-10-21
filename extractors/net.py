@@ -209,6 +209,25 @@ if getattr(_socket.create_connection, "__name__", "") != "_np_create_connection"
     _socket.create_connection = _np_create_connection
 
 
+_cffi_helper_state = {"checked": False, "client": None}
+
+
+def _cffi_helper_client():
+    """NovaPlay's curl_cffi helper process, when in-process impersonation is
+    broken (Enigma2); None when curl_cffi works here (plain python3, tests)."""
+    st = _cffi_helper_state
+    if not st["checked"]:
+        st["checked"] = True
+        try:
+            import novaplay_cffi_helper as _h
+            if _h.needed():
+                st["client"] = _h.client()
+                log("curl_cffi can't impersonate inside this process -- using the helper process")
+        except Exception as e:
+            log("curl_cffi helper unavailable: {}".format(e))
+    return st["client"]
+
+
 def _get_curl_session():
     if not _CURL_CFFI_OK:
         return None
@@ -700,6 +719,12 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                     else:
                         session = _get_curl_session()
                         cffi_client = session if session is not None else _curl_requests
+                    # [2026-10-21] inside Enigma2 curl_cffi can't impersonate (the
+                    # system libcurl is loaded first); run it in NovaPlay's helper
+                    # process instead, where it does
+                    _hc = _cffi_helper_client()
+                    if _hc is not None:
+                        cffi_client = _hc
 
                     # [PATCH 66] str/bytes bodies (faselhd_rip AJAX, OpenSubtitles
                     # /download) used to fall into the GET branch

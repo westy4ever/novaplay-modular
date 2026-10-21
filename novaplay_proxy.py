@@ -588,6 +588,14 @@ _cffi_target_lock = threading.Lock()
 
 
 def _cffi_get(url, headers, **kw):
+    # [2026-10-21] inside Enigma2 impersonation fails in-process (system
+    # libcurl loaded first) -- use NovaPlay's curl_cffi helper process
+    try:
+        import novaplay_cffi_helper as _h
+        if _h.needed():
+            return _h.client().get(url, headers=headers, impersonate=_CFFI_TARGETS[0], **kw)
+    except ImportError:
+        pass
     while True:
         with _cffi_target_lock:
             idx = _cffi_target_idx[0]
