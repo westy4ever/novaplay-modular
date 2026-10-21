@@ -525,10 +525,6 @@ class NovaPlayHub(Screen):
         except Exception as e:
             my_log("hub refresh: {}".format(e))
 
-    def _openHome(self, start):
-        from plugin_screen_home import NovaPlayHome
-        self.session.openWithCallback(self._back, NovaPlayHome, start=start)
-
     def _openSite(self, key):
         members = get_family_members(key)
         if len(members) > 1:

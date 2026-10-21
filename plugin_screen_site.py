@@ -562,6 +562,13 @@ class NovaPlaySite(Screen):
             if purl and not path:
                 plugin_imagecache.requestImageAsync(purl, target_size=(PW, PH))
                 missing = True
+            if path and mark == u"✓ Watched" and _get_config("watched_poster_bw", False):
+                try:
+                    _bw = plugin_imagecache.getBwVariant(purl, (PW, PH))
+                    if _bw:
+                        path = _bw
+                except Exception:
+                    pass
             path = path or placeholder_for_item(it)
             inst = self["pImg%d" % i].instance
             if path and inst is not None:

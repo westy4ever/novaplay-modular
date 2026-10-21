@@ -344,19 +344,23 @@ class NovaPlaySettings(Screen):
                  "Starts only for Download to HDD, pauses while you watch"),
             ]
         if sec == "library":
-            return [
+            lib = [
                 ("homestyle", "home", "Home Style",
                  "Classic grid" if _get_config("home_style", "panel") == "classic" else "Panel",
                  "Panel home with sidebar and cards, or the classic site grid"),
-                ("layout", "grid", "Poster Layout",
-                 "Grid" if _get_config("layout_style", "carousel") == "grid" else "Carousel",
-                 "Carousel or grid view for site posters"),
+
                 ("watchedbw", "contrast", "Watched Posters",
                  "Black & white" if _get_config("watched_poster_bw", False) else "Colour",
                  "How posters you already watched are shown"),
                 ("downloads", "download", "Downloads", "Open  ›",
                  "Downloads and recordings in progress"),
             ]
+            if _get_config("home_style", "panel") == "classic":
+                # carousel / grid only exists in the classic home's poster view
+                lib.insert(1, ("layout", "grid", "Poster Layout",
+                 "Grid" if _get_config("layout_style", "carousel") == "grid" else "Carousel",
+                 "Carousel or grid view for site posters"))
+            return lib
         if sec == "tools":
             return [
                 ("diagnostics", "pulse", "Diagnostics", "Run  ›",
