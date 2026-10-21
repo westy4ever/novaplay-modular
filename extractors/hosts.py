@@ -1963,6 +1963,23 @@ def resolve_n1mwq(url, referer=None, origin=None, video_id=None):
                                     extra_headers=pb_headers)
         playback = (playback_resp or {}).get("playback") if isinstance(playback_resp, dict) else None
         if not playback:
+            # [2026-10-21] byseqekaho.com answers GET .../embed/playback with 405
+            # Method Not Allowed: newer Byse builds want a POST (like the
+            # captcha calls). Try the body shapes the captcha flow uses.
+            jh = dict(pb_headers or {})
+            jh["Content-Type"] = "application/json"
+            jh["Origin"] = origin or _N1MWQ_ORIGIN
+            for body in ({}, {"captcha_token": captcha_token}, {"token": captcha_token}):
+                if not captcha_token and body:
+                    continue
+                playback_resp = fetch_json(base + "playback", referer=page_referer,
+                                           post_data=json.dumps(body), extra_headers=jh)
+                playback = (playback_resp or {}).get("playback") if isinstance(playback_resp, dict) else None
+                log("n1mwq: POST playback {} -> {}".format(
+                    list(body.keys()) or "{}", "payload" if playback else str(playback_resp)[:160]))
+                if playback:
+                    break
+        if not playback:
             log("n1mwq: no playback payload for {}: {}".format(video_id, str(playback_resp)[:400]))
             return None
 
