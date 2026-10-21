@@ -2763,6 +2763,12 @@ class NovaPlaySimplePlayer(Screen):
                         _save_position(self._item_url, secs, force=True)
                         _saved_secs = int(secs)
                         my_log("Exit save: {}s".format(secs))
+                        if _tot > 0:
+                            try:
+                                from plugin_state import _save_total_duration
+                                _save_total_duration(self._item_url, _tot)
+                            except Exception:
+                                pass
         except Exception as e:
             my_log("Exit save error: {}".format(e))
         if _saved_secs > 30:

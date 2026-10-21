@@ -376,6 +376,25 @@ def _save_position(url, seconds, force=False):
                 return
 
 
+def _save_total_duration(url, total):
+    """Remember a title's length (seconds) next to its saved position, so
+    Continue Watching can show time left and a progress bar."""
+    try:
+        total = int(total or 0)
+    except Exception:
+        return
+    if not url or total <= 60:
+        return
+    with _STATE_LOCK:
+        state = _load_state()
+        for item in (state.get("history") or []):
+            if item.get("url") == url:
+                if int(item.get("total_duration") or 0) != total:
+                    item["total_duration"] = total
+                    _save_state(state)
+                return
+
+
 def _remove_library_item(bucket, url):
     """Remove one title from "favorites" or "history"."""
     if not url:
@@ -615,9 +634,15 @@ def _library_search_suggestions(query="", current_site="", limit=8):
 
 def _continue_items(limit=7):
     rows = []
+    try:
+        from plugin_watched import is_watched
+    except Exception:
+        is_watched = lambda u: False
     for item in (_load_state().get("history") or []):
         pos = int(item.get("last_position_sec") or 0)
         if pos <= 30 or not item.get("url"):
+            continue
+        if is_watched(item.get("url")):      # finished (90%+): not "in progress"
             continue
         if not (item.get("poster") or item.get("title")):
             continue
