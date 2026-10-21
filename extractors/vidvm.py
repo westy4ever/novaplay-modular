@@ -104,7 +104,7 @@ def _decode(raw, headers):
             import zlib
             raw = zlib.decompress(raw)
         elif enc == "br":
-            import brotli
+            from .net import brotli
             raw = brotli.decompress(raw)
     except Exception:
         pass

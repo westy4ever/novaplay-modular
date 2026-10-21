@@ -39,7 +39,11 @@ except ImportError:
     try:
         import brotlicffi as brotli
     except ImportError:
-        brotli = None
+        try:
+            # OpenATV has no python3-brotli; use the C library ("opkg install brotli")
+            from . import brotli_ctypes as brotli
+        except ImportError:
+            brotli = None
 
 # ─── curl_cffi fallback (Cloudflare bypass) ─────────────────────────────────
 try:
