@@ -330,6 +330,44 @@ def load_extractor(target):
 
 # ─── the test ────────────────────────────────────────────────────────────────
 
+_NEW_V, _OLD_V = "Chrome/155.0.0.0", "Chrome/120.0.0.0"
+
+
+def _force_old_ua(obj=None):
+    """--old-ua: swap the browser identity back to Chrome/120 in every loaded
+    NovaPlay module (string constants, header dicts, class attributes)."""
+    def fix(v):
+        if isinstance(v, str) and _NEW_V in v:
+            return v.replace(_NEW_V, _OLD_V).replace('v="155"', 'v="120"')
+        if isinstance(v, dict):
+            for k in list(v):
+                nv = fix(v[k])
+                if nv is not v[k]:
+                    v[k] = nv
+        return v
+    if obj is not None:
+        for attr, val in list(vars(obj).items()):
+            nv = fix(val)
+            if nv is not val:
+                setattr(obj, attr, nv)
+    for mname, mod in list(sys.modules.items()):
+        if not mod or not (mname.startswith(("extractors", "novaplay", "plugin_"))):
+            continue
+        for attr, val in list(vars(mod).items()):
+            if isinstance(val, type):
+                for ca, cv in list(vars(val).items()):
+                    nv = fix(cv)
+                    if nv is not cv:
+                        try:
+                            setattr(val, ca, nv)
+                        except Exception:
+                            pass
+            else:
+                nv = fix(val)
+                if nv is not val:
+                    setattr(mod, attr, nv)
+
+
 def test_site(name, ext, args, quick=False):
     rep = Report(name)
     rep.out("=" * 64)
@@ -495,7 +533,12 @@ def main():
     ap.add_argument("--page", help="skip browsing and test this item/page url directly")
     ap.add_argument("--servers", type=int, default=5, help="max servers to try (default 5)")
     ap.add_argument("--all-servers", action="store_true", help="keep testing servers after one works")
+    ap.add_argument("--only", help="with --all: comma-separated site keys to check")
+    ap.add_argument("--old-ua", action="store_true",
+                    help="check with the old Chrome/120 browser identity (A/B against Chrome/155)")
     args = ap.parse_args()
+    if args.old_ua:
+        print("Browser identity for this run: Chrome/120 (old)")
 
     if args.list:
         from extractors import registry
@@ -506,11 +549,20 @@ def main():
     if args.all:
         from extractors import registry
         rows = []
+        details = []
+        only = set(k.strip() for k in (args.only or "").split(",") if k.strip())
         for key in registry._SITE_REGISTRY:
+            if only and key not in only:
+                continue
             try:
                 name, ext = load_extractor(key)
+                if args.old_ua:
+                    _force_old_ua(ext)
                 rep = test_site(name, ext, args, quick=True)
                 rows.append((key, "FAIL" if rep.fails else ("WARN" if rep.warns else "PASS")))
+                if rep.fails or rep.warns:
+                    details.append("--- {} ---".format(key))
+                    details.extend(l for l in rep.lines if l.startswith(("[", "         ")))
             except SystemExit as e:
                 rows.append((key, "FAIL ({})".format(e)))
             except Exception as e:  # noqa: BLE001
@@ -520,8 +572,10 @@ def main():
         print("\n".join(lines))
         try:
             with open("/tmp/site_test_ALL.txt", "w") as f:
-                f.write("\n".join(lines) + "\n")
-            print("\nsaved: /tmp/site_test_ALL.txt")
+                f.write(("Chrome/120 (old identity)\n" if args.old_ua else "") + "\n".join(lines) + "\n")
+                if details:
+                    f.write("\nDETAILS (failing / warning sites)\n" + "\n".join(details) + "\n")
+            print("\nsaved: /tmp/site_test_ALL.txt (with the reasons for every FAIL/WARN)")
         except Exception:
             pass
         return 1 if any(not v.startswith("PASS") and not v.startswith("WARN") for _, v in rows) else 0
