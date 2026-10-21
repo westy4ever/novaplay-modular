@@ -226,7 +226,11 @@ def _get_curl_session():
 # exact same unsupported string can never succeed). Discover a working
 # target (or that none work) ONCE per process and cache it here, instead
 # of rediscovering "chrome120 is broken" from scratch on every fetch.
-_CFFI_IMPERSONATE_CANDIDATES = ("chrome120", "chrome124", "chrome131", "chrome110", "chrome101", "chrome")
+# newest first: the box (curl_cffi 0.16.3 + curl-impersonate 2.2.3) lists up to
+# chrome146; a target its libcurl lacks fails with "Impersonating X is not
+# supported" and the next one is tried (once per process)
+_CFFI_IMPERSONATE_CANDIDATES = ("chrome146", "chrome145", "chrome142", "chrome136", "chrome131",
+                                "chrome124", "chrome120", "chrome110", "chrome101", "chrome")
 _cffi_impersonate_state = {"index": 0}
 _cffi_impersonate_lock = threading.Lock()
 
@@ -706,6 +710,11 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                             cf_headers["Content-Type"] = "application/x-www-form-urlencoded"
                     _imp = _get_cffi_impersonate()
 
+                    if _imp and not any(k.lower() == "user-agent" for k in (extra_headers or {})):
+                        # the impersonated browser sends its own matching
+                        # User-Agent -- a Chrome/155 UA on a chrome1xx TLS
+                        # fingerprint is a mismatch Cloudflare can see
+                        cf_headers.pop("User-Agent", None)
                     if _imp:
                         # declaring impersonate="chrome120" (or whichever
                         # candidate) but then hand-setting Accept-Encoding
@@ -745,7 +754,9 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
 
                     try:
                         r = _do_cffi_request(_imp)
-                    except TypeError:
+                    except TypeError as _te:
+                        if "imperson" not in str(_te).lower():
+                            raise
                         # curl_cffi version doesn't accept `impersonate` as a
                         # kwarg at all (very old release) -- same permanent
                         # breakage as the "not supported" case below, just a
@@ -754,6 +765,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         if _imp:
                             _mark_cffi_impersonate_broken(_imp)
                         cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
+                        cf_headers.setdefault("User-Agent", UA)
                         r = _do_cffi_request(None)
                     except Exception as e:
                         # [FIX] a device log confirmed this exact string: the
@@ -792,6 +804,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                                     # content encoding type" failure on this
                                     # very attempt.
                                     cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
+                                    cf_headers.setdefault("User-Agent", UA)
                                 try:
                                     r = _do_cffi_request(_next_imp)
                                     break

@@ -581,7 +581,8 @@ def prefetch_hls(url, headers, xor_key="", wait=False, max_variants=3):
 # curl_cffi: "chrome" maps to the newest Chrome the Python side knows, which the
 # box's libcurl-impersonate may not have ("Impersonating chrome146 is not
 # supported"). Walk down to a supported target once, then stick with it.
-_CFFI_TARGETS = ["chrome120", "chrome124", "chrome131", "chrome110", "chrome101", "chrome", None]
+_CFFI_TARGETS = ["chrome146", "chrome145", "chrome142", "chrome136", "chrome131", "chrome124",
+                 "chrome120", "chrome110", "chrome101", "chrome", None]
 _cffi_target_idx = [0]
 _cffi_target_lock = threading.Lock()
 
@@ -599,12 +600,16 @@ def _cffi_get(url, headers, **kw):
             return _cffi_requests.get(url, headers=headers, **kw)
         except Exception as e:
             msg = str(e).lower()
-            if "impersonat" in msg or "not supported" in msg:
+            # only curl-impersonate's own "Impersonating X is not supported"
+            # means the target is missing (box 2026-10-21: chrome120 works
+            # there, yet every target got dropped on some other error)
+            if target and "impersonating" in msg and "not supported" in msg:
                 with _cffi_target_lock:
                     if _cffi_target_idx[0] == idx:
                         _cffi_target_idx[0] = idx + 1
                 _log("Proxy: curl_cffi target {} unsupported, trying the next one".format(target))
                 continue
+            _log("Proxy: curl_cffi ({}) error: {}".format(target or "plain", str(e)[:200]))
             raise
 
 
