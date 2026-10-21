@@ -15,7 +15,9 @@ from Components.MenuList import MenuList
 
 from plugin_common import PLUGIN_PATH
 from plugin_gridlist import scale_skin_xml
-from plugin_state import (_library_search_suggestions, _save_search_query)
+from plugin_state import (_library_search_suggestions, _save_search_query,
+                          _clear_search_history, _remove_search_query)
+from Screens.MessageBox import MessageBox
 from plugin_tmdb import _tmdb_enabled, _tmdb_search_suggestions
 from plugin_util import (_wrap_ui_text, _single_line_text,
                          _search_scope_label, _normalize_query)
@@ -74,7 +76,7 @@ class NovaPlaySearch(Screen):
         self["suggestions_box"] = Label("")
         self["suggestions_title"] = Label("Quick suggestions")
         self["suggestions"] = MenuList([])
-        self["hint"] = Label("OK  Search / pick    ▲ ▼  Suggestions    EXIT  Back")
+        self["hint"] = Label("OK  Search / pick    MENU  Remove one    EXIT  Back")
         self["key_red"] = Label("Clear")
         self["key_green"] = Label("Search now")
         self["key_yellow"] = Label("Type")
@@ -82,7 +84,8 @@ class NovaPlaySearch(Screen):
         self._suggestions = []
         self._suggestion_ticket = 0
 
-        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions"], {
+        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions"], {
+            "menu": self._remove_suggestion,
             "ok": self._submit_or_edit,
             "cancel": self.close,
             "up": self._suggestion_up,
@@ -101,6 +104,7 @@ class NovaPlaySearch(Screen):
         self._refresh()
 
     def _refresh(self):
+        self["key_red"].setText("Clear text" if self._query.strip() else "Clear history")
         preview = self._query or "Type a movie, series or actor name"
         self["query"].setText(_wrap_ui_text(preview, width=42, max_lines=2))
         self["scope"].setText(_search_scope_label(self._scope if self._scope else "all"))
@@ -183,7 +187,31 @@ class NovaPlaySearch(Screen):
         self.session.openWithCallback(_picked, NovaChoiceBox, title=u"Search in…", list=items, selection=sel)
 
     def _clear_query(self):
-        self._query = ""
+        """RED: clear the typed text; with nothing typed, clear the
+        previous searches (after a yes/no)."""
+        if self._query.strip():
+            self._query = ""
+            self._refresh_suggestions()
+            self._refresh()
+            return
+
+        def _yes(ans):
+            if ans:
+                _clear_search_history()
+                self._refresh_suggestions()
+                self._refresh()
+        self.session.openWithCallback(_yes, MessageBox, "Remove all previous searches?\n\n(Titles from your Favorites and History will still be suggested.)",
+                                      MessageBox.TYPE_YESNO, default=False)
+
+    def _remove_suggestion(self):
+        """MENU: remove the selected previous search."""
+        idx = self["suggestions"].getSelectedIndex()
+        if not (self._suggestions and 0 <= idx < len(self._suggestions)):
+            return
+        it = self._suggestions[idx]
+        if it.get("source") != "Previous search":
+            return
+        _remove_search_query(it.get("query") or it.get("title"))
         self._refresh_suggestions()
         self._refresh()
 

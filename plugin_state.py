@@ -513,6 +513,21 @@ def _save_search_query(query):
         _save_state(state)
 
 
+def _clear_search_history():
+    with _STATE_LOCK:
+        state = _load_state()
+        state["search_history"] = []
+        _save_state(state)
+
+
+def _remove_search_query(query):
+    ql = re.sub(r"\s+", " ", (query or "")).strip().lower()
+    with _STATE_LOCK:
+        state = _load_state()
+        state["search_history"] = [r for r in (state.get("search_history") or []) if str(r).strip().lower() != ql]
+        _save_state(state)
+
+
 def _get_recent_searches(limit=10):
     rows = _load_state().get("search_history") or []
     return [str(r) for r in rows[:limit] if r]
