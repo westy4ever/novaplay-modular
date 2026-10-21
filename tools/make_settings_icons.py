@@ -110,6 +110,16 @@ def draw(name, n, d, c):
     elif name == "contrast":
         d.ellipse([L, T, R, B], outline=c, width=w)
         d.pieslice([L, T, R, B], 90, 270, fill=c)
+    elif name == "home":
+        d.line([L, cy, cx, T, R, cy], fill=c, width=w + 1, joint="curve")
+        d.line([L + n * .12, cy - n * .06, L + n * .12, B, R - n * .12, B, R - n * .12, cy - n * .06], fill=c, width=w, joint="curve")
+        d.rectangle([cx - n * .08, B - n * .26, cx + n * .08, B], fill=c)
+    elif name == "search":
+        d.ellipse([L, T, L + n * .5, T + n * .5], outline=c, width=w + 1)
+        d.line([L + n * .44, T + n * .44, R, B], fill=c, width=w + 3)
+    elif name == "history":
+        d.ellipse([L, T, R, B], outline=c, width=w)
+        d.line([cx, T + n * .16, cx, cy, cx + n * .16, cy + n * .1], fill=c, width=w, joint="curve")
     elif name == "download":
         d.line([cx, T, cx, cy + n * .12], fill=c, width=w + 1)
         d.line([cx - n * .18, cy - n * .06, cx, cy + n * .14, cx + n * .18, cy - n * .06], fill=c, width=w + 1, joint="curve")
@@ -140,8 +150,8 @@ def draw(name, n, d, c):
         d.line([cx, T + n * .3, cx + n * .1, T + n * .2, cx + n * .2, T + n * .3], fill=c, width=w, joint="curve")
 
 
-SIDEBAR = ("play", "cc", "globe", "star", "tools", "info")
-CARDS = ("hd", "next", "ask", "skip", "pick", "cc", "studio", "sliders", "key", "shield",
+SIDEBAR = ("play", "cc", "globe", "star", "tools", "info", "home", "search", "history", "download")
+CARDS = ("home", "hd", "next", "ask", "skip", "pick", "cc", "studio", "sliders", "key", "shield",
          "magnet", "adult", "transmission", "grid", "contrast", "download", "pulse",
          "package", "restart")
 

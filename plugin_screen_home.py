@@ -203,7 +203,14 @@ class NovaPlayHome(Screen):
     _STRIP_BELOW_OFF   = 1010       # strip off-screen below: CONT_Y + 1010 = 1120
     _NAV_HINT_Y        = 600        # legacy default; real Y comes from _navHintBaseY()
 
-    def __init__(self, session):
+    def __init__(self, session, start=None):
+        # [hub] opened by the panel Home (plugin_screen_hub) for one job:
+        # ("site", key) | ("library", "favorites"|"history") | ("search",).
+        # Backing out of that job closes this screen instead of showing
+        # the classic home grid.
+        self._hub_start = start
+        self._hub = start is not None
+        self._hub_ready = False
         self.skin = NovaPlayHome.skin.format(
             plugin_path=PLUGIN_PATH,
             home_grid_pics=build_pixmap_widgets_xml(
@@ -290,6 +297,8 @@ class NovaPlayHome(Screen):
         # Deferring the picker rebuild by one event-loop tick (a
         # dedicated one-shot timer, started AFTER the slide-out tick's
         # own tail code has already run) avoids that entirely.
+        self._hubCloseTimer = eTimer()
+        self._hubCloseTimer.callback.append(self.close)
         self._pendingPickerTimer = eTimer()
         self._pendingPickerTimer.callback.append(self._firePendingPicker)
         self._pendingPickerArgs = None
@@ -443,6 +452,19 @@ class NovaPlayHome(Screen):
                     pass
         self._applyCarouselGeometry()
         self._showHome()
+        if self._hub:
+            self._cold_open = False
+            try:
+                self._pulse_timer.start(1000, False)
+            except Exception:
+                pass
+            # run the job after this screen is up (opening the search
+            # screen from inside onLayoutFinish is not safe)
+            self._hubHideHome()
+            self._hubStartTimer = eTimer()
+            self._hubStartTimer.callback.append(self._hubRunStart)
+            self._hubStartTimer.start(30, True)
+            return
         if self._cold_open and self._cont_items:
             self._focus_zone = "row"
             self._cont_index = 0
@@ -892,7 +914,56 @@ class NovaPlayHome(Screen):
             else:
                 self._moveResize('cfocus%d' % logical_slot, 0, 0, 1, 1)
 
+    def _hubClose(self):
+        try:
+            self._hubCloseTimer.start(10, True)
+        except Exception:
+            self.close()
+
+    def _hubHideHome(self):
+        """Hide the classic home grid and continue strip (hub jobs that
+        load in the background would otherwise show them meanwhile)."""
+        names = ["home_grid", "cont_title", "contSel", "homeSel", "navHint"]
+        names += ["pic_%d_%d" % (r, c) for r in range(HOME_GRID_ROWS) for c in range(HOME_GRID_COLS)]
+        for i in range(CONT_SLOTS):
+            names += ["cont%d" % i, "contbadge%d" % i, "conttype%d" % i, "contbartrack%d" % i, "contbar%d" % i]
+        for n in names:
+            try:
+                self[n].hide()
+            except Exception:
+                pass
+        try:
+            self._navHintTimer.stop()
+        except Exception:
+            pass
+
+    def _hubRunStart(self):
+        start = self._hub_start or ()
+        kind = start[0] if start else ""
+        self._hubHideHome()
+        try:
+            if kind == "site":
+                key = start[1]
+                members = get_family_members(key)
+                if len(members) > 1:
+                    self._showSiteFamilyPicker(key, members)
+                else:
+                    self._site_pick_origin = None
+                    self._site = key
+                    self._showSiteCategories()
+            elif kind == "library":
+                self._showLibrary(start[1])
+            elif kind == "search":
+                self["title_text"].setText("Search")
+                self._onSearch()
+        except Exception as e:
+            my_log("hub start {}: {}".format(start, e))
+        self._hub_ready = True
+
     def _showHome(self):
+        if self._hub and self._hub_ready:
+            self._hubClose()
+            return
         self._source = "home"
         self._display_mode = "home"
         self._page = 1
@@ -2820,6 +2891,14 @@ class NovaPlayHome(Screen):
     def _onSettingsClosed(self, *args):
         """Apply a Poster Layout change made in Settings straight away."""
         try:
+            if not self._hub and _get_config("home_style", "panel") != "classic":
+                from plugin_screen_hub import NovaPlayHub
+                self.session.open(NovaPlayHub)
+                self.close()
+                return
+        except Exception as e:
+            my_log("home style switch: {}".format(e))
+        try:
             new = _get_config("layout_style", "carousel") or "carousel"
             if new == self._layout_style:
                 return
@@ -2847,6 +2926,8 @@ class NovaPlayHome(Screen):
 
     def _onSearchQuery(self, result=None):
         if not result:
+            if self._hub and self._source in ("home", "search_wait"):
+                self._hubClose()
             return
         if isinstance(result, str):
             query, scope = result, "all"
@@ -2854,8 +2935,13 @@ class NovaPlayHome(Screen):
             query = result[0]
             scope = result[1] if len(result) > 1 else "all"
         if not query:
+            if self._hub and self._source in ("home", "search_wait"):
+                self._hubClose()
             return
         self._last_query = query
+        if self._hub and self._source == "home":
+            self._source = "search_wait"
+            self._hubHideHome()
         self._setStatus("Searching for: {}…".format(query))
         threading.Thread(target=self._bgSearch, args=(query, scope or "all"), daemon=True).start()
 
@@ -2888,6 +2974,9 @@ class NovaPlayHome(Screen):
     def _onSearchResults(self, items, query):
         if not items:
             self._setStatus("No results")
+            if self._hub and self._source == "search_wait":
+                self.session.open(MessageBox, u"No results for \"{}\"".format(query), MessageBox.TYPE_INFO, timeout=4)
+                self._onSearch()
             return
         self._source = "search"
         self._setList(_rank_search_items(items, query))
@@ -2960,6 +3049,9 @@ class NovaPlayHome(Screen):
             self._nextPage()
 
     def _onBack(self):
+        if self._hub and self._source in ("search", "library", "search_wait"):
+            self._hubClose()
+            return
         if self._source == "library":
             self._showHome()
             return

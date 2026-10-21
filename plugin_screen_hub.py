@@ -1,0 +1,609 @@
+# -*- coding: utf-8 -*-
+"""NovaPlay — Home (panel style, 2026-10-21).
+
+The first screen: a sidebar (Home, Search, Favorites, History, Downloads,
+Settings), a Continue Watching row and the site cards (logo, name,
+tagline, health dot; 4 x 3 per page). It hands the browsing itself to the
+existing NovaPlayHome screen, opened "for one job" (a site, a library list
+or search results) -- when the user backs out of that job NovaPlayHome
+closes and this screen is shown again.
+
+The classic home grid stays available: Settings > Library & Display >
+Home Style (config "home_style": "panel" | "classic").
+
+Keys
+  ▲ ▼ ◀ ▶   move (◀ from the first column goes to the sidebar)
+  OK         open
+  MENU       site: open / rename / test / proxy / remove — continue: remove
+  RED Exit   GREEN Favorites   YELLOW Search   BLUE Settings
+  EXIT       close NovaPlay
+"""
+import os
+import threading
+import time
+
+from Screens.Screen import Screen
+from Screens.MessageBox import MessageBox
+from Screens.ChoiceBox import ChoiceBox
+from Screens.VirtualKeyBoard import VirtualKeyBoard
+from Components.ActionMap import ActionMap
+from Components.Label import Label
+from Components.Pixmap import Pixmap
+from Components.ProgressBar import ProgressBar
+from enigma import eTimer
+
+try:
+    from skin import parseColor
+except Exception:
+    parseColor = None
+
+from plugin_common import my_log, PLUGIN_PATH, _PLUGIN_VERSION
+from extractors import get_extractor, get_home_sites, get_family_members
+import plugin_imagecache
+import plugin_health
+from plugin_assets import placeholder_for_item
+from plugin_state import (_get_config, _set_config, _continue_items, _history_items,
+                          _favorite_items, _clear_continue_item, _hide_site, _is_site_hidden,
+                          _set_site_custom_name, _DEFAULT_TMDB_API_KEY)
+from plugin_gridlist import resolve_icon_path, scale_skin_xml
+from plugin_util import _single_line_text
+from novaplay_thread import callInMainThread
+from novaplay_dualclock import format_dual_dates
+
+GOLD = "#F2C230"
+WHITE = "#FFFFFF"
+TEXT = "#D6DCE5"
+MUTED = "#A3ADBB"
+CARD = "#161C26"
+EDGE = "#262E3B"
+ROW_ON = "#222B3A"
+PANEL = "#121822"
+BG = "#0C1017"
+DOT = {"ok": "#30C48D", "down": "#E5484D", "blocked": "#F2A33A"}
+
+_ICONS = os.path.join(PLUGIN_PATH, "images", "settings")
+
+SECTIONS = (
+    ("home", "Home", "home"),
+    ("search", "Search", "search"),
+    ("favorites", "Favorites", "star"),
+    ("history", "History", "history"),
+    ("downloads", "Downloads", "download"),
+    ("settings", "Settings", "tools"),
+)
+ROWS = len(SECTIONS)
+_SIDE_Y0, _SIDE_STEP = 214, 74
+
+CONT_N = 3
+_CONT_X = (430, 921, 1412)
+_CONT_Y, _CONT_W, _CONT_H = 222, 468, 132
+
+S_COLS, S_ROWS = 4, 3
+S_PAGE = S_COLS * S_ROWS
+_S_X = (430, 798, 1166, 1534)
+_S_Y = (440, 618, 796)
+_S_W, _S_H = 346, 158
+
+
+def _skin():
+    parts = ["""
+    <screen name="NovaPlayHub" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="{bg}">
+        <eLabel position="0,0" size="1920,1080" backgroundColor="{bg}" zPosition="0" />
+        <ePixmap position="40,30" size="84,84" pixmap="{p}/images/plugin.png" alphatest="blend" scale="1" zPosition="2" />
+        <eLabel position="146,30" size="600,52" text="NovaPlay" font="Bold;40" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="subtitle" position="146,86" size="1100,32" font="Regular;22" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="clock_time" position="1380,18" size="500,62" font="Bold;54" halign="right" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="clock_greg" position="1280,84" size="600,30" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="clock_hijri" position="1280,114" size="600,30" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+
+        <widget name="sideEdge" position="40,150" size="360,810" backgroundColor="{gold}" cornerRadius="16" zPosition="1" />
+        <eLabel position="42,152" size="356,806" backgroundColor="{panel}" cornerRadius="14" zPosition="2" />
+        <eLabel position="68,174" size="300,30" text="SECTIONS" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <eLabel position="68,690" size="304,1" backgroundColor="#2A3240" zPosition="3" />
+        <eLabel position="68,704" size="300,30" text="LIBRARY" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="libinfo" position="68,740" size="316,212" font="Regular;22" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="3" />
+
+        <eLabel position="430,148" size="900,58" text="Continue Watching" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="contCount" position="1380,162" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="contEmpty" position="430,222" size="1450,132" font="Regular;26" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
+
+        <eLabel position="430,376" size="900,58" text="Sites" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="siteCount" position="1380,390" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+
+        <eLabel position="40,976" size="1840,76" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
+        <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="2" />
+        <eLabel position="106,994" size="200,40" text="Exit" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <eLabel position="312,1003" size="22,22" backgroundColor="#30A46C" cornerRadius="11" zPosition="2" />
+        <eLabel position="346,994" size="220,40" text="Favorites" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <eLabel position="572,1003" size="22,22" backgroundColor="#F2C230" cornerRadius="11" zPosition="2" />
+        <eLabel position="606,994" size="200,40" text="Search" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <eLabel position="812,1003" size="22,22" backgroundColor="#3E7BFA" cornerRadius="11" zPosition="2" />
+        <widget name="key_blue" position="846,994" size="200,40" font="Regular;26" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="2" />
+        <widget name="hint" position="1060,994" size="790,40" font="Regular;24" halign="right" valign="center" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="2" />
+    """.format(p=PLUGIN_PATH, bg=BG, gold=GOLD, muted=MUTED, white=WHITE, panel=PANEL, card=CARD)]
+    for i in range(ROWS):
+        y = _SIDE_Y0 + i * _SIDE_STEP
+        parts.append("""
+        <widget name="rowBg{i}" position="54,{y}" size="332,66" backgroundColor="{panel}" cornerRadius="10" zPosition="3" />
+        <widget name="rowBar{i}" position="54,{y}" size="5,66" backgroundColor="{gold}" zPosition="5" />
+        <widget name="rowIcon{i}" position="72,{iy}" size="36,36" alphatest="blend" scale="1" zPosition="5" />
+        <widget name="rowText{i}" position="124,{y}" size="256,66" font="Regular;28" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        """.format(i=i, y=y, iy=y + 15, panel=PANEL, gold=GOLD, text=TEXT))
+    for i in range(CONT_N):
+        x, y = _CONT_X[i], _CONT_Y
+        parts.append("""
+        <widget name="kEdge{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{edge}" cornerRadius="14" zPosition="2" />
+        <widget name="kBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
+        <widget name="kPoster{i}" position="{px},{py}" size="72,100" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="kTitle{i}" position="{tx},{ty}" size="336,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="kSub{i}" position="{tx},{sy}" size="336,30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="kBar{i}" position="{tx},{by}" size="330,6" backgroundColor="#2A3240" foregroundColor="{gold}" borderWidth="0" cornerRadius="3" zPosition="4" />
+        """.format(i=i, x=x, y=y, w=_CONT_W, h=_CONT_H, x3=x + 3, y3=y + 3, w3=_CONT_W - 6, h3=_CONT_H - 6,
+                   px=x + 16, py=y + 16, tx=x + 106, ty=y + 18, sy=y + 58, by=y + 100,
+                   edge=EDGE, card=CARD, white=WHITE, muted=MUTED, gold=GOLD))
+    for i in range(S_PAGE):
+        x, y = _S_X[i % S_COLS], _S_Y[i // S_COLS]
+        parts.append("""
+        <widget name="sEdge{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{edge}" cornerRadius="14" zPosition="2" />
+        <widget name="sBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
+        <widget name="sLogo{i}" position="{lx},{ly}" size="132,47" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="sDot{i}" position="{dx},{dy}" size="14,14" backgroundColor="{card}" cornerRadius="7" zPosition="4" />
+        <widget name="sName{i}" position="{nx},{ny}" size="310,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="sTag{i}" position="{nx},{gy}" size="310,30" font="Regular;20" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="4" />
+        """.format(i=i, x=x, y=y, w=_S_W, h=_S_H, x3=x + 3, y3=y + 3, w3=_S_W - 6, h3=_S_H - 6,
+                   lx=x + 18, ly=y + 18, dx=x + _S_W - 34, dy=y + 34, nx=x + 18, ny=y + 74, gy=y + 112,
+                   edge=EDGE, card=CARD, white=WHITE))
+    parts.append("</screen>")
+    return "".join(parts)
+
+
+def _remaining(item):
+    pos = int(item.get("last_position_sec") or 0)
+    dur = int(item.get("total_duration") or item.get("duration") or item.get("total_seconds") or 0)
+    if dur > 0:
+        left = max(0, dur - pos)
+        h, m = divmod(left // 60, 60)
+        txt = ("{}h {:02d}m left".format(h, m) if h else "{} min left".format(max(1, m)))
+        return txt, min(99, max(1, int(pos * 100 / dur)))
+    m, s = divmod(pos, 60)
+    h, m = divmod(m, 60)
+    return ("at {}:{:02d}:{:02d}".format(h, m, s) if h else "at {}:{:02d}".format(m, s)), 0
+
+
+class NovaPlayHub(Screen):
+    skin = scale_skin_xml(_skin())
+
+    def __init__(self, session):
+        Screen.__init__(self, session)
+        self._zone = "sites"          # side | cont | sites
+        self._sec = 0
+        self._ci = 0                  # continue index
+        self._si = 0                  # site index (global)
+        self._sites = []
+        self._cont = []
+        self._swept = False
+
+        self["subtitle"] = Label("Version {}  |  Media Center".format(_PLUGIN_VERSION))
+        self["clock_time"] = Label("")
+        self["clock_greg"] = Label("")
+        self["clock_hijri"] = Label("")
+        self["sideEdge"] = Label("")
+        self["libinfo"] = Label("")
+        self["contCount"] = Label("")
+        self["contEmpty"] = Label("")
+        self["siteCount"] = Label("")
+        self["key_blue"] = Label("Settings")
+        self["hint"] = Label("")
+        for i in range(ROWS):
+            self["rowBg%d" % i] = Label("")
+            self["rowBar%d" % i] = Label("")
+            self["rowIcon%d" % i] = Pixmap()
+            self["rowText%d" % i] = Label(SECTIONS[i][1])
+        for i in range(CONT_N):
+            for n in ("kEdge", "kBox", "kTitle", "kSub"):
+                self["%s%d" % (n, i)] = Label("")
+            self["kPoster%d" % i] = Pixmap()
+            self["kBar%d" % i] = ProgressBar()
+        for i in range(S_PAGE):
+            for n in ("sEdge", "sBox", "sDot", "sName", "sTag"):
+                self["%s%d" % (n, i)] = Label("")
+            self["sLogo%d" % i] = Pixmap()
+
+        self["actions"] = ActionMap(
+            ["OkCancelActions", "DirectionActions", "ColorActions", "MenuActions",
+             "InfobarMenuActions"], {
+                "ok": self._ok,
+                "cancel": self.close,
+                "up": lambda: self._move(0, -1),
+                "down": lambda: self._move(0, 1),
+                "left": lambda: self._move(-1, 0),
+                "right": lambda: self._move(1, 0),
+                "red": self.close,
+                "green": lambda: self._openSection("favorites"),
+                "yellow": lambda: self._openSection("search"),
+                "blue": lambda: self._openSection("settings"),
+                "menu": self._menu,
+                "showMenu": self._menu,
+                "mainMenu": self._menu,
+            }, -1)
+
+        self._clock = eTimer()
+        self._clock.callback.append(self._tick)
+        self._art = eTimer()
+        self._art.callback.append(self._artPoll)
+        self._art_tries = 0
+        self.onLayoutFinish.append(self._start)
+        self.onClose.append(self._stopTimers)
+
+    # ─── lifecycle ──────────────────────────────────────────────────────
+
+    def _start(self):
+        self._tick()
+        self._clock.start(10000, False)
+        self._reload()
+        self._zone = "cont" if self._cont else "sites"
+        self._paint()
+        self._healthSweep()
+
+    def _stopTimers(self):
+        for t in (self._clock, self._art):
+            try:
+                t.stop()
+            except Exception:
+                pass
+
+    def _tick(self):
+        try:
+            greg, hijri, t, period = format_dual_dates()
+            self["clock_time"].setText("{} {}".format(t, period))
+            self["clock_greg"].setText(greg)
+            self["clock_hijri"].setText(hijri)
+        except Exception as e:
+            my_log("hub clock: {}".format(e))
+
+    def _reload(self):
+        try:
+            self._cont = _continue_items(CONT_N)
+        except Exception:
+            self._cont = []
+        self._ci = min(self._ci, max(0, len(self._cont) - 1))
+        recent = {}
+        now = time.time()
+        try:
+            for h in (_history_items() or [])[:200]:
+                s = h.get("_site")
+                try:
+                    ts = float(h.get("_ts") or 0)
+                except Exception:
+                    ts = 0
+                if s and ts and now - ts < 86400:
+                    recent[s] = recent.get(s, 0) + 1
+        except Exception:
+            pass
+        rank = {"blocked": 1, "down": 2}
+        rows = [(k, t, g) for k, t, g in get_home_sites() if not _is_site_hidden(k)]
+        rows.sort(key=lambda r: (rank.get(plugin_health.get(r[0]), 0), -recent.get(r[0], 0)))
+        self._sites = [{"key": k, "title": t, "tagline": g, "_action": "site_" + k} for k, t, g in rows]
+        self._si = min(self._si, max(0, len(self._sites) - 1))
+        try:
+            fav, hist = len(_favorite_items()), len(_history_items())
+        except Exception:
+            fav = hist = 0
+        key = (_get_config("tmdb_api_key", "") or "").strip()
+        proxy = (_get_config("browser_proxy", "") or "").strip()
+        dl = 0
+        try:
+            import plugin_downloads
+            dl = len([t for t in plugin_downloads.get_all_tasks() if t.status == "downloading"])
+        except Exception:
+            pass
+        self["libinfo"].setText("\n".join([
+            "Favorites: {}".format(fav),
+            "History: {}".format(hist),
+            "Downloads: {} active".format(dl),
+            "TMDb: {}".format("Built-in key" if key == _DEFAULT_TMDB_API_KEY else ("Your key" if key else "Off")),
+            "Proxy: {}".format("On" if proxy else "Off"),
+        ]))
+
+    # ─── painting ───────────────────────────────────────────────────────
+
+    def _color(self, name, bg=None, fg=None):
+        inst = self[name].instance
+        if inst is None or parseColor is None:
+            return
+        if bg:
+            inst.setBackgroundColor(parseColor(bg))
+        if fg:
+            inst.setForegroundColor(parseColor(fg))
+        inst.invalidate()
+
+    def _pix(self, name, path):
+        inst = self[name].instance
+        if inst is not None and path and os.path.exists(path):
+            inst.setPixmapFromFile(path)
+            self[name].show()
+        else:
+            self[name].hide()
+
+    def _paint(self):
+        side = self._zone == "side"
+        self._color("sideEdge", bg=GOLD if side else EDGE)
+        for i, (_k, _t, ic) in enumerate(SECTIONS):
+            on = i == self._sec
+            self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
+            self["rowBar%d" % i].show() if on else self["rowBar%d" % i].hide()
+            self._color("rowText%d" % i, fg=WHITE if on else TEXT)
+            self._pix("rowIcon%d" % i, os.path.join(_ICONS, "side_%s_%s.png" % (ic, "on" if on else "off")))
+        self._paintCont()
+        self._paintSites()
+        if side:
+            self["hint"].setText("OK  Open    ▶  Back to the list    EXIT  Close")
+        elif self._zone == "cont":
+            self["hint"].setText("OK  Resume    MENU  Remove    ◀  Sections")
+        else:
+            self["hint"].setText("OK  Open site    MENU  Site options    ◀  Sections")
+
+    def _paintCont(self):
+        n = len(self._cont)
+        self["contCount"].setText("{} items".format(n) if n else "")
+        if not n:
+            self["contEmpty"].setText("      Nothing in progress — pick a site below")
+            self["contEmpty"].show()
+        else:
+            self["contEmpty"].hide()
+        missing = False
+        for i in range(CONT_N):
+            names = ["kEdge%d", "kBox%d", "kPoster%d", "kTitle%d", "kSub%d", "kBar%d"]
+            if i >= n:
+                for nm in names:
+                    self[nm % i].hide()
+                continue
+            for nm in names:
+                self[nm % i].show()
+            it = self._cont[i]
+            sel = self._zone == "cont" and i == self._ci
+            self._color("kEdge%d" % i, bg=GOLD if sel else EDGE)
+            self["kTitle%d" % i].setText(_single_line_text(it.get("title", ""), width=26, fallback="—"))
+            self._color("kTitle%d" % i, fg=GOLD if sel else WHITE)
+            left, pct = _remaining(it)
+            kind = {"episode": "Episode", "series": "Series"}.get(it.get("type", ""), "Movie")
+            self["kSub%d" % i].setText("{}  ·  {}".format(kind, left))
+            self["kBar%d" % i].setValue(pct)
+            url = it.get("poster") or it.get("thumbnail") or ""
+            path = plugin_imagecache.getCachedImage(url, target_size=(72, 100)) if url else ""
+            if url and not path:
+                plugin_imagecache.requestImageAsyncPriority(url, target_size=(72, 100))
+                missing = True
+            self._pix("kPoster%d" % i, path or placeholder_for_item(it))
+        if missing:
+            self._art_tries = 0
+            self._art.start(1000, False)
+
+    def _artPoll(self):
+        self._art_tries += 1
+        done = True
+        for it in self._cont:
+            url = it.get("poster") or it.get("thumbnail") or ""
+            if url and not plugin_imagecache.getCachedImage(url, target_size=(72, 100)):
+                done = False
+        if done or self._art_tries > 15:
+            self._art.stop()
+            self._paintCont()
+
+    def _paintSites(self):
+        n = len(self._sites)
+        page = self._si // S_PAGE
+        pages = max(1, (n + S_PAGE - 1) // S_PAGE)
+        self["siteCount"].setText("{} sites  ·  Page {}/{}".format(n, page + 1, pages))
+        base = page * S_PAGE
+        for i in range(S_PAGE):
+            g = base + i
+            names = ["sEdge%d", "sBox%d", "sLogo%d", "sDot%d", "sName%d", "sTag%d"]
+            if g >= n:
+                for nm in names:
+                    self[nm % i].hide()
+                continue
+            for nm in names:
+                self[nm % i].show()
+            s = self._sites[g]
+            sel = self._zone == "sites" and g == self._si
+            self._color("sEdge%d" % i, bg=GOLD if sel else EDGE)
+            self["sName%d" % i].setText(_single_line_text(s["title"], width=22, fallback=s["key"]))
+            self._color("sName%d" % i, fg=GOLD if sel else WHITE)
+            self["sTag%d" % i].setText(_single_line_text(s.get("tagline") or "", width=30, fallback=""))
+            self._color("sDot%d" % i, bg=DOT.get(plugin_health.get(s["key"]), CARD))
+            self._pix("sLogo%d" % i, resolve_icon_path(s))
+
+    # ─── health dots (same check the classic home runs) ─────────────────
+
+    def _healthSweep(self):
+        if self._swept:
+            return
+        self._swept = True
+        pending = [s["key"] for s in self._sites if plugin_health.get(s["key"]) == "unknown"]
+        if not pending:
+            return
+
+        def _worker():
+            for key in pending:
+                try:
+                    ex = get_extractor(key)
+                    cats = getattr(ex, "get_categories", None)
+                    if cats:
+                        cats("movie") if key in ("egydead", "egydead_coupons") else cats()
+                    plugin_health.record(key, "ok")
+                except Exception as e:
+                    plugin_health.record(key, "down", str(e))
+                callInMainThread(self._paintSites)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ─── navigation ─────────────────────────────────────────────────────
+
+    def _move(self, dx, dy):
+        if self._zone == "side":
+            if dy:
+                self._sec = (self._sec + dy) % ROWS
+            elif dx > 0:
+                self._zone = "cont" if self._cont else "sites"
+                self._sec = 0
+        elif self._zone == "cont":
+            n = len(self._cont)
+            if dx < 0 and self._ci == 0:
+                self._zone = "side"
+            elif dx:
+                self._ci = max(0, min(n - 1, self._ci + dx))
+            elif dy > 0 and self._sites:
+                self._zone = "sites"
+                page = self._si // S_PAGE
+                self._si = min(len(self._sites) - 1, page * S_PAGE + min(self._ci, S_COLS - 1))
+        else:
+            n = len(self._sites)
+            local = self._si % S_PAGE
+            col, row = local % S_COLS, local // S_COLS
+            page = self._si // S_PAGE
+            if dx < 0 and col == 0:
+                if page > 0:
+                    self._si = max(0, self._si - S_PAGE + S_COLS - 1)
+                else:
+                    self._zone = "side"
+            elif dx > 0 and (col == S_COLS - 1 or self._si == n - 1):
+                nxt = (page + 1) * S_PAGE + row * S_COLS
+                if (page + 1) * S_PAGE < n:
+                    self._si = min(n - 1, nxt)
+            elif dx:
+                self._si = max(0, min(n - 1, self._si + dx))
+            elif dy < 0:
+                if row > 0:
+                    self._si -= S_COLS
+                elif self._cont:
+                    self._zone = "cont"
+                    self._ci = min(col, len(self._cont) - 1)
+                elif page > 0:
+                    self._si = max(0, self._si - S_COLS)
+            elif dy > 0:
+                t = self._si + S_COLS
+                if t < n:
+                    self._si = t
+                elif (page + 1) * S_PAGE < n:
+                    self._si = n - 1
+        self._paint()
+
+    def _ok(self):
+        if self._zone == "side":
+            self._openSection(SECTIONS[self._sec][0])
+        elif self._zone == "cont":
+            if self._cont:
+                self._openItem(self._cont[self._ci])
+        elif self._sites:
+            self._openSite(self._sites[self._si]["key"])
+
+    # ─── opening things ─────────────────────────────────────────────────
+
+    def _back(self, *args):
+        """Returned from another screen: refresh what may have changed."""
+        try:
+            self._reload()
+            self._paint()
+        except Exception as e:
+            my_log("hub refresh: {}".format(e))
+
+    def _openHome(self, start):
+        from plugin_screen_home import NovaPlayHome
+        self.session.openWithCallback(self._back, NovaPlayHome, start=start)
+
+    def _openSite(self, key):
+        self._openHome(("site", key))
+
+    def _openItem(self, item):
+        from plugin_screen_detail import NovaPlayDetail
+        self.session.openWithCallback(self._back, NovaPlayDetail, item=item,
+                                      site=item.get("_site", ""), m_type=item.get("type", "movie"))
+
+    def _openSection(self, key):
+        if key == "home":
+            self._zone = "cont" if self._cont else "sites"
+            self._paint()
+        elif key == "search":
+            self._openHome(("search",))
+        elif key in ("favorites", "history"):
+            self._openHome(("library", key))
+        elif key == "downloads":
+            from plugin_screen_downloads import NovaPlayDownloads
+            self.session.openWithCallback(self._back, NovaPlayDownloads)
+        elif key == "settings":
+            from plugin_screen_settings import NovaPlaySettings
+            self.session.openWithCallback(self._afterSettings, NovaPlaySettings, None)
+
+    def _afterSettings(self, *args):
+        if _get_config("home_style", "panel") == "classic":
+            from plugin_screen_home import NovaPlayHome
+            self.session.open(NovaPlayHome)
+            self.close()
+            return
+        self._back()
+
+    # ─── MENU ───────────────────────────────────────────────────────────
+
+    def _menu(self):
+        if self._zone == "cont" and self._cont:
+            it = self._cont[self._ci]
+
+            def _confirm(ans, _url=it.get("url", "")):
+                if ans:
+                    try:
+                        _clear_continue_item(_url)
+                    except Exception as e:
+                        my_log("clear continue: {}".format(e))
+                    self._back()
+            self.session.openWithCallback(_confirm, MessageBox, u"Remove from Continue Watching?\n{}".format(
+                _single_line_text(it.get("title", ""), width=40, fallback="Item")),
+                MessageBox.TYPE_YESNO, timeout=8, default=False)
+            return
+        if self._zone != "sites" or not self._sites:
+            return
+        s = self._sites[self._si]
+        key, label = s["key"], s["title"]
+
+        def _choice(ans):
+            act = ans[1] if isinstance(ans, tuple) else None
+            if act == "open":
+                self._openSite(key)
+            elif act == "rename":
+                def _typed(name):
+                    if name is not None:
+                        try:
+                            _set_site_custom_name(key, name)
+                        except Exception:
+                            pass
+                        self._back()
+                self.session.openWithCallback(_typed, VirtualKeyBoard,
+                                              title=u"Display name for {}".format(label), text=label)
+            elif act == "ping":
+                self["subtitle"].setText("Testing {}…".format(label))
+
+                def _worker():
+                    try:
+                        ex = get_extractor(key)
+                        cats = getattr(ex, "get_categories", None)
+                        if cats:
+                            cats("movie") if key in ("egydead", "egydead_coupons") else cats()
+                        plugin_health.record(key, "ok")
+                        msg = "{}: OK".format(label)
+                    except Exception as e:
+                        plugin_health.record(key, "down", str(e))
+                        msg = "{}: failed".format(label)
+                    callInMainThread(self["subtitle"].setText, msg)
+                    callInMainThread(self._paintSites)
+                threading.Thread(target=_worker, daemon=True).start()
+            elif act == "proxy":
+                _set_config("use_proxy_for_" + key, "true")
+                self["subtitle"].setText("Proxy enabled for {}".format(label))
+            elif act == "hide":
+                try:
+                    _hide_site(key)
+                except Exception:
+                    pass
+                self._back()
+        self.session.openWithCallback(_choice, ChoiceBox, title=u"{} — what do you want?".format(label), list=[
+            ("Open site", "open"), ("Rename", "rename"), ("Test connection", "ping"),
+            ("Enable proxy", "proxy"), ("Remove from home", "hide")])

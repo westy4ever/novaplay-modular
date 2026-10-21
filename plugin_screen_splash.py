@@ -49,5 +49,15 @@ class NovaPlaySplash(Screen):
             self.picLoad.PictureData.get().remove(self._paintSplash)
         except Exception:
             pass
-        self.session.open(NovaPlayHome)
+        # [hub] panel Home by default; Settings > Library & Display > Home Style
+        try:
+            from plugin_state import _get_config
+            classic = _get_config("home_style", "panel") == "classic"
+        except Exception:
+            classic = False
+        if classic:
+            self.session.open(NovaPlayHome)
+        else:
+            from plugin_screen_hub import NovaPlayHub
+            self.session.open(NovaPlayHub)
         self.close()

@@ -322,6 +322,9 @@ class NovaPlaySettings(Screen):
             ]
         if sec == "library":
             return [
+                ("homestyle", "home", "Home Style",
+                 "Classic grid" if _get_config("home_style", "panel") == "classic" else "Panel",
+                 "Panel home with sidebar and cards, or the classic site grid"),
                 ("layout", "grid", "Poster Layout",
                  "Grid" if _get_config("layout_style", "carousel") == "grid" else "Carousel",
                  "Carousel or grid view for site posters"),
@@ -511,6 +514,9 @@ class NovaPlaySettings(Screen):
             self._toggleAdult()
         elif key == "transmission":
             self._transmissionInfo()
+        elif key == "homestyle":
+            _set_config("home_style", "panel" if _get_config("home_style", "panel") == "classic" else "classic")
+            self._refresh()
         elif key == "layout":
             _set_config("layout_style", "carousel" if _get_config("layout_style", "carousel") == "grid" else "grid")
             self._refresh()
