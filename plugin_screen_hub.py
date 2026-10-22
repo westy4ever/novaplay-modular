@@ -76,8 +76,11 @@ _SIDE_Y0, _SIDE_STEP = 214, 74
 
 CONT_N = 3          # cards on screen
 CONT_MAX = 20       # titles the row scrolls through
-_CONT_X = (430, 921, 1412)
-_CONT_Y, _CONT_W, _CONT_H = 222, 468, 132
+# [band] the row sits in a dark band with ‹ › arrows, like the detail
+# screen's server cards
+_CONT_X = (465, 935, 1405)
+_CONT_Y, _CONT_W, _CONT_H = 222, 440, 132
+_CONT_TW = _CONT_W - 120          # title / details / bar width
 
 S_COLS, S_ROWS = 4, 3
 S_PAGE = S_COLS * S_ROWS
@@ -90,8 +93,8 @@ _S_W, _S_H = 346, 158
 POP_ZOOM = 0.08
 POP_STEPS, POP_STEP_MS = POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 _CONT_PARTS = (("kEdge", 0, 0, _CONT_W, _CONT_H, True), ("kBox", 3, 3, _CONT_W - 6, _CONT_H - 6, True),
-               ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, 336, 36, False),
-               ("kSub", 106, 58, 336, 30, False), ("kBar", 106, 100, 330, 6, False))
+               ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, _CONT_TW, 36, False),
+               ("kSub", 106, 58, _CONT_TW, 30, False), ("kBar", 106, 100, _CONT_TW, 6, False))
 _SIDE_PARTS = (("rowBg", 0, 0, 332, 66, True), ("rowBar", 0, 0, 5, 66, True),
                ("rowIcon", 18, 15, 36, 36, True), ("rowText", 70, 0, 256, 66, False))
 _SITE_PARTS = (("sEdge", 0, 0, _S_W, _S_H, True), ("sBox", 3, 3, _S_W - 6, _S_H - 6, True),
@@ -119,7 +122,10 @@ def _skin():
 
         <eLabel position="430,148" size="900,58" text="Continue Watching" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="contCount" position="1380,162" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
-        <widget name="contEmpty" position="430,222" size="1450,132" font="Regular;26" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
+        <eLabel position="420,208" size="1470,160" backgroundColor="{panel}" cornerRadius="20" zPosition="1" />
+        <widget name="contLeft" position="424,256" size="34,64" font="Regular;52" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        <widget name="contRight" position="1852,256" size="34,64" font="Regular;52" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        <widget name="contEmpty" position="465,222" size="1380,132" font="Regular;26" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
 
         <eLabel position="430,376" size="900,58" text="Sites" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="siteCount" position="1380,390" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
@@ -149,11 +155,11 @@ def _skin():
         <widget name="kEdge{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{edge}" cornerRadius="14" zPosition="2" />
         <widget name="kBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
         <widget name="kPoster{i}" position="{px},{py}" size="72,100" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="kTitle{i}" halign="left" position="{tx},{ty}" size="336,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
-        <widget name="kSub{i}" position="{tx},{sy}" size="336,30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
-        <widget name="kBar{i}" position="{tx},{by}" size="330,6" backgroundColor="#2A3240" foregroundColor="{gold}" borderWidth="0" cornerRadius="3" zPosition="4" />
+        <widget name="kTitle{i}" halign="left" position="{tx},{ty}" size="{tw},36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="kSub{i}" position="{tx},{sy}" size="{tw},30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="kBar{i}" position="{tx},{by}" size="{tw},6" backgroundColor="#2A3240" foregroundColor="{gold}" borderWidth="0" cornerRadius="3" zPosition="4" />
         """.format(i=i, x=x, y=y, w=_CONT_W, h=_CONT_H, x3=x + 3, y3=y + 3, w3=_CONT_W - 6, h3=_CONT_H - 6,
-                   px=x + 16, py=y + 16, tx=x + 106, ty=y + 18, sy=y + 58, by=y + 100,
+                   px=x + 16, py=y + 16, tx=x + 106, ty=y + 18, sy=y + 58, by=y + 100, tw=_CONT_TW,
                    edge=EDGE, card=CARD, white=WHITE, muted=MUTED, gold=GOLD))
     for i in range(S_PAGE):
         x, y = _S_X[i % S_COLS], _S_Y[i // S_COLS]
@@ -215,6 +221,8 @@ class NovaPlayHub(Screen):
         self["libinfo"] = Label("")
         self["contCount"] = Label("")
         self["contEmpty"] = Label("")
+        self["contLeft"] = Label(u"\u2039")
+        self["contRight"] = Label(u"\u203a")
         self["siteCount"] = Label("")
         self["key_blue"] = Label("Settings")
         self["hint"] = Label("")
@@ -564,6 +572,9 @@ class NovaPlayHub(Screen):
             self["contEmpty"].show()
         else:
             self["contEmpty"].hide()
+        # ‹ › only when there are more titles that way
+        self["contLeft"].show() if self._cbase > 0 else self["contLeft"].hide()
+        self["contRight"].show() if self._cbase + CONT_N < n else self["contRight"].hide()
         missing = False
         for i in range(CONT_N):
             names = ["kEdge%d", "kBox%d", "kPoster%d", "kTitle%d", "kSub%d", "kBar%d"]
@@ -577,7 +588,7 @@ class NovaPlayHub(Screen):
             it = self._cont[g]
             sel = self._zone == "cont" and g == self._ci
             self._color("kEdge%d" % i, bg=GOLD if sel else EDGE)
-            self["kTitle%d" % i].setText(_single_line_text(it.get("title", ""), width=26, fallback="—"))
+            self["kTitle%d" % i].setText(_single_line_text(it.get("title", ""), width=24, fallback="—"))
             self._color("kTitle%d" % i, fg=GOLD if sel else WHITE)
             left, pct = _remaining(it)
             kind = {"episode": "Episode", "series": "Series"}.get(it.get("type", ""), "Movie")
