@@ -402,6 +402,10 @@ class EgyDeadExtractor(BaseExtractor):
         title = self._strip_tags(title)
         for word in self.CLEAN_WORDS:
             title = title.replace(word, "")
+        # [2026-10-22] "مترجم و مدبلج كامل" left "و كامل" behind ("The Terminal List
+        # و كامل"): drop "كامل" (complete) and a lone "و" (and) the removals stranded
+        title = re.sub(r"(^|\s)كامل(?=\s|$)", " ", title)
+        title = re.sub(r"(^|\s)و(?=\s|$)", " ", title)
         title = re.sub(r"\s*\|\s*$", "", title)
         title = re.sub(r"\s*\-\s*$", "", title)
         return re.sub(r"\s+", " ", title).strip(" -|")
