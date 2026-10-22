@@ -27,7 +27,7 @@ from novaplay_choice import NovaMessageBox as MessageBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
-from enigma import eTimer
+from enigma import eTimer, ePoint, eSize
 
 try:
     from skin import parseColor
@@ -74,6 +74,9 @@ M_COLS = 7
 M_VIEW = M_COLS * P_ROWS
 _MPX = tuple(430 + c * (PW + 34) for c in range(M_COLS))
 ROW_ON_M = "#353124"
+# [theme] Modern: the selected poster grows 8 % with an ease-out "pop",
+# the same animation as the home screen's poster grid
+POP_ZOOM, POP_FRAMES, POP_MS = 0.08, 6, 25
 
 
 def _modern_style():
@@ -345,6 +348,12 @@ class NovaPlaySite(Screen):
         self._art_tries = 0
         self._infoTimer = eTimer()
         self._infoTimer.callback.append(self._loadInfo)
+        self._pop = eTimer()
+        self._pop.callback.append(self._popTick)
+        self._pop_key = None         # (view, slot) of the zoomed poster
+        self._pop_slot = -1
+        self._pop_frame = 0
+        self._pop_p = 1.0
         self.onLayoutFinish.append(self._start)
         self.onClose.append(self._stop)
 
@@ -378,7 +387,7 @@ class NovaPlaySite(Screen):
         self._loadCategories()
 
     def _stop(self):
-        for t in (self._clock, self._art, self._infoTimer):
+        for t in (self._clock, self._art, self._infoTimer, self._pop):
             try:
                 t.stop()
             except Exception:
@@ -789,8 +798,74 @@ class NovaPlaySite(Screen):
         if missing:
             self._art_tries = 0
             self._art.start(1000, False)
+        if self._modern:
+            self._popFocus(view, n)
         self._scheduleInfo()
         self._applyLayout()
+
+    # ─── [theme] Modern: pop zoom on the selected poster ────────────────
+
+    def _slotGeom(self, i, p):
+        x, y = _MPX[i % M_COLS], _PY[i // M_COLS]
+        z = POP_ZOOM * p
+        w, h = int(PW * (1 + z)), int(PH * (1 + z))
+        return x - (w - PW) // 2, y - (h - PH) // 2, w, h, (h - PH) // 2
+
+    def _mr(self, name, x, y, w=None, h=None):
+        inst = self[name].instance
+        if inst is None:
+            return
+        try:
+            inst.move(ePoint(int(x), int(y)))
+            if w is not None:
+                inst.resize(eSize(max(1, int(w)), max(1, int(h))))
+        except Exception:
+            pass
+
+    def _placeSlot(self, i, p):
+        x, y, w, h, dy = self._slotGeom(i, p)
+        bx, by = _MPX[i % M_COLS], _PY[i // M_COLS]
+        self._mr("pBack%d" % i, x, y, w, h)
+        self._mr("pImg%d" % i, x, y, w, h)
+        self._mr("pEdge%d" % i, x - 6, y - 6, w + 12, h + 12)
+        self._mr("pRate%d" % i, x + w - 78, y + 8)
+        self._mr("pMark%d" % i, x, y + h - 28, w, 28)
+        self._mr("pName%d" % i, bx - 12, by + PH + 10 + dy)
+        self._mr("pYear%d" % i, bx - 12, by + PH + 40 + dy)
+
+    def _popFocus(self, view, n):
+        slot = self._pi - view * self._view if (self._zone == "posters" and n) else -1
+        key = (view, slot, id(self._posters))
+        if key == self._pop_key:
+            return                   # a repaint (art arrived) -- keep the zoom
+        try:
+            self._pop.stop()
+        except Exception:
+            pass
+        if 0 <= self._pop_slot < self._view and self._pop_slot != slot:
+            self._placeSlot(self._pop_slot, 0.0)
+        self._pop_key = key
+        self._pop_slot = slot
+        if slot < 0:
+            return
+        self._pop_frame = 0
+        self._pop_p = 0.0
+        self._placeSlot(slot, 0.0)
+        try:
+            self._pop.start(POP_MS, False)
+        except Exception:
+            self._placeSlot(slot, 1.0)
+
+    def _popTick(self):
+        if self._pop_slot < 0 or self._carousel():
+            self._pop.stop()
+            return
+        self._pop_frame += 1
+        t = min(1.0, self._pop_frame / float(POP_FRAMES))
+        self._pop_p = 1.0 - (1.0 - t) ** 3          # ease-out cubic
+        self._placeSlot(self._pop_slot, self._pop_p)
+        if t >= 1.0:
+            self._pop.stop()
 
     # ─── [carousel] painting ────────────────────────────────────────────
 
