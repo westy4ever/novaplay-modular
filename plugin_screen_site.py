@@ -76,7 +76,7 @@ _MPX = tuple(430 + c * (PW + 34) for c in range(M_COLS))
 ROW_ON_M = "#353124"
 # [theme] Modern: the selected poster grows 8 % with an ease-out "pop",
 # the same animation as the home screen's poster grid
-POP_ZOOM, POP_FRAMES, POP_MS = 0.08, 6, 25
+POP_ZOOM, POP_FRAMES, POP_MS = 0.08, 12, 15     # ~180 ms, small even steps
 
 
 def _modern_style():
@@ -850,6 +850,7 @@ class NovaPlaySite(Screen):
             return
         self._pop_frame = 0
         self._pop_p = 0.0
+        self._pop_last = None
         self._placeSlot(slot, 0.0)
         try:
             self._pop.start(POP_MS, False)
@@ -862,8 +863,15 @@ class NovaPlaySite(Screen):
             return
         self._pop_frame += 1
         t = min(1.0, self._pop_frame / float(POP_FRAMES))
-        self._pop_p = 1.0 - (1.0 - t) ** 3          # ease-out cubic
-        self._placeSlot(self._pop_slot, self._pop_p)
+        # ease-out sine: softer start than cubic, so the first frames
+        # don't jump several pixels at once
+        import math
+        self._pop_p = math.sin(t * math.pi / 2)
+        # skip frames that wouldn't change a single pixel (less redraw work)
+        size = self._slotGeom(self._pop_slot, self._pop_p)[2:4]
+        if size != getattr(self, "_pop_last", None) or t >= 1.0:
+            self._pop_last = size
+            self._placeSlot(self._pop_slot, self._pop_p)
         if t >= 1.0:
             self._pop.stop()
 
