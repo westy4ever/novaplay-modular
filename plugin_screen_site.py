@@ -882,9 +882,7 @@ class NovaPlaySite(Screen):
         views = (n + self._view - 1) // self._view
         base = view * self._view
         self["gridCount"].setText("{} titles  ·  {}/{}".format(n, view + 1, views))
-        more = []
-        if view < views - 1 or self._next_url or self._site in _PAGED_SITES and self._cat_url:
-            more.append("▼ more")
+        more = []                        # (the › arrow shows there is more)
         if self._page > 1 or self._hasPages():
             more.append("page {}".format(self._page))
         self["gridMore"].setText("   ·   ".join(more))
