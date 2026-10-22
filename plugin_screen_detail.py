@@ -57,6 +57,7 @@ from plugin_tmdb import _tmdb_enabled, _merge_tmdb_data
 from plugin_util import _split_episode_label                    # [PATCH 81]
 from plugin_screen_player import NovaPlaySimplePlayer, _play
 from plugin_widgets import StreamList
+from plugin_toast import TOAST_XML, toast_init, toast
 from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 import plugin_health
 import plugin_imagecache
@@ -223,7 +224,7 @@ def _detail_skin_modern():
     return "".join(p)
 
 
-_DETAIL_SKIN_MODERN = _detail_skin_modern()
+_DETAIL_SKIN_MODERN = _detail_skin_modern().replace("</screen>", TOAST_XML + "</screen>")
 
 
 def _modern_backdrop(img, w, h, is_landscape):
@@ -413,7 +414,7 @@ class NovaPlayDetail(Screen):
             self._PROG_H = 6
             self._PROG_SPAN = SV_CARDS * _SV_W + (SV_CARDS - 1) * _SV_GAP - self._PROG_W
         else:
-            self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH)
+            self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH).replace("</screen>", TOAST_XML + "</screen>")
         self._sv_items = []
         self._sv_pop_key = None
         self._sv_pop_slot = -1
@@ -517,6 +518,7 @@ class NovaPlayDetail(Screen):
         self["key_blue"] = Label("Download")
         self["key_green"] = Label("")
         self["status"] = Label("Loading details...")
+        toast_init(self)
 
         self._downloads = []
         self._active_download_task = None
@@ -1872,6 +1874,14 @@ class NovaPlayDetail(Screen):
             _r = str(data.get("rating") or self._item.get("rating") or "").strip()
             if _r and float(_r) > 0:
                 self["posterRating"].setText(u"★ " + _r[:3])
+                try:
+                    from skin import parseColor
+                    _v = float(_r)
+                    _rc = "#30C48D" if _v >= 7 else ("#F2C230" if _v >= 5 else "#A3ADBB")
+                    self["posterRating"].instance.setForegroundColor(parseColor(_rc))
+                    self["posterRating"].instance.invalidate()
+                except Exception:
+                    pass
                 self["posterRating"].show()
             else:
                 self["posterRating"].hide()
@@ -2006,6 +2016,7 @@ class NovaPlayDetail(Screen):
         )
         added = _toggle_favorite_entry(entry)
         self["status"].setText("Added to favorites" if added else "Removed from favorites")
+        toast(self, u"\u2605  Added to favorites" if added else u"Removed from favorites")
         if self._data:
             self._onLoaded(self._data)
 
@@ -2547,6 +2558,7 @@ class NovaPlayDetail(Screen):
         if not stream_url:
             self._resume_direct = False      # the remembered server failed: user picks
             self["status"].setText("{} — not available, try another server".format(server["name"]))
+            toast(self, u"{} failed \u2014 try another server".format(server["name"][:24]))
             return
         try:
             from plugin_state import _save_last_server

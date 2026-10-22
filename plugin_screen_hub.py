@@ -48,6 +48,7 @@ from plugin_state import (_get_config, _set_config, _continue_items, _history_it
 from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 from plugin_util import _single_line_text
 from novaplay_thread import callInMainThread
+from plugin_toast import TOAST_XML, toast_init, toast
 from novaplay_dualclock import format_dual_dates
 
 GOLD = "#F2C230"
@@ -176,6 +177,7 @@ def _skin():
         """.format(i=i, x=x, y=y, w=_S_W, h=_S_H, x3=x + 3, y3=y + 3, w3=_S_W - 6, h3=_S_H - 6,
                    lx=x + 18, ly=y + 18, dx=x + _S_W - 34, dy=y + 34, nx=x + 18, ny=y + 74, gy=y + 112, tw=_S_W - 36,
                    edge=EDGE, card=CARD, white=WHITE))
+    parts.append(TOAST_XML)
     parts.append("</screen>")
     return "".join(parts)
 
@@ -227,6 +229,7 @@ class NovaPlayHub(Screen):
         self["contLeft"] = Label(u"\u2039")
         self["siteLeft"] = Label(u"\u2039")
         self["siteRight"] = Label(u"\u203a")
+        toast_init(self)
         self["contRight"] = Label(u"\u203a")
         self["siteCount"] = Label("")
         self["key_blue"] = Label("Settings")
@@ -830,6 +833,7 @@ class NovaPlayHub(Screen):
                     except Exception as e:
                         my_log("clear continue: {}".format(e))
                     self._back()
+                    toast(self, u"Removed from Continue Watching")
                 elif act == "all":
                     def _yes(ok):
                         if ok:
@@ -839,6 +843,7 @@ class NovaPlayHub(Screen):
                             except Exception as e:
                                 my_log("clear all continue: {}".format(e))
                             self._back()
+                            toast(self, u"Continue Watching cleared")
                     self.session.openWithCallback(_yes, MessageBox,
                         u"Clear Continue Watching?\n\n{} unfinished titles will be removed from the list "
                         u"(they stay in History).".format(total), MessageBox.TYPE_YESNO, default=False)

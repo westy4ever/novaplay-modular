@@ -47,6 +47,7 @@ from plugin_util import (_site_label, _site_search_item, _single_line_text, _wra
                          _dedupe_items, _rank_search_items, _strip_arabic_from_english_title)
 from plugin_tmdb import _tmdb_search_metadata, fill_item_rating_async
 from novaplay_thread import callInMainThread
+from plugin_toast import TOAST_XML, toast_init, toast
 
 GOLD = "#F2C230"
 WHITE = "#FFFFFF"
@@ -57,6 +58,13 @@ EDGE = "#262E3B"
 ROW_ON = "#222B3A"
 PANEL = "#121822"
 BG = "#0C1017"
+
+# [ratings] badge colour by score: green 7+, gold 5-7, grey below
+def _rate_color(v):
+    return "#30C48D" if v >= 7 else (GOLD if v >= 5 else MUTED)
+
+
+SKELETON = "#1E2633"             # [loading] grey placeholder cards
 
 CAT_ROWS = 10
 _CAT_Y0, _CAT_STEP, _CAT_H = 212, 62, 56
@@ -194,6 +202,7 @@ def _skin():
         <widget name="kRate{i}" position="{rx},{ry}" size="78,30" font="Bold;19" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="8" />
         """.format(i=s_, x=x, y=y, w=w, h=h, ex=x - 5, ey=y - 5, ew=w + 10, eh=h + 10,
                    rx=x + 8, ry=y + 8, gold=GOLD, card=CARD))
+    parts.append(TOAST_XML)
     parts.append("</screen>")
     return "".join(parts)
 
@@ -343,6 +352,7 @@ class NovaPlaySite(Screen):
         self._bd_token = 0
         self._bd_path = ""
         self["hint"] = Label("")
+        toast_init(self)
         for i in range(CAT_ROWS):
             self["cBg%d" % i] = Label("")
             self["cBar%d" % i] = Label("")
@@ -543,7 +553,7 @@ class NovaPlaySite(Screen):
 
     def _loadCategories(self):
         self._status("Loading sections…")
-        self._showMsg("Loading…")
+        self._showSkeleton()
         tok = self._token
 
         def _worker():
@@ -657,6 +667,7 @@ class NovaPlaySite(Screen):
         self._history = [(url, 1)]
         self._next_url = None
         self._focus_after = focus
+        self._showSkeleton()
         self._fetch(url)
 
     def _fetch(self, url):
@@ -691,7 +702,7 @@ class NovaPlaySite(Screen):
             self._setPosters(content)
             if getattr(self, "_focus_after", True):
                 self._zone = "posters"
-            self._status(u"Page {}  ·  {}".format(self._page, self._cat_name))
+            self._status(self._crumb())
         elif items and any(self._selectable(i) for i in items):
             # a folder of sub-categories: open it in the left panel
             self._levels.append({"title": self._cat_name, "items": items,
@@ -710,7 +721,7 @@ class NovaPlaySite(Screen):
         self._loading = True
         self._token += 1
         tok = self._token
-        self._showMsg("Loading…")
+        self._showSkeleton()
         self._status("Loading…")
 
         def _worker():
@@ -732,6 +743,13 @@ class NovaPlaySite(Screen):
     # ─── posters ────────────────────────────────────────────────────────
 
     def _showMsg(self, text):
+        if getattr(self, "_skeleton", False):
+            self._skeleton = False
+            for i in range(self._view):
+                self._color("pBack%d" % i, bg=CARD)
+            for s_ in range(K_SLOTS):
+                self._color("kBack%d" % s_, bg=CARD)
+                self["kBack%d" % s_].hide()
         self["gridMsg"].setText(text)
         self["gridMsg"].show()
         for i in range(self._view):
@@ -744,11 +762,49 @@ class NovaPlaySite(Screen):
         self._clearInfo()
         self._applyLayout()
 
+    def _showSkeleton(self):
+        """[loading] grey poster-shaped cards where the posters will appear
+        (instead of one big 'Loading…' box), so nothing jumps when they come"""
+        self["gridMsg"].hide()
+        self._posters = []
+        self._clearInfo()
+        self["gridCount"].setText("")
+        self["gridMore"].setText("")
+        self._vis(["gridLeft", "gridRight", "kLeft", "kRight"], False)
+        car = self._carousel()
+        for i in range(self._view):
+            for n in ("pEdge", "pImg", "pRate", "pMark", "pName", "pYear"):
+                self["%s%d" % (n, i)].hide()
+            if car:
+                self["pBack%d" % i].hide()
+            else:
+                self._color("pBack%d" % i, bg=SKELETON)
+                self["pBack%d" % i].show()
+        for s_ in range(K_SLOTS):
+            for n in ("kEdge", "kImg", "kRate"):
+                self["%s%d" % (n, s_)].hide()
+            if car and _KX[s_] >= 420:
+                self._color("kBack%d" % s_, bg=SKELETON)
+                self["kBack%d" % s_].show()
+            else:
+                self["kBack%d" % s_].hide()
+        self._skeleton = True
+        self._applyLayout()
+
     def _setPosters(self, items):
         self._posters = items
         self._pi = 0 if not getattr(self, "_focus_end", False) else len(items) - 1
         self._focus_end = False
         self["gridMsg"].hide()
+
+    def _crumb(self):
+        """[breadcrumb] where you are: folders › category › page N"""
+        parts = [l.get("title", "") for l in self._levels[1:]]
+        if self._cat_name and (not parts or parts[-1] != self._cat_name):
+            parts.append(self._cat_name)
+        if self._page > 1 or self._hasPages():
+            parts.append(u"page {}".format(self._page))
+        return u"  \u203a  ".join(_single_line_text(p, width=30, fallback="") for p in parts if p)
 
     def _hasPages(self):
         """the open category has more site pages (so 'page 1' is worth showing)"""
@@ -762,6 +818,10 @@ class NovaPlaySite(Screen):
             self._paintCarousel()
             return
         self["gridMsg"].hide()
+        if getattr(self, "_skeleton", False):
+            self._skeleton = False
+            for i in range(self._view):
+                self._color("pBack%d" % i, bg=CARD)
         view = self._pi // self._view
         views = (n + self._view - 1) // self._view
         base = view * self._view
@@ -804,6 +864,7 @@ class NovaPlaySite(Screen):
                 rv = 0.0
             if rv > 0:
                 self["pRate%d" % i].setText(u"★ " + r[:3])
+                self._color("pRate%d" % i, fg=_rate_color(rv))
                 self["pRate%d" % i].show()
             else:
                 self["pRate%d" % i].hide()
@@ -1168,6 +1229,10 @@ class NovaPlaySite(Screen):
 
     def _paintCarousel(self):
         n = len(self._posters)
+        if getattr(self, "_skeleton", False):
+            self._skeleton = False
+            for s_ in range(K_SLOTS):
+                self._color("kBack%d" % s_, bg=CARD)
         self["gridMsg"].hide()
         self._pi = max(0, min(self._pi, n - 1))
         more = u"  ·  page {}".format(self._page) if (self._page > 1 or self._hasPages()) else u""
@@ -1205,6 +1270,7 @@ class NovaPlaySite(Screen):
                 rv = 0.0
             if rv > 0:
                 self["kRate%d" % s_].setText(u"★ " + r_[:3])
+                self._color("kRate%d" % s_, fg=_rate_color(rv))
                 self["kRate%d" % s_].show()
             else:
                 self["kRate%d" % s_].hide()
@@ -1629,6 +1695,7 @@ class NovaPlaySite(Screen):
 
     def _afterRemove(self, msg):
         self._status(msg)
+        toast(self, msg)
         self._info_item = None
         if not self._posters:
             self._zone = "cats"
@@ -1647,6 +1714,7 @@ class NovaPlaySite(Screen):
         entry = _entry_from_item(dict(it), it.get("_site", self._site), it.get("type", self._m_type))
         added = _toggle_favorite_entry(entry)
         self._status("Added to favorites" if added else "Removed from favorites")
+        toast(self, u"\u2605  Added to favorites" if added else u"Removed from favorites")
         self["infoState"].setText(self._stateText(it))
         self["kState"].setText(self._stateText(it))
 
