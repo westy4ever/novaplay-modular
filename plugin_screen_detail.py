@@ -165,8 +165,10 @@ _SV_Y = 758
 _SV_GOLD, _SV_CARD, _SV_ON = "#F2C230", "#161C26", "#2A2717"
 # [cast] 2 rows x 3 round TMDb photos with names, right of the plot
 CAST_N = 6
-_CAST_X = (1356, 1526, 1696)
-_CAST_Y = (196, 432)
+# [cast] one row of 6 round photos (no panel) under the details, over the backdrop
+_CAST_PHOTO, _CAST_W = 100, 146
+_CAST_X = tuple(420 + i * _CAST_W for i in range(6))
+_CAST_Y = 324
 
 
 def _detail_skin_modern():
@@ -187,13 +189,11 @@ def _detail_skin_modern():
 
         <widget name="title" position="420,140" size="900,66" font="Bold;52" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
         <widget name="meta" position="420,212" size="900,34" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="4" />
-        <widget name="proxy_warning" position="420,248" size="900,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
-        <widget name="source" position="420,290" size="880,160" font="Regular;22" foregroundColor="#D6DCE5" transparent="1" halign="left" zPosition="4" />
-        <widget name="plot_title" position="420,462" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
-        <widget name="plot" position="420,494" size="880,180" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
+        <widget name="source" position="420,250" size="900,30" font="Regular;21" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
+        <widget name="proxy_warning" position="420,284" size="900,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
+        <widget name="plot_title" position="420,504" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
+        <widget name="plot" position="420,534" size="900,146" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
 
-        <eLabel position="1336,140" size="544,532" backgroundColor="#121822" cornerRadius="20" zPosition="2" />
-        <widget name="castTitle" position="1364,152" size="480,32" font="Bold;19" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="4" />
         <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
         <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
         <widget name="svPos" position="1230,706" size="620,36" font="Regular;20" halign="right" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="4" />
@@ -204,11 +204,12 @@ def _detail_skin_modern():
         <widget name="menuProgress" position="{px},936" size="180,6" backgroundColor="#F2C230" transparent="0" cornerRadius="3" zPosition="5" />
     """.format(px=_SV_X0)]
     for i in range(CAST_N):
-        x, y = _CAST_X[i % 3], _CAST_Y[i // 3]
+        x, y = _CAST_X[i], _CAST_Y
         p.append("""
-        <widget name="castImg{i}" position="{ix},{y}" size="116,116" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="castName{i}" position="{x},{ny}" size="164,54" font="Regular;18" halign="center" valign="top" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
-        """.format(i=i, x=x, ix=x + 24, y=y, ny=y + 122))
+        <widget name="castImg{i}" position="{ix},{y}" size="{ps},{ps}" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="castName{i}" position="{x},{ny}" size="{w},50" font="Regular;17" halign="center" valign="top" foregroundColor="#FFFFFF" backgroundColor="#0C1017" transparent="1" zPosition="4" />
+        """.format(i=i, x=x, ix=x + (_CAST_W - _CAST_PHOTO) // 2, y=y, ny=y + _CAST_PHOTO + 6,
+                   ps=_CAST_PHOTO, w=_CAST_W))
     for i in range(SV_CARDS):
         x = _SV_X0 + i * (_SV_W + _SV_GAP)
         p.append("""
@@ -237,6 +238,35 @@ def _detail_skin_modern():
 
 
 _DETAIL_SKIN_MODERN = _detail_skin_modern().replace("</screen>", TOAST_XML + "</screen>")
+
+
+def _runtime_minutes(v):
+    """[FIX runtime] minutes from TMDb's int or a site's text:
+    130 / "130" / "130 min" / "130 دقيقة" / "2h 10m" / "02:10:00" / "2:10" /
+    "ساعتان و 10 دقائق" -> 130; 0 when it can't tell."""
+    if v is None or v == "":
+        return 0
+    if isinstance(v, (int, float)):
+        return int(v) if 0 < v < 1000 else 0
+    t = str(v).strip().translate({ord(a): ord("0") + i for i, a in enumerate(u"\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669")})
+    m = re.search(r"(\d{1,2}):(\d{2})(?::\d{2})?", t)
+    if m:
+        return int(m.group(1)) * 60 + int(m.group(2))
+    hours = 0
+    mh = re.search(r"(\d+)\s*(?:h|hr|hour|hours|\u0633\u0627\u0639)", t, re.I)
+    if mh:
+        hours = int(mh.group(1))
+    elif re.search(u"\u0633\u0627\u0639\u062a\u0627\u0646|\u0633\u0627\u0639\u062a\u064a\u0646", t):
+        hours = 2
+    elif re.search(u"\u0633\u0627\u0639\u0629", t):
+        hours = 1
+    mm = re.search(r"(\d+)\s*(?:m\b|min|mins|minutes|\u062f\u0642)", t, re.I)
+    mins = int(mm.group(1)) if mm else 0
+    if hours or mins:
+        return hours * 60 + mins
+    m = re.search(r"\d+", t)
+    n = int(m.group(0)) if m else 0
+    return n if 0 < n < 1000 else 0
 
 
 def _youtube_search_trailer(yt_dlp, query):
@@ -458,10 +488,10 @@ class NovaPlayDetail(Screen):
         ("info", (
             ("title", 420, 140),
             ("meta", 420, 212),
-            ("proxy_warning", 420, 248),
-            ("source", 420, 290),
-            ("plot_title", 420, 462),
-            ("plot", 420, 494),
+            ("source", 420, 250),
+            ("proxy_warning", 420, 284),
+            ("plot_title", 420, 504),
+            ("plot", 420, 534),
         ), 260, 0, 2, 8),
         ("band", (
             ("menu_box", 40, 692),
@@ -598,7 +628,6 @@ class NovaPlayDetail(Screen):
         self["menuAccent"].hide()
         self["menuProgress"].hide()
         if self._modern:
-            self["castTitle"] = Label("")
             for _i in range(CAST_N):
                 self["castImg%d" % _i] = Pixmap()
                 self["castName%d" % _i] = Label("")
@@ -702,7 +731,6 @@ class NovaPlayDetail(Screen):
             self["menuAccent"].hide()
         except Exception:
             pass
-        self["castTitle"].setText("CAST")
         for i in range(CAST_N):
             self["castImg%d" % i].hide()
             self["castName%d" % i].hide()
@@ -807,7 +835,7 @@ class NovaPlayDetail(Screen):
                     cast = []
             out = []
             for c in cast[:CAST_N]:
-                out.append((c.get("name", ""), _round_photo(c.get("photo"))))
+                out.append((c.get("name", ""), _round_photo(c.get("photo"), _CAST_PHOTO)))
             callInMainThread(self._paintCast, key, out)
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -817,7 +845,7 @@ class NovaPlayDetail(Screen):
         for i in range(CAST_N):
             if i < len(cast):
                 name, path = cast[i]
-                self["castName%d" % i].setText(_wrap_ui_text(name, width=16, max_lines=2, fallback=""))
+                self["castName%d" % i].setText(_wrap_ui_text(name, width=15, max_lines=2, fallback=""))
                 self["castName%d" % i].show()
                 inst = self["castImg%d" % i].instance
                 if path and inst is not None:
@@ -828,7 +856,6 @@ class NovaPlayDetail(Screen):
             else:
                 self["castName%d" % i].hide()
                 self["castImg%d" % i].hide()
-        self["castTitle"].setText("CAST" if cast else "")
 
     def _svStep(self, d):
         n = len(self._sv_items)
@@ -1653,6 +1680,11 @@ class NovaPlayDetail(Screen):
                 w, h = 1830, 600
 
             img = Image.open(src_path).convert("RGB")
+            # [FIX backdrop] trust the picture, not the caller: a portrait
+            # image handed in as a "backdrop" was cover-cropped hard and
+            # stretched; it now gets the blurred-poster treatment instead
+            if is_landscape and img.size[0] < img.size[1] * 1.2:
+                is_landscape = False
 
             if getattr(self, "_modern", False):
                 fitted = _modern_backdrop(img, w, h, is_landscape)
@@ -1869,13 +1901,24 @@ class NovaPlayDetail(Screen):
             except Exception:
                 _rd_fmt = _rd
         _rt_fmt = ""
-        try:
-            _rt_min = int(data.get("runtime") or 0)
-            if _rt_min > 0:
-                _h, _m2 = divmod(_rt_min, 60)
-                _rt_fmt = "{}h {}m".format(_h, _m2) if _h else "{}m".format(_m2)
-        except Exception:
-            pass
+        # [FIX runtime] sites keep their own runtime text ("120 دقيقة",
+        # "02:10:00", "2h 10m"); the merge never replaced it with TMDb's
+        # minutes, so int() failed silently and no runtime was shown. TMDb's
+        # own number first, then whatever the site wrote, parsed.
+        # TMDb's runtime goes in the details line; a site-only runtime (TMDb
+        # had none) goes in the facts line below instead
+        _rt_raw = data.get("runtime")
+        _rt_min = _runtime_minutes((data.get("_tmdb") or {}).get("runtime")) or \
+            (_runtime_minutes(_rt_raw) if isinstance(_rt_raw, (int, float)) else 0)
+        if _rt_min > 0:
+            _h, _m2 = divmod(_rt_min, 60)
+            _rt_fmt = "{}h {}m".format(_h, _m2) if _h else "{}m".format(_m2)
+        _rt_site = ""
+        if not _rt_fmt:
+            _sm = _runtime_minutes(_rt_raw)
+            if _sm > 0:
+                _sh, _sm2 = divmod(_sm, 60)
+                _rt_site = "{}h {}m".format(_sh, _sm2) if _sh else "{}m".format(_sm2)
         _cert = str(data.get("certification") or "").strip()
 
         # [FIX] data.get("genres") alone is NOT a reliable TMDb-ran signal
@@ -1911,20 +1954,29 @@ class NovaPlayDetail(Screen):
             or self._item.get("type") in ("series", "show")
             or has_episodes
         )
+        _modern = getattr(self, "_modern", False)
         if has_episodes:
             _nav_label = "Seasons" if all(e.get("type") in ("series", "season") for e in _nav_items) else "Episodes"
-            counts.append("{}: {}".format(_nav_label, len(_nav_items)))
-        else:
+            counts.append(("{} " + _nav_label.lower()) .format(len(_nav_items)) if _modern
+                          else "{}: {}".format(_nav_label, len(_nav_items)))
+        elif not _modern:
+            # (Modern: the server count is on the server band already)
             counts.append("Servers: {}".format(len([s for s in data.get("servers", []) if s.get("url")])))
         # [no-repeat] Year is on the poster badge, Runtime in the details line
         # when TMDb gave it -- the facts only keep what is shown nowhere else
         if data.get("country"):                                       # [PATCH 111]
-            counts.append("Country: {}".format(data.get("country")))
-        if data.get("runtime") and not _rt_fmt:
-            counts.append("Runtime: {}".format(data.get("runtime")))
+            counts.append(data["country"] if _modern else "Country: {}".format(data.get("country")))
+        if _rt_site:
+            counts.append(_rt_site if _modern else "Runtime: {}".format(_rt_site))
         if data.get("channel"):
-            counts.append("Channel: {}".format(data.get("channel")))
-        self["source"].setText("\n".join(["Source: {}".format(_site_label(self._site))] + counts))
+            counts.append(data["channel"] if _modern else "Channel: {}".format(data.get("channel")))
+        if _modern:
+            # [facts-line] one line under the details: episodes / seasons · country · channel · site-only runtime
+            # (the site is the logo top-left; servers are counted on the band)
+            self["source"].setText(_single_line_text(u"  \u00b7  ".join(
+                str(c) for c in counts if c), width=90, fallback=""))
+        else:
+            self["source"].setText("\n".join(["Source: {}".format(_site_label(self._site))] + counts))
         if has_episodes:
             plot_label = "Series plot"
         elif has_servers:
@@ -2062,7 +2114,9 @@ class NovaPlayDetail(Screen):
         # unused anywhere in this screen until now). Falls back to the
         # poster (blurred, since it's portrait) only when no TMDb backdrop
         # URL came back at all.
-        backdrop_url = data.get("fanart") or ""
+        # [FIX backdrop] TMDb's wide backdrop first: a site's own "fanart"
+        # (often a small or portrait image) used to win over it
+        backdrop_url = (data.get("_tmdb") or {}).get("backdrop_url") or data.get("fanart") or ""
         if backdrop_url or poster_url:
             threading.Thread(target=self._downloadBackdrop, args=(backdrop_url, poster_url), daemon=True).start()
 
