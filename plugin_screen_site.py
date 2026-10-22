@@ -1430,7 +1430,7 @@ class NovaPlaySite(Screen):
         elif self._library:
             self["hint"].setText("OK  Open    MENU  Options    EXIT  Back")
         else:
-            self["hint"].setText("OK  Open    MENU  Options    ◀  Sections")
+            self["hint"].setText("OK  Open    ◀ ▶  Pages    MENU  Options    EXIT  Sections")
 
     def _move(self, dx, dy):
         if self._zone == "cats":
@@ -1479,6 +1479,18 @@ class NovaPlaySite(Screen):
         local = self._pi % self._view
         col = local % self._cols
         if dx < 0 and col == 0:
+            # ◀ on the first column follows the ‹ arrow: the previous view of
+            # posters (same row, last column), then the previous page; only
+            # from the very first view does it go to the categories
+            view = self._pi // self._view
+            if view > 0:
+                row = local // self._cols
+                self._pi = (view - 1) * self._view + row * self._cols + self._cols - 1
+                self._paintPosters()
+                return
+            if self._page > 1 and len(self._history) > 1 and not self._loading:
+                self._prevPage()
+                return
             self._zone = "cats"
             self._paintCats()
             self._paintPosters()
