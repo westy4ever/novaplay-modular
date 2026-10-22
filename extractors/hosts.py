@@ -396,6 +396,19 @@ def resolve_govid(url, referer=None):
         return None
 
 
+def resolve_vidhide(url, referer=None):
+    """[2026-10-22] vidhidevip.com/v/<code> now redirects to callistanise.com
+    (a packed JW player, hls2 playlist); resolve_govid finds nothing there,
+    the hanerix-style resolver does (box test)."""
+    r = resolve_hanerix_style(url, referer=referer or "https://q7v3k8m2p1.top/")
+    if r:
+        return r
+    try:
+        return resolve_govid(url, referer)
+    except Exception:
+        return None
+
+
 def resolve_upstream(url):
     try:
         html, _ = fetch(url, referer=url)
@@ -1177,6 +1190,9 @@ def resolve_fastvip(url, referer=None):
     except Exception: pass
     return None
 
+_STREAMWISH_MIRRORS = ("hglamioz.com",)
+
+
 def resolve_streamwish(url, _depth=0):
     try:
         html, final = fetch(url, referer=url)
@@ -1199,6 +1215,19 @@ def resolve_streamwish(url, _depth=0):
                 if nxt != (final or url):
                     log("streamwish: stub page ({} bytes) -> {}".format(len(html), nxt[:90]))
                     r = resolve_streamwish(nxt, _depth + 1)
+                    if r:
+                        return r
+            # streamwish.to's "Page is loading..." shell picks the mirror in an
+            # obfuscated main.js; the same /e/<code> plays on its mirror (box:
+            # hglamioz.com/e/<code> -> packed player -> premilkyway hls2)
+            code = re.search(r"/(?:e|v|embed)/([A-Za-z0-9]+)", url)
+            if code and "main.js" in html:
+                for mirror in _STREAMWISH_MIRRORS:
+                    if mirror in urlparse(url).netloc:
+                        continue
+                    alt = "https://{}/e/{}".format(mirror, code.group(1))
+                    log("streamwish: loading shell -> trying {}".format(alt))
+                    r = resolve_streamwish(alt, _depth + 1)
                     if r:
                         return r
             log("streamwish: stub page ({} bytes): {}".format(len(html), re.sub(r"\s+", " ", html)[:300]))
@@ -5043,6 +5072,8 @@ HOST_RESOLVERS = {
     "filelion":    resolve_streamwish,
     "filelions":   resolve_streamwish,
     "vidhide":     resolve_govid,
+    "vidhidevip":  resolve_vidhide,   # [2026-10-22] -> callistanise.com
+    "callistanise": resolve_hanerix_style,
     "vidhide.com": resolve_govid,
     "vidhide.pro": resolve_govid,
     "streamhide":  resolve_govid,

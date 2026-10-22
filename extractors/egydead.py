@@ -105,6 +105,7 @@ resolve_streamruby = _safe_import('resolve_streamruby')
 resolve_mixdrop = _safe_import('resolve_mixdrop')
 resolve_doodstream = _safe_import('resolve_doodstream')
 resolve_streamwish = _safe_import('resolve_streamwish')
+resolve_vidhide = _safe_import('resolve_vidhide')
 resolve_voe = _safe_import('resolve_voe')
 resolve_byselapuix = _safe_import('resolve_byselapuix')
 resolve_vidguard = _safe_import('resolve_vidguard')
@@ -1677,8 +1678,10 @@ class EgyDeadExtractor(BaseExtractor):
 
         # ─── VIDHIDEVIP ──────────────────────────────────────────────────
         if "vidhidevip" in low or "vidhide" in low:
-            if resolve_govid:   # <--- USE resolve_govid HERE INSTEAD!
-                stream = resolve_govid(url)
+            if resolve_vidhide or resolve_govid:
+                # [2026-10-22] vidhidevip -> callistanise: resolve_vidhide tries
+                # govid, then the page resolver that works there
+                stream = (resolve_vidhide or resolve_govid)(url)
                 if stream:
                     stream = _correct_stream_url(stream)
                     return stream, None, None, _variants_for(stream)
