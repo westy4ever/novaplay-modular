@@ -611,6 +611,80 @@ def _host_is_dead(url):
         return True
 
 
+# ─── [2026-10-22] browser cookies from Stream Recorder ("🍪 For NovaPlay") ─────
+# When Brave passes a site's Cloudflare check it holds a cf_clearance cookie
+# tied to its User-Agent and internet address. The box shares the PC's
+# address, so requests to that site carry the browser's cookies AND its exact
+# User-Agent. File: /etc/enigma2/novaplay_cookies.json (re-read when changed).
+_BROWSER_COOKIE_FILE = "/etc/enigma2/novaplay_cookies.json"
+_browser_cookies = {"mtime": None, "ua": "", "sites": {}, "logged": set()}
+
+
+def _cookie_label(host):
+    parts = [p for p in (host or "").lower().split(".") if p]
+    if len(parts) < 2:
+        return parts[0] if parts else ""
+    sld = parts[-2]
+    if sld in ("co", "com", "net", "org") and len(parts) >= 3:
+        return parts[-3]
+    return sld
+
+
+def browser_cookies_for(url):
+    """(cookie header, user agent) exported from the browser for this url's
+    site, or ("", "")."""
+    try:
+        st = os.stat(_BROWSER_COOKIE_FILE)
+    except OSError:
+        return "", ""
+    c = _browser_cookies
+    if c["mtime"] != st.st_mtime:
+        c["mtime"] = st.st_mtime
+        try:
+            with open(_BROWSER_COOKIE_FILE) as f:
+                data = json.load(f)
+            c["ua"] = str(data.get("user_agent") or "")
+            c["sites"] = data.get("sites") or {}
+            log("browser cookies: loaded {} site(s) from {}".format(len(c["sites"]), _BROWSER_COOKIE_FILE))
+        except Exception as e:
+            log("browser cookies: could not read {}: {}".format(_BROWSER_COOKIE_FILE, e))
+            c["ua"], c["sites"] = "", {}
+    if not c["sites"]:
+        return "", ""
+    host = (urlparse(url).netloc or "").lower().split(":")[0]
+    label = _cookie_label(host)
+    jar = {}
+    now = time.time()
+    for dom, site in c["sites"].items():
+        dom = dom.lower().lstrip(".")
+        if host == dom or host.endswith("." + dom) or (label and _cookie_label(dom) == label):
+            exp = (site or {}).get("expires") or 0
+            if exp and exp < now:
+                continue
+            jar.update((site or {}).get("cookies") or {})
+    if not jar:
+        return "", ""
+    if host not in c["logged"]:
+        c["logged"].add(host)
+        log("browser cookies: using {} cookie(s){} for {}".format(
+            len(jar), " incl. cf_clearance" if "cf_clearance" in jar else "", host))
+    return "; ".join("{}={}".format(k, v) for k, v in jar.items()), c["ua"]
+
+
+def _apply_browser_cookies(url, headers):
+    ck, ua = browser_cookies_for(url)
+    if not ck:
+        return
+    old = next((headers[k] for k in list(headers) if k.lower() == "cookie"), "")
+    for k in [k for k in headers if k.lower() == "cookie"]:
+        headers.pop(k, None)
+    headers["Cookie"] = (old + "; " + ck) if old else ck
+    if ua:
+        for k in [k for k in headers if k.lower() == "user-agent"]:
+            headers.pop(k, None)
+        headers["User-Agent"] = ua
+
+
 def fetch(url, referer=None, extra_headers=None, post_data=None,
            timeout=None, max_retries=None):
     """
@@ -772,6 +846,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                         # negotiates a compression this build can't decode.
                         cf_headers["Accept-Encoding"] = ACCEPT_ENCODING
 
+                    _apply_browser_cookies(url, cf_headers)
                     _cffi_timeout = 30 if timeout is None else timeout
 
                     def _do_cffi_request(imp):
@@ -920,6 +995,7 @@ def fetch(url, referer=None, extra_headers=None, post_data=None,
                 headers.update(extra_headers)
             # a None value in extra_headers removes that default header
             headers = {k: v for k, v in headers.items() if v is not None}
+            _apply_browser_cookies(encoded_url, headers)
 
             data = post_data
             if data and isinstance(data, dict):
