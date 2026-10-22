@@ -369,7 +369,7 @@ class NovaPlayHub(Screen):
             on = i == self._sec
             self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
             self["rowBg%d" % i].show() if on else self["rowBg%d" % i].hide()
-            self["rowEdge%d" % i].show() if (on and side) else self["rowEdge%d" % i].hide()
+            self["rowEdge%d" % i].hide()      # no outline on the row (panel frame only)
             self["rowBar%d" % i].show() if on else self["rowBar%d" % i].hide()
             self._color("rowText%d" % i, fg=WHITE if on else TEXT)
             self._pix("rowIcon%d" % i, os.path.join(_ICONS, "side_%s_%s.png" % (ic, "on" if on else "off")))

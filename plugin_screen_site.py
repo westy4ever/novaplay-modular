@@ -610,7 +610,7 @@ class NovaPlaySite(Screen):
             # otherwise) -- so the growing row never slides under a neighbour
             self["cBg%d" % i].show() if on else self["cBg%d" % i].hide()
             self._color("cBg%d" % i, bg=(ROW_ON_M if self._modern else ROW_ON) if on else PANEL)
-            self["cEdge%d" % i].show() if (on and side) else self["cEdge%d" % i].hide()
+            self["cEdge%d" % i].hide()        # no outline on the row (panel frame only)
             self["cBar%d" % i].show() if (on and side) else self["cBar%d" % i].hide()
             self._color("cText%d" % i, fg=WHITE if on else (MUTED if c.get("type") == "error" else TEXT))
         self._catPopFocus(sel - top if (side and n and 0 <= sel - top < CAT_ROWS
