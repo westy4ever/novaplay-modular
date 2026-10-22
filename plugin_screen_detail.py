@@ -1841,15 +1841,15 @@ class NovaPlayDetail(Screen):
             if _rd_fmt:             tmdb_meta.append(_rd_fmt)
             if data.get("genres"): tmdb_meta.append(data["genres"])
             if _rt_fmt:             tmdb_meta.append(_rt_fmt)
-            self["meta"].setText(_single_line_text("{}  |  {}".format(_site_label(self._site), "  ·  ".join(tmdb_meta)), width=96, fallback=""))
+            # [no-repeat] no site name here (logo + "Source" fact show it)
+            self["meta"].setText(_single_line_text("  ·  ".join(tmdb_meta), width=96, fallback=""))
         else:
+            # [no-repeat] year and rating are on the poster badges already
             meta = []
-            if data.get("year"):    meta.append(data["year"])
-            if data.get("rating"):  meta.append("{}/10".format(data["rating"]))
             if data.get("type") in _TYPE_LABELS: meta.append(_TYPE_LABELS[data["type"]])
             if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
             if data.get("genres"):  meta.append(data["genres"])
-            self["meta"].setText(_single_line_text("{}  |  {}".format(_site_label(self._site), "  ·  ".join(meta)), width=96, fallback=""))
+            self["meta"].setText(_single_line_text("  ·  ".join(meta), width=96, fallback=""))
         counts = []
         _nav_items = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
         has_episodes = bool(_nav_items)
@@ -1864,11 +1864,11 @@ class NovaPlayDetail(Screen):
             counts.append("{}: {}".format(_nav_label, len(_nav_items)))
         else:
             counts.append("Servers: {}".format(len([s for s in data.get("servers", []) if s.get("url")])))
-        if data.get("year"):
-            counts.append("Year: {}".format(data.get("year")))
+        # [no-repeat] Year is on the poster badge, Runtime in the details line
+        # when TMDb gave it -- the facts only keep what is shown nowhere else
         if data.get("country"):                                       # [PATCH 111]
             counts.append("Country: {}".format(data.get("country")))
-        if data.get("runtime"):
+        if data.get("runtime") and not _rt_fmt:
             counts.append("Runtime: {}".format(data.get("runtime")))
         if data.get("channel"):
             counts.append("Channel: {}".format(data.get("channel")))
