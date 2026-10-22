@@ -708,8 +708,6 @@ class NovaPlayHub(Screen):
                     self._si = t
                 elif (page + 1) * S_PAGE < n:
                     self._si = n - 1
-            if self._zone == "sites" and abs(self._si // S_PAGE - _page0) == 1:
-                self._site_slide = self._si // S_PAGE - _page0
         self._paint()
 
     def _ok(self):
