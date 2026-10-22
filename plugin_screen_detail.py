@@ -3091,8 +3091,13 @@ class NovaPlayDetail(Screen):
                 candidates = _build_remote_play_candidates(local_path)
             else:
                 candidates = [(4097, local_path, u"local trailer", False)]
+            # [FIX exit freeze] remember the TV channel so closing the trailer
+            # brings it back (stop + forceRestart, like the films) instead of
+            # leaving the trailer's last frame frozen on screen
+            from plugin_screen_player import _capture_previous_service
             self.session.open(NovaPlaySimplePlayer, trailer_title, candidates,
-                               previous_service=None, resume_pos=0, item_url="",
+                               previous_service=_capture_previous_service(self.session),
+                               resume_pos=0, item_url="",
                                next_episode=None, on_next=None,
                                poster_url=self._osd_poster, quality_variants=None,
                                server_url="", is_preview=True)

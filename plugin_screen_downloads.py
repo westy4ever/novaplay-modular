@@ -447,10 +447,11 @@ class NovaPlayDownloads(Screen):
 
     def _play(self, t):
         try:
-            from plugin_screen_player import NovaPlaySimplePlayer
+            from plugin_screen_player import NovaPlaySimplePlayer, _capture_previous_service
             self.session.open(NovaPlaySimplePlayer, t.title or os.path.basename(t.dest_path),
                               [(4097, t.dest_path, u"local file", False)],
-                              previous_service=None, resume_pos=0, item_url="",
+                              previous_service=_capture_previous_service(self.session),
+                              resume_pos=0, item_url="",
                               next_episode=None, on_next=None, poster_url="",
                               quality_variants=None, server_url="", is_preview=True)
         except Exception as e:
