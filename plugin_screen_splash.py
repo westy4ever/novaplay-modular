@@ -61,6 +61,11 @@ class NovaPlaySplash(Screen):
                 set_browser_proxy(_get_config("browser_proxy", ""))
             except Exception:
                 pass
+            try:
+                import novaplay_kbfix               # keyboard Google suggestions (in memory)
+                novaplay_kbfix.apply()
+            except Exception:
+                pass
             import plugin_screen_hub                # noqa: F401
             import plugin_screen_home               # noqa: F401
         except Exception as e:
