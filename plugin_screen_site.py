@@ -689,6 +689,7 @@ class NovaPlaySite(Screen):
         side = self._zone == "cats"
         self._color("catEdge", bg=GOLD if side else EDGE)
         self._framePop("catEdge", (40, 150, 350 if self._modern else 360, 810), side)
+        self._setCatDirection(items)
         for i in range(CAT_ROWS):
             g = top + i
             if g >= n:
@@ -718,6 +719,31 @@ class NovaPlaySite(Screen):
         elif not self._fixed_title and self._loader is None:
             self["catHead"].setText("CATEGORIES")
         self._applyLayout()
+
+    def _setCatDirection(self, items):
+        """[rtl] a list of mostly Arabic category names reads right-to-left:
+        names right-aligned and the gold bar on the right; English lists
+        stay left-to-right (decided per list, so a mixed list doesn't zigzag)"""
+        names = [str(c.get("title", "")) for c in items if c.get("type") != "separator"]
+        ar = sum(1 for t in names if any(u"\u0600" <= ch <= u"\u06ff" for ch in t))
+        rtl = bool(names) and ar * 2 > len(names)
+        if rtl == getattr(self, "_cat_rtl", None):
+            return
+        self._cat_rtl = rtl
+        try:
+            from enigma import eLabel
+            align = eLabel.alignRight if rtl else eLabel.alignLeft
+        except Exception:
+            align = 2 if rtl else 0
+        for i in range(CAT_ROWS):
+            inst = self["cText%d" % i].instance
+            if inst is not None:
+                try:
+                    inst.setHAlign(align)
+                    inst.invalidate()
+                except Exception:
+                    pass
+            self._placeCat(i, 1.0 if i == getattr(self, "_cat_slot", -1) else 0.0)
 
     def _openCategory(self, c, focus=True):
         self._slide_dir = 0          # a new category appears in place (no slide)
@@ -1118,13 +1144,15 @@ class NovaPlaySite(Screen):
         x0, y0 = 54 - dw / 2.0 + getattr(self, "_open_dx", 0.0), y - dh / 2.0
         w, h = W + dw, H + dh
         self._mr("cBg%d" % i, x0, y0, w, h)
+        rtl = getattr(self, "_cat_rtl", False)
+        bx = x0 + w - 5 if rtl else x0            # [rtl] gold bar on the reading side
         if self._modern:
-            self._mr("cBar%d" % i, x0, y0 + 10 * h / H, 5, h - 20 * h / H)
-            self._mr("cText%d" % i, x0 + 20, y0, w - 30, h)
+            self._mr("cBar%d" % i, bx, y0 + 10 * h / H, 5, h - 20 * h / H)
+            self._mr("cText%d" % i, x0 + (10 if rtl else 20), y0, w - 30, h)
             base = 24
         else:
-            self._mr("cBar%d" % i, x0, y0, 5, h)
-            self._mr("cText%d" % i, x0 + 18, y0, w - 28, h)
+            self._mr("cBar%d" % i, bx, y0, 5, h)
+            self._mr("cText%d" % i, x0 + (10 if rtl else 18), y0, w - 28, h)
             base = 25
         size = sc(base + 3 * p)
         inst = self["cText%d" % i].instance
