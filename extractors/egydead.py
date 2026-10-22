@@ -986,6 +986,10 @@ class EgyDeadExtractor(BaseExtractor):
     _MEGAMAX_ORDER = ("streamruby", "mixdrop", "streamp2p", "voe", "streamhg", "earnvids", "doodstream",
                       "vidmoly", "byse", "vidara", "uqload")
 
+    # [2026-10-22] VidHide ("earnvids": vidhidevip -> callistanise) doesn't play
+    # even in a browser (user, PC); the box got its playlist but every variant 403
+    _MEGAMAX_SKIP = ("earnvids",)
+
     _MEGAMAX_IFRAME_RE = re.compile(r'^https?://[^/]+/iframe/[A-Za-z0-9_-]+/?(?:\?.*)?$', re.I)
 
     _KNOWN_DIRECT_HOSTS = (
@@ -1146,6 +1150,8 @@ class EgyDeadExtractor(BaseExtractor):
             q, size_txt = self._group_quality(g), self._fmt_size(g["size"])
             info = ", ".join([x for x in (q, size_txt) if x])
             for driver, link in sorted(g["mirrors"], key=lambda it: order.index(it[0]) if it[0] in order else len(order)):
+                if driver in self._MEGAMAX_SKIP:
+                    continue
                 dname = self._MEGAMAX_DRIVERS.get(driver, driver.title() or "Server")
                 servers.append({"name": "{} ({})".format(dname, info), "url": link, "type": "embed", "quality": q,
                                 "_dl": {"resolution": q, "size": size_txt, "quality": dname, "url": link}})
