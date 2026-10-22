@@ -750,6 +750,10 @@ class NovaPlaySite(Screen):
         self._focus_end = False
         self["gridMsg"].hide()
 
+    def _hasPages(self):
+        """the open category has more site pages (so 'page 1' is worth showing)"""
+        return bool(self._next_url) or (self._site in _PAGED_SITES and bool(self._cat_url))
+
     def _paintPosters(self):
         n = len(self._posters)
         if not n:
@@ -765,7 +769,7 @@ class NovaPlaySite(Screen):
         more = []
         if view < views - 1 or self._next_url or self._site in _PAGED_SITES and self._cat_url:
             more.append("▼ more")
-        if self._page > 1:
+        if self._page > 1 or self._hasPages():
             more.append("page {}".format(self._page))
         self["gridMore"].setText("   ·   ".join(more))
         # [band] ‹ › beside the grid when there is more that way
@@ -1166,7 +1170,7 @@ class NovaPlaySite(Screen):
         n = len(self._posters)
         self["gridMsg"].hide()
         self._pi = max(0, min(self._pi, n - 1))
-        more = u"  ·  page {}".format(self._page) if self._page > 1 else u""
+        more = u"  ·  page {}".format(self._page) if (self._page > 1 or self._hasPages()) else u""
         # ‹ › at the ends of the strip when there are titles beyond it
         _br = self._zone == "posters"
         self["kLeft"].show() if (_br and (self._pi - K_MID > 0 or self._page > 1)) else self["kLeft"].hide()
