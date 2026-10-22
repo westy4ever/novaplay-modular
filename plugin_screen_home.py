@@ -94,7 +94,7 @@ from plugin_gridlist import (HomeMenuGrid, PosterCardGrid, resolve_icon_path,
     HOME_CELL_INNER_W, HOME_CELL_INNER_H,                # [PATCH G6][PATCH G7]
     HOME_CENTER_OFFSET_X,
     HOME_POP_OUT, HOME_POP_OUT_ICON,                     # [pop-out]
-    POP_ANIM_FRAMES, POP_ANIM_INTERVAL,                  # [pop-anim]
+    POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames, anim_light,   # [pop-anim]
     POSTER_GRID_COLS, POSTER_GRID_ROWS, POSTER_W, POSTER_H,
     _CAROUSEL_GEOMETRY,
     CONT_SLOTS, CONT_W, CONT_H, CONT_GAP, CONT_X0, CONT_Y,
@@ -938,16 +938,16 @@ class NovaPlayHome(Screen):
     def _carFrame(self, p):
         d = getattr(self, "_car_delta", 0)
         if not d:
-            self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(p))
+            self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(p), final=p >= 1.0)
             return
         for s in range(self.carousel_slots):
             a = self._slotGeomAt(s + d)
             b = self._slotGeomAt(s)
             g = [int(a[i] + (b[i] - a[i]) * p) for i in range(4)]
-            self._placeCarouselSlot(s, *g)
+            self._placeCarouselSlot(s, *g, final=p >= 1.0)
 
     def _carPopTick(self):
-        frames = max(1, POP_ANIM_FRAMES)
+        frames = max(1, anim_frames())
         self._car_pop_frame += 1
         t = min(1.0, float(self._car_pop_frame) / float(frames))
         p = math.sin(t * math.pi / 2)
@@ -958,37 +958,56 @@ class NovaPlayHome(Screen):
             except Exception:
                 pass
 
-    def _placeCarouselSlot(self, logical_slot, x, y, w, h):
+    def _placeCarouselSlot(self, logical_slot, x, y, w, h, final=True):
         if True:
             widget_id = logical_slot
             is_big = (logical_slot == self.carousel_center)
             pad = 12 if is_big else 8
-            self._moveResize('cposter%d' % widget_id, x, y, w, h)
-            self._moveResize('cposterImg%d' % widget_id, x + pad, y + pad, max(1, w - pad * 2), max(1, h - pad * 2))
+            self._mrc('cposter%d' % widget_id, x, y, w, h)
+            if final or not anim_light():
+                self._mrc('cposterImg%d' % widget_id, x + pad, y + pad, max(1, w - pad * 2), max(1, h - pad * 2))
+            else:
+                self._mrc('cposterImg%d' % widget_id, x + pad, y + pad)   # Light: resize at the end
             rb_w = 38 if is_big else 34
             rb_h = 40 if is_big else 34
             if is_big:
                 rb_w = int(rb_w * 1.3)
                 rb_h = int(rb_h * 1.25)
-            self._moveResize('cratingBadge%d' % widget_id, x + w - rb_w - 14, y + 22, rb_w, rb_h)
-            self._moveResize('cfavMark%d' % widget_id, x + 10, y + 10, 42, 42)
+            self._mrc('cratingBadge%d' % widget_id, x + w - rb_w - 14, y + 22, rb_w, rb_h)
+            self._mrc('cfavMark%d' % widget_id, x + 10, y + 10, 42, 42)
             _yw = 58 if is_big else 52
-            self._moveResize('cyearBadge%d' % widget_id, x + 12, y + 22, _yw, 28)
+            self._mrc('cyearBadge%d' % widget_id, x + 12, y + 22, _yw, 28)
             # [site-label] clabel geometry is now set per-slot inside
             # _updateCarouselSlot, where the actual label text (and thus
             # the chip width) is known.
-            self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
-            try:
-                _li = self["clabel%d" % widget_id].instance
-                if _li is not None:
-                    _li.move(ePoint(int(x + 12), int(y + 22 + 28 + 4)))
-            except Exception:
-                pass
+            self._mrc('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
+            self._mrc("clabel%d" % widget_id, x + 12, y + 22 + 28 + 4)
             if logical_slot == self.carousel_center:
                 focus_extra = 7
-                self._moveResize('cfocus%d' % self.carousel_center, x - focus_extra, y - focus_extra, w + (focus_extra * 2), h + (focus_extra * 2))
+                self._mrc('cfocus%d' % self.carousel_center, x - focus_extra, y - focus_extra, w + (focus_extra * 2), h + (focus_extra * 2))
             else:
-                self._moveResize('cfocus%d' % logical_slot, 0, 0, 1, 1)
+                self._mrc('cfocus%d' % logical_slot, 0, 0, 1, 1)
+
+    def _mrc(self, key, x, y, w=None, h=None):
+        """[perf] cached move / resize for the carousel widgets: skipped when
+        nothing would change (every call makes Enigma2 redraw the widget)"""
+        geo = self.__dict__.setdefault("_geo", {})
+        pos = (int(x), int(y))
+        size = (max(1, int(w)), max(1, int(h))) if w is not None else None
+        old = geo.get(key)
+        if old and old[0] == pos and (size is None or old[1] == size):
+            return
+        try:
+            inst = self[key].instance
+            if inst is None:
+                return
+            if not old or old[0] != pos:
+                inst.move(ePoint(*pos))
+            if size is not None and (not old or old[1] != size):
+                inst.resize(eSize(*size))
+            geo[key] = (pos, size if size is not None else (old[1] if old else None))
+        except Exception as e:
+            my_log("UI moveResize error for {}: {}".format(key, e))
 
     def _hubClose(self):
         try:
@@ -1436,7 +1455,7 @@ class NovaPlayHome(Screen):
             _ch = _label_chip_height(is_big=_is_big)
             _cx = _sx + 12
             _cy = _sy + 22 + 28 + 4
-            self._moveResize("clabel%d" % widget_id, _cx, _cy, _cw, _ch)
+            self._mrc("clabel%d" % widget_id, _cx, _cy, _cw, _ch)
             _cl.show()
         else:
             self["clabel%d" % widget_id].hide()
@@ -1506,7 +1525,7 @@ class NovaPlayHome(Screen):
             try: self._poster_pop_timer.stop()
             except Exception: pass
             return
-        frames = max(1, POP_ANIM_FRAMES)
+        frames = max(1, anim_frames())
         self._poster_pop_frame += 1
         p_raw = min(1.0, float(self._poster_pop_frame) / float(frames))
         # ease-out cubic: fast at the start, gentle landing
@@ -2061,7 +2080,7 @@ class NovaPlayHome(Screen):
             except Exception:
                 pass
             return
-        frames = max(1, POP_ANIM_FRAMES)
+        frames = max(1, anim_frames())
         self._pop_frame += 1
         p_raw = min(1.0, float(self._pop_frame) / float(frames))
         # ease-out cubic: fast at the start, gentle landing
@@ -2283,7 +2302,7 @@ class NovaPlayHome(Screen):
             except Exception:
                 pass
             return
-        frames = max(1, POP_ANIM_FRAMES)
+        frames = max(1, anim_frames())
         self._cont_pop_frame += 1
         p_raw = min(1.0, float(self._cont_pop_frame) / float(frames))
         p = math.sin(p_raw * math.pi / 2)      # ease-out sine (soft start)

@@ -399,8 +399,42 @@ HOME_POP_OUT       = sc(8)              # cyan glow ring width around the select
 HOME_POP_OUT_ICON  = sc(8)              # icon widget enlargement when selected
 
 # [pop-anim] eased pop-out animation on selection change
-POP_ANIM_FRAMES    = 12                 # frames per pop-out animation
+POP_ANIM_FRAMES    = 12                 # frames per pop-out animation (Full)
 POP_ANIM_INTERVAL  = 15                 # ms between frames (12 * 15 = 180ms, small even steps)
+
+# [anim] Settings > Animations: Full (12 steps) / Light (8 steps, poster
+# pictures don't rescale while zooming) / Off (straight to the end).
+# Read through a 3 s cache so animation frames don't hit the state file.
+_ANIM_STEPS = {"full": POP_ANIM_FRAMES, "light": 8, "off": 1}
+_anim_cache = [0.0, "full"]
+
+
+def anim_mode():
+    import time as _t
+    now = _t.time()
+    if now - _anim_cache[0] > 3.0:
+        try:
+            from plugin_state import _get_config
+            m = str(_get_config("anim_mode", "full") or "full").lower()
+        except Exception:
+            m = "full"
+        _anim_cache[0], _anim_cache[1] = now, (m if m in _ANIM_STEPS else "full")
+    return _anim_cache[1]
+
+
+def anim_frames():
+    """steps per animation for the current mode (1 = no animation)"""
+    return _ANIM_STEPS[anim_mode()]
+
+
+def anim_light():
+    """True when pictures should not be rescaled while they zoom"""
+    return anim_mode() != "full"
+
+
+def anim_reset():
+    """forget the cached mode (Settings just changed it)"""
+    _anim_cache[0] = 0.0
 
 
 class HomeMenuGrid(_BaseCardGrid):

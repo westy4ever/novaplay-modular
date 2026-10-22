@@ -58,7 +58,7 @@ from plugin_util import _split_episode_label                    # [PATCH 81]
 from plugin_screen_player import NovaPlaySimplePlayer, _play
 from plugin_widgets import StreamList
 from plugin_toast import TOAST_XML, toast_init, toast
-from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL
+from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames
 import plugin_health
 import plugin_imagecache
 from novaplay_thread import callInMainThread
@@ -671,14 +671,23 @@ class NovaPlayDetail(Screen):
         x0 = _SV_X0 + i * (_SV_W + _SV_GAP) + xoff
         k = 1.0 + 0.08 * p
         cx, cy = x0 - (_SV_W * k - _SV_W) / 2.0, _SV_Y - (_SV_H * k - _SV_H) / 2.0
+        geo = self.__dict__.setdefault("_sv_geo", {})
         for name, rx, ry, w, h, rs in self._SV_PARTS:
+            key = "%s%d" % (name, i)
+            pos = (int(cx + rx * k), int(cy + ry * k))
+            size = (max(1, int(w * k)), max(1, int(h * k))) if rs else None
+            old = geo.get(key)
+            if old == (pos, size):
+                continue                      # [perf] nothing would change
             try:
-                inst = self["%s%d" % (name, i)].instance
+                inst = self[key].instance
                 if inst is None:
                     continue
-                inst.move(ePoint(int(cx + rx * k), int(cy + ry * k)))
-                if rs:
-                    inst.resize(eSize(max(1, int(w * k)), max(1, int(h * k))))
+                if not old or old[0] != pos:
+                    inst.move(ePoint(*pos))
+                if size is not None and (not old or old[1] != size):
+                    inst.resize(eSize(*size))
+                geo[key] = (pos, size)
             except Exception:
                 pass
 
@@ -720,7 +729,7 @@ class NovaPlayDetail(Screen):
             self._svPopT.stop()
             return
         self._sv_pop_f += 1
-        t = min(1.0, self._sv_pop_f / float(max(1, POP_ANIM_FRAMES)))
+        t = min(1.0, self._sv_pop_f / float(max(1, anim_frames())))
         self._svFrame(math.sin(t * math.pi / 2))
         if t >= 1.0:
             self._svPopT.stop()

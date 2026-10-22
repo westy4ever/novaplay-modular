@@ -13,9 +13,12 @@ import math
 from enigma import eTimer
 
 try:
-    from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL
+    from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames
 except Exception:                                   # pragma: no cover
     POP_ANIM_FRAMES, POP_ANIM_INTERVAL = 12, 15
+
+    def anim_frames():
+        return 12
 
 
 class RowZoom(object):
@@ -49,7 +52,7 @@ class RowZoom(object):
 
     def _tick(self):
         self._f += 1
-        t = min(1.0, self._f / float(max(1, POP_ANIM_FRAMES)))
+        t = min(1.0, self._f / float(max(1, anim_frames())))
         if self._cur and self._cur[0] is not None and self._cur[0] >= 0:
             self._place(self._cur[0], math.sin(t * math.pi / 2))
         if t >= 1.0:

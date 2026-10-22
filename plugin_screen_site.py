@@ -43,7 +43,7 @@ import plugin_health
 from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _get_saved_position, _is_favorite,
                           _entry_from_item, _toggle_favorite_entry)
-from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc
+from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, anim_frames, anim_light
 from plugin_util import (_site_label, _site_search_item, _single_line_text, _wrap_ui_text,
                          _dedupe_items, _rank_search_items, _strip_arabic_from_english_title)
 from plugin_tmdb import _tmdb_search_metadata, fill_item_rating_async
@@ -430,12 +430,12 @@ class NovaPlaySite(Screen):
     def _openTick(self):
         import math
         self._open_f += 1
-        t = min(1.0, self._open_f / float(POP_FRAMES))
+        t = min(1.0, self._open_f / float(anim_frames()))
         self._open_dx = -420.0 * (1.0 - math.sin(t * math.pi / 2))
         st = getattr(self, "_frame_st", {}).get("catEdge")
         fp = 0.0
         if st and st["on"]:
-            fp = math.sin(min(1.0, st["f"] / float(POP_STEPS)) * math.pi / 2)
+            fp = math.sin(min(1.0, st["f"] / float(anim_frames())) * math.pi / 2)
         self._framePlace("catEdge", (40, 150, 350 if self._modern else 360, 810), fp)
         dx = self._open_dx
         self._mr("catHead", 68 + dx, 168 if self._modern else 170)
@@ -443,7 +443,7 @@ class NovaPlaySite(Screen):
         for i in range(CAT_ROWS):
             cp = 0.0
             if i == self._cat_slot:
-                cp = math.sin(min(1.0, self._cat_frame / float(POP_FRAMES)) * math.pi / 2)
+                cp = math.sin(min(1.0, self._cat_frame / float(anim_frames())) * math.pi / 2)
             self._placeCat(i, cp)
         if t >= 1.0:
             self._open_dx = 0.0
@@ -976,7 +976,10 @@ class NovaPlaySite(Screen):
             path = path or placeholder_for_item(it)
             inst = self["pImg%d" % i].instance
             if path and inst is not None:
-                inst.setPixmapFromFile(path)
+                pix = self.__dict__.setdefault("_pix_path", {})
+                if pix.get(("p", i)) != path:          # only a new picture is loaded
+                    inst.setPixmapFromFile(path)
+                    pix[("p", i)] = path
                 self["pImg%d" % i].show()
             else:
                 self["pImg%d" % i].hide()
@@ -1036,10 +1039,10 @@ class NovaPlaySite(Screen):
         import math
         busy = False
         for name, st in self._frame_st.items():
-            if not st["on"] or st["f"] >= POP_STEPS:
+            if not st["on"] or st["f"] >= anim_frames():
                 continue
             st["f"] += 1
-            t = min(1.0, st["f"] / float(POP_STEPS))
+            t = min(1.0, st["f"] / float(anim_frames()))
             self._framePlace(name, st["box"], math.sin(t * math.pi / 2))
             busy = busy or t < 1.0
         if not busy:
@@ -1100,7 +1103,7 @@ class NovaPlaySite(Screen):
             return
         import math
         self._cat_frame += 1
-        t = min(1.0, self._cat_frame / float(POP_FRAMES))
+        t = min(1.0, self._cat_frame / float(anim_frames()))
         self._placeCat(self._cat_slot, math.sin(t * math.pi / 2))
         if t >= 1.0:
             self._catPop.stop()
@@ -1114,17 +1117,27 @@ class NovaPlaySite(Screen):
         return x - (w - PW) // 2, y - (h - PH) // 2, w, h, (h - PH) // 2
 
     def _mr(self, name, x, y, w=None, h=None):
+        """move / resize a widget -- skipped when it would not change a pixel
+        (each call makes Enigma2 redraw the widget)"""
         inst = self[name].instance
         if inst is None:
             return
+        geo = self.__dict__.setdefault("_geo", {})
+        pos = (sc(x), sc(y))
+        size = (max(1, sc(w)), max(1, sc(h))) if w is not None else None
+        old = geo.get(name)
+        if old and old[0] == pos and (size is None or old[1] == size):
+            return
         try:
-            inst.move(ePoint(sc(x), sc(y)))
-            if w is not None:
-                inst.resize(eSize(max(1, sc(w)), max(1, sc(h))))
+            if not old or old[0] != pos:
+                inst.move(ePoint(*pos))
+            if size is not None and (not old or old[1] != size):
+                inst.resize(eSize(*size))
+            geo[name] = (pos, size if size is not None else (old[1] if old else None))
         except Exception:
             pass
 
-    def _placeSlot(self, i, p, xoff=0.0):
+    def _placeSlot(self, i, p, xoff=0.0, text=True):
         if not self._modern:
             # Classic grid: no zoom, only the page slide moves it
             x, y = _PX[i % P_COLS] + xoff, _PY[i // P_COLS]
@@ -1134,20 +1147,26 @@ class NovaPlaySite(Screen):
             self._mr("pRate%d" % i, x + 8, y + 8)
             self._mr("pQual%d" % i, x + PW - 92, y + 8)
             self._mr("pMark%d" % i, x, y + PH - 28, PW, 28)
-            self._mr("pName%d" % i, x, y + PH + 6)
-            self._mr("pYear%d" % i, x, y + PH + 36)
+            if text:
+                self._mr("pName%d" % i, x, y + PH + 6)
+                self._mr("pYear%d" % i, x, y + PH + 36)
             return
         x, y, w, h, dy = self._slotGeom(i, p)
         x += xoff
         bx, by = _MPX[i % M_COLS] + xoff, _PY[i // M_COLS]
         self._mr("pBack%d" % i, x, y, w, h)
-        self._mr("pImg%d" % i, x, y, w, h)
+        if anim_light():
+            # Light: the picture keeps its size (rescaling it is the costly part)
+            self._mr("pImg%d" % i, bx, by, PW, PH)
+        else:
+            self._mr("pImg%d" % i, x, y, w, h)
         self._mr("pEdge%d" % i, x - 6, y - 6, w + 12, h + 12)
         self._mr("pRate%d" % i, x + w - 78, y + 8)
         self._mr("pQual%d" % i, x + 8, y + 8)
         self._mr("pMark%d" % i, x, y + h - 28, w, 28)
-        self._mr("pName%d" % i, bx - 12, by + PH + 10 + dy)
-        self._mr("pYear%d" % i, bx - 12, by + PH + 40 + dy)
+        if text:
+            self._mr("pName%d" % i, bx - 12, by + PH + 10 + dy)
+            self._mr("pYear%d" % i, bx - 12, by + PH + 40 + dy)
 
     def _popFocus(self, view, n):
         slot = (self._pi - view * self._view if (self._zone == "posters" and n) else -1) if self._modern else -1
@@ -1191,8 +1210,9 @@ class NovaPlaySite(Screen):
         d = getattr(self, "_grid_slide", 0)
         if d:
             off = d * (1920 - 430) * (1.0 - p)
+            ends = p <= 0.0 or p >= 1.0          # names / years only at start and end
             for i in range(self._view):
-                self._placeSlot(i, p if i == self._pop_slot else 0.0, off)
+                self._placeSlot(i, p if i == self._pop_slot else 0.0, off, ends)
         elif self._pop_slot >= 0:
             self._placeSlot(self._pop_slot, p)
 
@@ -1203,9 +1223,12 @@ class NovaPlaySite(Screen):
         w, h = int(KW + (KCW - KW) * p), int(KH + (KCH - KH) * p)
         return x + (KCW - w) // 2, y + (KCH - h) // 2, w, h
 
-    def _placeCarSlot(self, s_, x, y, w, h):
+    def _placeCarSlot(self, s_, x, y, w, h, final=True):
         self._mr("kBack%d" % s_, x, y, w, h)
-        self._mr("kImg%d" % s_, x, y, w, h)
+        if final or not anim_light():
+            self._mr("kImg%d" % s_, x, y, w, h)
+        else:
+            self._mr("kImg%d" % s_, x, y)        # Light: move only, resize at the end
         self._mr("kEdge%d" % s_, x - 5, y - 5, w + 10, h + 10)
         self._mr("kRate%d" % s_, x + 8, y + 8)
 
@@ -1222,12 +1245,12 @@ class NovaPlaySite(Screen):
     def _placeCarCentre(self, p):
         d = getattr(self, "_car_delta", 0)
         if not d:
-            self._placeCarSlot(K_MID, *self._carGeom(p))
+            self._placeCarSlot(K_MID, *self._carGeom(p), final=p >= 1.0)
             return
         # [slide-anim] every poster glides from its old slot to the new one
         for s_ in range(K_SLOTS):
             a, b = self._kGeom(s_ + d), self._kGeom(s_)
-            self._placeCarSlot(s_, *[int(a[i] + (b[i] - a[i]) * p) for i in range(4)])
+            self._placeCarSlot(s_, *[int(a[i] + (b[i] - a[i]) * p) for i in range(4)], final=p >= 1.0)
 
     def _carPopFocus(self):
         key = (self._pi, id(self._posters), self._zone)
@@ -1253,7 +1276,7 @@ class NovaPlaySite(Screen):
             return
         import math
         self._car_frame += 1
-        t = min(1.0, self._car_frame / float(POP_FRAMES))
+        t = min(1.0, self._car_frame / float(anim_frames()))
         self._placeCarCentre(math.sin(t * math.pi / 2))
         if t >= 1.0:
             self._carPop.stop()
@@ -1263,7 +1286,10 @@ class NovaPlaySite(Screen):
             self._pop.stop()
             return
         self._pop_frame += 1
-        t = min(1.0, self._pop_frame / float(POP_FRAMES))
+        steps = anim_frames()
+        if getattr(self, "_grid_slide", 0):
+            steps = min(steps, 8)                # a whole page moves: fewer, bigger steps
+        t = min(1.0, self._pop_frame / float(steps))
         # ease-out sine: softer start than cubic, so the first frames
         # don't jump several pixels at once
         import math
@@ -1327,7 +1353,10 @@ class NovaPlaySite(Screen):
             missing = missing or loading
             inst = self["kImg%d" % s_].instance
             if path and inst is not None:
-                inst.setPixmapFromFile(path)
+                pix = self.__dict__.setdefault("_pix_path", {})
+                if pix.get(("k", s_)) != path:
+                    inst.setPixmapFromFile(path)
+                    pix[("k", s_)] = path
                 self["kImg%d" % s_].show()
             else:
                 self["kImg%d" % s_].hide()

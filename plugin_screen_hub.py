@@ -45,7 +45,7 @@ from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _set_config, _continue_items, _history_items,
                           _favorite_items, _clear_continue_item, _hide_site, _is_site_hidden,
                           _set_site_custom_name, _DEFAULT_TMDB_API_KEY)
-from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL
+from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames, anim_light
 from plugin_util import _single_line_text
 from novaplay_thread import callInMainThread
 from plugin_toast import TOAST_XML, toast_init, toast
@@ -450,10 +450,10 @@ class NovaPlayHub(Screen):
         import math
         busy = False
         for name, st in self._frame_st.items():
-            if not st["on"] or st["f"] >= POP_STEPS:
+            if not st["on"] or st["f"] >= anim_frames():
                 continue
             st["f"] += 1
-            t = min(1.0, st["f"] / float(POP_STEPS))
+            t = min(1.0, st["f"] / float(anim_frames()))
             self._framePlace(name, st["box"], math.sin(t * math.pi / 2))
             busy = busy or t < 1.0
         if not busy:
@@ -470,18 +470,11 @@ class NovaPlayHub(Screen):
             dw, dh = 20.0 * p, float(_SIDE_STEP - H) * p
             x0, y0 = 54 - dw / 2.0, _SIDE_Y0 + i * _SIDE_STEP - dh / 2.0
             w, h = W + dw, H + dh
-            ic = 36 + 6 * p
+            ic = 36 if anim_light() else 36 + 6 * p
             for name, x, y, ww, hh in (("rowBg", x0, y0, w, h), ("rowBar", x0, y0, 5, h),
                                        ("rowIcon", x0 + 18, y0 + (h - ic) / 2.0, ic, ic),
                                        ("rowText", x0 + 70 + 6 * p, y0, w - 76, h)):
-                inst = self["%s%d" % (name, i)].instance
-                if inst is None:
-                    continue
-                try:
-                    inst.move(ePoint(sc(x), sc(y)))
-                    inst.resize(eSize(max(1, sc(ww)), max(1, sc(hh))))
-                except Exception:
-                    pass
+                self._mrc("%s%d" % (name, i), x, y, ww, hh)
             size = sc(28 + 3 * p)
             inst = self["rowText%d" % i].instance
             fonts = self.__dict__.setdefault("_side_font", {})
@@ -498,16 +491,36 @@ class NovaPlayHub(Screen):
             x0, y0, W, H, parts = _S_X[i % S_COLS] + xoff, _S_Y[i // S_COLS], _S_W, _S_H, _SITE_PARTS
         k = 1.0 + POP_ZOOM * p
         cx, cy = x0 - (W * k - W) / 2.0, y0 - (H * k - H) / 2.0
+        light = anim_light()
         for name, rx, ry, w, h, rs in parts:
-            inst = self["%s%d" % (name, i)].instance
-            if inst is None:
+            if rs and light and name in ("kPoster", "sLogo"):
+                # Light: pictures keep their size, they only move with the card
+                self._mrc("%s%d" % (name, i), cx + rx * k, cy + ry * k, w, h)
                 continue
-            try:
-                inst.move(ePoint(sc(cx + rx * k), sc(cy + ry * k)))
-                if rs:
-                    inst.resize(eSize(max(1, sc(w * k)), max(1, sc(h * k))))
-            except Exception:
-                pass
+            if rs:
+                self._mrc("%s%d" % (name, i), cx + rx * k, cy + ry * k, w * k, h * k)
+            else:
+                self._mrc("%s%d" % (name, i), cx + rx * k, cy + ry * k)
+
+    def _mrc(self, name, x, y, w=None, h=None):
+        """[perf] move / resize, skipped when it would not change a pixel"""
+        geo = self.__dict__.setdefault("_geo", {})
+        pos = (sc(x), sc(y))
+        size = (max(1, sc(w)), max(1, sc(h))) if w is not None else None
+        old = geo.get(name)
+        if old and old[0] == pos and (size is None or old[1] == size):
+            return
+        inst = self[name].instance
+        if inst is None:
+            return
+        try:
+            if not old or old[0] != pos:
+                inst.move(ePoint(*pos))
+            if size is not None and (not old or old[1] != size):
+                inst.resize(eSize(*size))
+            geo[name] = (pos, size if size is not None else (old[1] if old else None))
+        except Exception:
+            pass
 
     def _popFocus(self):
         if self._zone == "side":
@@ -561,7 +574,7 @@ class NovaPlayHub(Screen):
             return
         import math
         self._pop_frame += 1
-        t = min(1.0, self._pop_frame / float(max(1, POP_ANIM_FRAMES)))
+        t = min(1.0, self._pop_frame / float(max(1, anim_frames())))
         self._popFrame(math.sin(t * math.pi / 2))
         if t >= 1.0:
             self._pop.stop()

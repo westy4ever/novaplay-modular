@@ -37,7 +37,7 @@ except Exception:
     parseColor = None
 
 from plugin_common import _PLUGIN_VERSION, PLUGIN_PATH, my_log
-from plugin_gridlist import scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL
+from plugin_gridlist import scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames, anim_reset, anim_light
 from plugin_state import (_get_config, _set_config, _PLUGIN_OWNER, _favorite_items,
                           _history_items, _DEFAULT_TMDB_API_KEY)
 from plugin_util import _site_label, _site_tagline
@@ -372,6 +372,10 @@ class NovaPlaySettings(Screen):
             lib.insert(2, ("screenstyle", "grid", "Screen Style",
                            "Modern" if _get_config("screen_style", "classic") == "modern" else "Classic",
                            "Classic, or Modern: 7 x 2 posters without the info panel (site and detail screens)"))
+            _am = str(_get_config("anim_mode", "full") or "full")
+            lib.insert(3, ("animmode", "grid", "Animations",
+                           {"light": "Light", "off": "Off"}.get(_am, "Full"),
+                           "Full, Light (fewer steps, pictures don't rescale) or Off -- for a smoother box"))
             return lib
         if sec == "tools":
             return [
@@ -463,12 +467,21 @@ class NovaPlaySettings(Screen):
     # ─── [pop-anim] zoom: section row, card, panel frame ────────────────
 
     def _mr(self, name, x, y, w, h):
+        """[perf] move / resize, skipped when it would not change a pixel"""
+        geo = self.__dict__.setdefault("_geo", {})
+        g = (sc(x), sc(y), max(1, sc(w)), max(1, sc(h)))
+        old = geo.get(name)
+        if old == g:
+            return
         inst = self[name].instance
         if inst is None:
             return
         try:
-            inst.move(ePoint(sc(x), sc(y)))
-            inst.resize(eSize(max(1, sc(w)), max(1, sc(h))))
+            if not old or old[:2] != g[:2]:
+                inst.move(ePoint(g[0], g[1]))
+            if not old or old[2:] != g[2:]:
+                inst.resize(eSize(g[2], g[3]))
+            geo[name] = g
         except Exception:
             pass
 
@@ -501,15 +514,8 @@ class NovaPlaySettings(Screen):
         k = 1.0 + 0.08 * p
         cx, cy = x0 - (_CW * k - _CW) / 2.0, y0 - (_CH * k - _CH) / 2.0
         for name, rx, ry, w, h, rs in self._CARD_PARTS:
-            inst = self["%s%d" % (name, i)].instance
-            if inst is None:
-                continue
-            try:
-                inst.move(ePoint(sc(cx + rx * k), sc(cy + ry * k)))
-                if rs:
-                    inst.resize(eSize(max(1, sc(w * k)), max(1, sc(h * k))))
-            except Exception:
-                pass
+            grow = rs and not (name == "cIcon" and anim_light())
+            self._mr("%s%d" % (name, i), cx + rx * k, cy + ry * k, w * k if grow else w, h * k if grow else h)
 
     def _placeItem(self, item, p):
         if item[0] == "side":
@@ -551,7 +557,7 @@ class NovaPlaySettings(Screen):
 
     def _popTick(self):
         import math
-        n = float(max(1, POP_ANIM_FRAMES))
+        n = float(max(1, anim_frames()))
         busy = False
         if self._pop_item and self._pop_f < n:
             self._pop_f += 1
@@ -666,6 +672,12 @@ class NovaPlaySettings(Screen):
         elif key == "layout":
             _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
             _set_config("layout_style", "grid" if _get_config("layout_style", _dflt) == "carousel" else "carousel")
+            self._refresh()
+        elif key == "animmode":
+            _order = ["full", "light", "off"]
+            _cur = str(_get_config("anim_mode", "full") or "full")
+            _set_config("anim_mode", _order[(_order.index(_cur) + 1) % 3 if _cur in _order else 1])
+            anim_reset()
             self._refresh()
         elif key == "screenstyle":
             _set_config("screen_style", "classic" if _get_config("screen_style", "classic") == "modern" else "modern")
