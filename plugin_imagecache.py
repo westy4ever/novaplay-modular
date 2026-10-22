@@ -116,9 +116,20 @@ def getCacheBase():
     return base
 
 
+_DIR_CACHE = [0.0, ""]
+_FRESH_SEEN = {}          # [perf] cache path -> time it was last confirmed fresh
+_FRESH_TTL = 600          # trust that for 10 min (no disk access per repaint)
+_TOUCH_AGE = 6 * 3600     # bump a file's mtime (LRU) at most every 6 h
+
+
 def getImagesDir():
+    # [perf] was 3 existence checks (+ HDD wake-ups) per poster per repaint
+    now = time.time()
+    if _DIR_CACHE[1] and now - _DIR_CACHE[0] < 60:
+        return _DIR_CACHE[1]
     p = os.path.join(getCacheBase(), CACHE_IMAGES_DIRNAME)
     ensureDir(p)
+    _DIR_CACHE[0], _DIR_CACHE[1] = now, p
     return p
 
 
@@ -199,6 +210,7 @@ def evictCacheIfLarge():
     Pixmap is currently displaying is harmless on Linux (unlink keeps
     open fds valid; at worst the image re-downloads next request).
     Returns the number of files removed."""
+    _FRESH_SEEN.clear()          # [perf] files may be removed below
     try:
         import glob
         files = glob.glob(os.path.join(getImagesDir(), "*.jpg"))
@@ -383,8 +395,21 @@ def getCachedImage(url, target_size=None):
         pass
     try:
         cache_path = buildCachePath(url, target_size)
+        now = time.time()
+        seen = _FRESH_SEEN.get(cache_path)
+        if seen and now - seen < _FRESH_TTL:
+            return cache_path                      # [perf] confirmed recently
         if isFresh(cache_path):
-            touch(cache_path)
+            # [perf] the LRU touch was a disk write on every repaint of every
+            # poster; once every few hours keeps eviction order just as well
+            try:
+                if now - os.path.getmtime(cache_path) > _TOUCH_AGE:
+                    touch(cache_path)
+            except Exception:
+                pass
+            _FRESH_SEEN[cache_path] = now
+            if len(_FRESH_SEEN) > 4000:
+                _FRESH_SEEN.clear()
             return cache_path
     except Exception:
         pass

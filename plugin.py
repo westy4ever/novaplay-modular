@@ -32,26 +32,45 @@ if _PLUGIN_DIR and _PLUGIN_DIR not in sys.path:
 
 from Plugins.Plugin import PluginDescriptor
 
-import plugin_common                                  # sys.path shim + constants
-from plugin_common import _PLUGIN_NAME
-from plugin_screen_splash import NovaPlaySplash
+# [perf 2026-10-22] Enigma2 imports every plugin's plugin.py while it boots.
+# NovaPlay used to pull in all its screens and every site extractor right
+# here (curl_cffi, requests, bs4, ...): slower boot and that memory held all
+# day even when NovaPlay is never opened. Everything now loads on first open.
+_PLUGIN_NAME = "NOVA Media Player"          # same as plugin_common._PLUGIN_NAME
+_LOADED = [False]
 
-# Re-exported so external references (diagnostics, tools, any skin
-# patches) keep working against the old names:
-from plugin_screen_home import NovaPlayHome            # noqa: F401
-from plugin_screen_detail import NovaPlayDetail        # noqa: F401
-from plugin_screen_player import (NovaPlaySimplePlayer,  # noqa: F401
-                                  _play, _build_remote_play_candidates)
-from plugin_screen_search import NovaPlaySearch        # noqa: F401
-from plugin_screen_settings import NovaPlaySettings    # noqa: F401
 
-# Restore the browser proxy setting at boot (was in the monolith).
-try:
-    from extractors.base import set_browser_proxy
-    from plugin_state import _get_config
-    set_browser_proxy(_get_config("browser_proxy", ""))
-except Exception:
-    pass
+def _load():
+    """Import the plugin for real (first open only)."""
+    if _LOADED[0]:
+        return
+    import plugin_common                                  # noqa: F401  sys.path shim + constants
+    # Restore the browser proxy setting (was done at boot).
+    try:
+        from extractors.base import set_browser_proxy
+        from plugin_state import _get_config
+        set_browser_proxy(_get_config("browser_proxy", ""))
+    except Exception:
+        pass
+    _LOADED[0] = True
+
+
+_REEXPORTS = {
+    "NovaPlaySplash": "plugin_screen_splash", "NovaPlayHome": "plugin_screen_home",
+    "NovaPlayDetail": "plugin_screen_detail", "NovaPlaySimplePlayer": "plugin_screen_player",
+    "_play": "plugin_screen_player", "_build_remote_play_candidates": "plugin_screen_player",
+    "NovaPlaySearch": "plugin_screen_search", "NovaPlaySettings": "plugin_screen_settings",
+}
+
+
+def __getattr__(name):
+    """Old names (plugin.NovaPlayHome, ...) still work -- loaded on first use."""
+    mod = _REEXPORTS.get(name)
+    if not mod:
+        raise AttributeError(name)
+    _load()
+    import importlib
+    return getattr(importlib.import_module(mod), name)
 
 
 def main(session, **kwargs):
@@ -63,6 +82,8 @@ def main(session, **kwargs):
         threading.Thread(target=novaplay_transmission.stop_if_idle, daemon=True).start()
     except Exception:
         pass
+    # the splash opens at once and loads the rest of NovaPlay while it shows
+    from plugin_screen_splash import NovaPlaySplash
     session.open(NovaPlaySplash)
 
 

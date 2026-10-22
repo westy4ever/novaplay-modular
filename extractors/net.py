@@ -100,12 +100,18 @@ _LOG_PATH = "/tmp/novaplay.log"
 _LOG_MAX_BYTES = 2 * 1024 * 1024  # 2 MB cap
 
 
+_LOG_LOCK = threading.Lock()
+_LOG_N = [0]
+
+
 def log(msg):
     try:
         # Rotate (keep the previous 2MB as .1) instead of deleting —
         # destroying the whole log on rotation lost the evidence that
         # post-mortem debugging depends on.
-        if os.path.exists(_LOG_PATH) and os.path.getsize(_LOG_PATH) > _LOG_MAX_BYTES:
+        # [perf] the size is checked every 50 lines, not on every line
+        _LOG_N[0] += 1
+        if _LOG_N[0] % 50 == 1 and os.path.exists(_LOG_PATH) and os.path.getsize(_LOG_PATH) > _LOG_MAX_BYTES:
             try:
                 old = _LOG_PATH + ".1"
                 if os.path.exists(old):
@@ -118,8 +124,9 @@ def log(msg):
         safe_msg = re.sub(r'api_key=[^&]+', 'api_key=****', str(msg))
 
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(_LOG_PATH, "a") as f:
-            f.write("[{}] {}\n".format(ts, safe_msg))
+        with _LOG_LOCK:              # threads no longer interleave half-lines
+            with open(_LOG_PATH, "a") as f:
+                f.write("[{}] {}\n".format(ts, safe_msg))
     except Exception:
         pass
 
