@@ -156,10 +156,11 @@ def _skin():
     for i in range(CAT_ROWS):
         y = _CAT_Y0 + i * _CAT_STEP
         parts.append("""
-        <widget name="cBg{i}" position="54,{y}" size="332,{h}" backgroundColor="{panel}" cornerRadius="10" zPosition="3" />
+        <widget name="cEdge{i}" position="52,{ey}" size="336,{eh}" backgroundColor="{gold}" cornerRadius="12" zPosition="3" />
+        <widget name="cBg{i}" position="54,{y}" size="332,{h}" backgroundColor="{panel}" cornerRadius="10" zPosition="4" />
         <widget name="cBar{i}" position="54,{y}" size="5,{h}" backgroundColor="{gold}" zPosition="5" />
         <widget name="cText{i}" position="72,{y}" size="304,{h}" font="Regular;25" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
-        """.format(i=i, y=y, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
+        """.format(i=i, y=y, ey=y - 2, eh=_CAT_H + 4, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
     for i in range(P_VIEW):
         x, y = _PX[i % P_COLS], _PY[i // P_COLS]
         parts.append("""
@@ -238,10 +239,11 @@ def _skin_modern():
     for i in range(CAT_ROWS):
         y = _CAT_Y0 + i * _CAT_STEP
         parts.append("""
-        <widget name="cBg{i}" position="54,{y}" size="322,{h}" backgroundColor="{panel}" cornerRadius="14" zPosition="3" />
+        <widget name="cEdge{i}" position="52,{ey}" size="326,{eh}" backgroundColor="{gold}" cornerRadius="16" zPosition="3" />
+        <widget name="cBg{i}" position="54,{y}" size="322,{h}" backgroundColor="{panel}" cornerRadius="14" zPosition="4" />
         <widget name="cBar{i}" position="54,{by}" size="5,{bh}" backgroundColor="{gold}" cornerRadius="2" zPosition="5" />
         <widget name="cText{i}" position="74,{y}" size="290,{h}" font="Regular;24" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
-        """.format(i=i, y=y, by=y + 10, bh=_CAT_H - 20, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
+        """.format(i=i, y=y, ey=y - 2, eh=_CAT_H + 4, by=y + 10, bh=_CAT_H - 20, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
     for i in range(M_VIEW):
         x, y = _MPX[i % M_COLS], _PY[i // M_COLS]
         parts.append("""
@@ -334,6 +336,7 @@ class NovaPlaySite(Screen):
         self["hint"] = Label("")
         for i in range(CAT_ROWS):
             self["cBg%d" % i] = Label("")
+            self["cEdge%d" % i] = Label("")
             self["cBar%d" % i] = Label("")
             self["cText%d" % i] = Label("")
         for i in range(self._view):
@@ -471,7 +474,7 @@ class NovaPlaySite(Screen):
         self._vis(self._CAT_W, not browsing)
         if browsing:
             for i in range(CAT_ROWS):
-                self._vis(["cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
+                self._vis(["cEdge%d" % i, "cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
         self._vis(self._INFO_W, not car)
         if not car:
             # infoImg is shown by _paintBackdrop only when it has a picture
@@ -592,17 +595,20 @@ class NovaPlaySite(Screen):
             g = top + i
             if g >= n:
                 self["cBg%d" % i].hide(); self["cBar%d" % i].hide(); self["cText%d" % i].hide()
+                self["cEdge%d" % i].hide()
                 continue
             c = items[g]
             self["cText%d" % i].show()
             self["cText%d" % i].setText(_single_line_text(c.get("title", ""), width=24, fallback="—"))
             if c.get("type") == "separator":
                 self["cBg%d" % i].hide(); self["cBar%d" % i].hide()
+                self["cEdge%d" % i].hide()
                 self._color("cText%d" % i, fg=GOLD)
                 continue
             on = g == sel
             self["cBg%d" % i].show()
             self._color("cBg%d" % i, bg=(ROW_ON_M if self._modern else ROW_ON) if on else PANEL)
+            self["cEdge%d" % i].show() if (on and side) else self["cEdge%d" % i].hide()
             self["cBar%d" % i].show() if (on and side) else self["cBar%d" % i].hide()
             self._color("cText%d" % i, fg=WHITE if on else (MUTED if c.get("type") == "error" else TEXT))
         self._catPopFocus(sel - top if (side and n and 0 <= sel - top < CAT_ROWS
@@ -886,10 +892,12 @@ class NovaPlaySite(Screen):
         k = 1.0 + 0.06 * p
         cx, cy = 54 - (W * k - W) / 2.0, y - (_CAT_H * k - _CAT_H) / 2.0
         if self._modern:
-            parts = (("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 10, 5, _CAT_H - 20, True),
+            parts = (("cEdge", -2, -2, W + 4, _CAT_H + 4, True),
+                     ("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 10, 5, _CAT_H - 20, True),
                      ("cText", 20, 0, 290, _CAT_H, False))
         else:
-            parts = (("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 0, 5, _CAT_H, True),
+            parts = (("cEdge", -2, -2, W + 4, _CAT_H + 4, True),
+                     ("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 0, 5, _CAT_H, True),
                      ("cText", 18, 0, 304, _CAT_H, False))
         for name, rx, ry, w, h, rs in parts:
             self._mr("%s%d" % (name, i), cx + rx * k, cy + ry * k,
