@@ -1220,8 +1220,11 @@ class EgyDeadExtractor(BaseExtractor):
                 dname = self._MEGAMAX_DRIVERS.get(driver, driver.title() or "Server")
                 servers.append({"name": "{} ({})".format(dname, info), "url": link, "type": "embed", "quality": q,
                                 "_dl": {"resolution": q, "size": size_txt, "quality": dname, "url": link}})
-        if servers:
-            servers += self._megamax_download_servers(iframe_url, set(x["url"] for x in servers))
+        # [2026-10-22] not called: on the box the download page listed the SAME
+        # uploads as the watch list (every playable mirror "already listed",
+        # only Byse new), so it only added 4 requests per page. Kept for a site
+        # change; enable with:
+        #   servers += self._megamax_download_servers(iframe_url, set(x["url"] for x in servers))
         return servers
 
     def _parse_download_servers(self, html):
