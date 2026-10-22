@@ -424,7 +424,42 @@ class NovaPlaySite(Screen):
 
     # ─── lifecycle ──────────────────────────────────────────────────────
 
+    # ─── [open-anim] the category panel slides in from the left on open,
+    # the first posters glide in from the right ──────────────────────────
+
+    def _openTick(self):
+        import math
+        self._open_f += 1
+        t = min(1.0, self._open_f / float(POP_FRAMES))
+        self._open_dx = -420.0 * (1.0 - math.sin(t * math.pi / 2))
+        st = getattr(self, "_frame_st", {}).get("catEdge")
+        fp = 0.0
+        if st and st["on"]:
+            fp = math.sin(min(1.0, st["f"] / float(POP_STEPS)) * math.pi / 2)
+        self._framePlace("catEdge", (40, 150, 350 if self._modern else 360, 810), fp)
+        dx = self._open_dx
+        self._mr("catHead", 68 + dx, 168 if self._modern else 170)
+        self._mr("catPage", 68 + dx, 912 if self._modern else 906)
+        for i in range(CAT_ROWS):
+            cp = 0.0
+            if i == self._cat_slot:
+                cp = math.sin(min(1.0, self._cat_frame / float(POP_FRAMES)) * math.pi / 2)
+            self._placeCat(i, cp)
+        if t >= 1.0:
+            self._open_dx = 0.0
+            self._openT.stop()
+
     def _start(self):
+        self._first_posters = True
+        self._open_f = 0
+        self._open_dx = -420.0
+        self._openT = eTimer()
+        self._openT.callback.append(self._openTick)
+        try:
+            self._openTick()
+            self._openT.start(POP_MS, False)
+        except Exception:
+            self._open_dx = 0.0
         # nothing of the category rows shows until the categories arrive
         # (the skin draws every row's gold bar / box by default)
         for i in range(CAT_ROWS):
@@ -460,7 +495,7 @@ class NovaPlaySite(Screen):
 
     def _stop(self):
         for t in (self._clock, self._art, self._infoTimer, self._pop, self._carPop, self._catPop,
-                  getattr(self, "_frameT", None)):
+                  getattr(self, "_frameT", None), getattr(self, "_openT", None)):
             try:
                 t.stop()
             except Exception:
@@ -978,6 +1013,7 @@ class NovaPlaySite(Screen):
 
     def _framePlace(self, name, box, p):
         x, y, w, h = box
+        x += getattr(self, "_open_dx", 0.0)
         d = 7.0 * p
         inst = self[name].instance
         if inst is None:
@@ -1020,7 +1056,7 @@ class NovaPlaySite(Screen):
         y = _CAT_Y0 + i * _CAT_STEP
         W, H = (322 if self._modern else 332), _CAT_H
         dw, dh = 20.0 * p, float(_CAT_STEP - _CAT_H) * p
-        x0, y0 = 54 - dw / 2.0, y - dh / 2.0
+        x0, y0 = 54 - dw / 2.0 + getattr(self, "_open_dx", 0.0), y - dh / 2.0
         w, h = W + dw, H + dh
         self._mr("cBg%d" % i, x0, y0, w, h)
         if self._modern:
@@ -1124,7 +1160,10 @@ class NovaPlaySite(Screen):
         # [slide-anim] a new view of posters glides in sideways: the next
         # view / page from the right, the previous one from the left
         d = 0
-        if old and old[2] == key[2] and abs(view - old[0]) == 1:
+        if getattr(self, "_first_posters", False) and n:
+            self._first_posters = False
+            d = 1                    # the first posters glide in from the right
+        elif old and old[2] == key[2] and abs(view - old[0]) == 1:
             d = view - old[0]
         elif old and old[2] != key[2] and n:
             d = getattr(self, "_slide_dir", 0)
