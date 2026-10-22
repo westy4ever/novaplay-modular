@@ -110,7 +110,7 @@ def _skin():
         <widget name="clock_hijri" position="1280,114" size="600,30" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
 
         <widget name="sideEdge" position="40,150" size="360,810" backgroundColor="{gold}" cornerRadius="16" zPosition="1" />
-        <eLabel position="42,152" size="356,806" backgroundColor="{panel}" cornerRadius="14" zPosition="2" />
+        <widget name="sidePanel" position="42,152" size="356,806" backgroundColor="{panel}" cornerRadius="14" zPosition="2" />
         <eLabel position="68,174" size="300,30" text="SECTIONS" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <eLabel position="68,690" size="304,1" backgroundColor="#2A3240" zPosition="3" />
         <eLabel position="68,704" size="300,30" text="LIBRARY" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
@@ -208,6 +208,7 @@ class NovaPlayHub(Screen):
         self["clock_greg"] = Label("")
         self["clock_hijri"] = Label("")
         self["sideEdge"] = Label("")
+        self["sidePanel"] = Label("")
         self["libinfo"] = Label("")
         self["contCount"] = Label("")
         self["contEmpty"] = Label("")
@@ -414,6 +415,16 @@ class NovaPlayHub(Screen):
         try:
             inst.move(ePoint(sc(x - d), sc(y - d)))
             inst.resize(eSize(max(1, sc(w + 2 * d)), max(1, sc(h + 2 * d))))
+        except Exception:
+            pass
+        # the panel inside grows with it, so the frame stays a thin line and
+        # the whole box pops out (like a poster) instead of a thicker border
+        inner = {"sideEdge": "sidePanel", "catEdge": "catPanel"}.get(name)
+        try:
+            ii = self[inner].instance if inner else None
+            if ii is not None:
+                ii.move(ePoint(sc(x + 2 - d), sc(y + 2 - d)))
+                ii.resize(eSize(max(1, sc(w - 4 + 2 * d)), max(1, sc(h - 4 + 2 * d))))
         except Exception:
             pass
 

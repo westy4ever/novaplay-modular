@@ -872,6 +872,16 @@ class NovaPlaySite(Screen):
             inst.resize(eSize(max(1, sc(w + 2 * d)), max(1, sc(h + 2 * d))))
         except Exception:
             pass
+        # the panel inside grows with it, so the frame stays a thin line and
+        # the whole box pops out (like a poster) instead of a thicker border
+        inner = {"sideEdge": "sidePanel", "catEdge": "catPanel"}.get(name)
+        try:
+            ii = self[inner].instance if inner else None
+            if ii is not None:
+                ii.move(ePoint(sc(x + 2 - d), sc(y + 2 - d)))
+                ii.resize(eSize(max(1, sc(w - 4 + 2 * d)), max(1, sc(h - 4 + 2 * d))))
+        except Exception:
+            pass
 
     def _frameTick(self):
         import math
