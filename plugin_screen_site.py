@@ -697,7 +697,11 @@ class NovaPlaySite(Screen):
                 continue
             c = items[g]
             self["cText%d" % i].show()
-            self["cText%d" % i].setText(_single_line_text(c.get("title", ""), width=24, fallback="—"))
+            _t = c.get("title", "")
+            # Arabic letters are narrower than Latin ones at the same size: the
+            # 24-character cut (with '...') was shortening names that fit
+            _ar = any(u"\u0600" <= ch <= u"\u06ff" for ch in _t)
+            self["cText%d" % i].setText(_single_line_text(_t, width=(31 if _ar else 24), fallback="—"))
             if c.get("type") == "separator":
                 self["cBg%d" % i].hide(); self["cBar%d" % i].hide()
                 self._color("cText%d" % i, fg=GOLD)
