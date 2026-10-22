@@ -74,7 +74,8 @@ SECTIONS = (
 ROWS = len(SECTIONS)
 _SIDE_Y0, _SIDE_STEP = 214, 74
 
-CONT_N = 3
+CONT_N = 3          # cards on screen
+CONT_MAX = 20       # titles the row scrolls through
 _CONT_X = (430, 921, 1412)
 _CONT_Y, _CONT_W, _CONT_H = 222, 468, 132
 
@@ -197,6 +198,8 @@ class NovaPlayHub(Screen):
         self._zone = "sites"          # side | cont | sites
         self._sec = 0
         self._ci = 0                  # continue index
+        self._cbase = 0               # first title shown in the row
+        self._cont_slide = 0
         self._si = 0                  # site index (global)
         self._sites = []
         self._cont = []
@@ -297,11 +300,12 @@ class NovaPlayHub(Screen):
                     continue
                 seen.add(k)
                 self._cont.append(it)
-                if len(self._cont) >= CONT_N:
+                if len(self._cont) >= CONT_MAX:
                     break
         except Exception:
             self._cont = []
         self._ci = min(self._ci, max(0, len(self._cont) - 1))
+        self._cbase = max(0, min(self._cbase, self._ci, len(self._cont) - CONT_N))
         recent = {}
         now = time.time()
         try:
@@ -440,7 +444,7 @@ class NovaPlayHub(Screen):
 
     # ─── [pop-anim] zoom on the selected card ───────────────────────────
 
-    def _placeCard(self, card, p):
+    def _placeCard(self, card, p, xoff=0.0):
         zone, i = card[0], card[1]
         if zone == "side":
             # like the cards: wider AND taller (into the gap), thicker gold
@@ -472,7 +476,7 @@ class NovaPlayHub(Screen):
                     pass
             return
         if zone == "cont":
-            x0, y0, W, H, parts = _CONT_X[i], _CONT_Y, _CONT_W, _CONT_H, _CONT_PARTS
+            x0, y0, W, H, parts = _CONT_X[0] + i * (_CONT_X[1] - _CONT_X[0]) + xoff, _CONT_Y, _CONT_W, _CONT_H, _CONT_PARTS
         else:
             x0, y0, W, H, parts = _S_X[i % S_COLS], _S_Y[i // S_COLS], _S_W, _S_H, _SITE_PARTS
         k = 1.0 + POP_ZOOM * p
@@ -492,7 +496,7 @@ class NovaPlayHub(Screen):
         if self._zone == "side":
             card = ("side", self._sec, 0)
         elif self._zone == "cont" and self._cont:
-            card = ("cont", self._ci, 0)
+            card = ("cont", self._ci - self._cbase, self._cbase)
         elif self._zone == "sites" and self._sites:
             card = ("sites", self._si % S_PAGE, self._si // S_PAGE)
         else:
@@ -507,12 +511,25 @@ class NovaPlayHub(Screen):
             self._placeCard(self._pop_card, 0.0)
         self._pop_card = card
         if not card:
+            self._cont_slide = 0
             return
         self._pop_frame = 0
+        self._popFrame(0.0)
         try:
             self._pop.start(POP_ANIM_INTERVAL, False)
         except Exception:
-            self._placeCard(card, 1.0)
+            self._popFrame(1.0)
+
+    def _popFrame(self, p):
+        """[slide-anim] Continue Watching scrolled by one: all its cards glide
+        one card sideways while the selected one grows; else just the zoom."""
+        d = self._cont_slide if self._pop_card and self._pop_card[0] == "cont" else 0
+        if d:
+            off = d * (_CONT_X[1] - _CONT_X[0]) * (1.0 - p)
+            for i in range(CONT_N):
+                self._placeCard(("cont", i, 0), p if i == self._pop_card[1] else 0.0, off)
+        else:
+            self._placeCard(self._pop_card, p)
 
     def _popTick(self):
         if not self._pop_card:
@@ -521,14 +538,18 @@ class NovaPlayHub(Screen):
         import math
         self._pop_frame += 1
         t = min(1.0, self._pop_frame / float(max(1, POP_ANIM_FRAMES)))
-        self._placeCard(self._pop_card, math.sin(t * math.pi / 2))
+        self._popFrame(math.sin(t * math.pi / 2))
         if t >= 1.0:
             self._pop.stop()
+            self._cont_slide = 0
 
     def _paintCont(self):
         n = len(self._cont)
         tot = max(n, getattr(self, "_cont_total", n))
-        self["contCount"].setText(("{} of {}  ·  MENU to clear".format(n, tot) if tot > n else "{} items".format(n)) if n else "")
+        if n > CONT_N:
+            self["contCount"].setText(u"{} / {}  ·  \u25c0 \u25b6 scroll  ·  MENU to clear".format(self._ci + 1, tot if tot > n else n))
+        else:
+            self["contCount"].setText(("{} of {}  ·  MENU to clear".format(n, tot) if tot > n else "{} items".format(n)) if n else "")
         if not n:
             self["contEmpty"].setText("      Nothing in progress — pick a site below")
             self["contEmpty"].show()
@@ -537,14 +558,15 @@ class NovaPlayHub(Screen):
         missing = False
         for i in range(CONT_N):
             names = ["kEdge%d", "kBox%d", "kPoster%d", "kTitle%d", "kSub%d", "kBar%d"]
-            if i >= n:
+            g = self._cbase + i
+            if g >= n:
                 for nm in names:
                     self[nm % i].hide()
                 continue
             for nm in names:
                 self[nm % i].show()
-            it = self._cont[i]
-            sel = self._zone == "cont" and i == self._ci
+            it = self._cont[g]
+            sel = self._zone == "cont" and g == self._ci
             self._color("kEdge%d" % i, bg=GOLD if sel else EDGE)
             self["kTitle%d" % i].setText(_single_line_text(it.get("title", ""), width=26, fallback="—"))
             self._color("kTitle%d" % i, fg=GOLD if sel else WHITE)
@@ -565,7 +587,7 @@ class NovaPlayHub(Screen):
     def _artPoll(self):
         self._art_tries += 1
         done = True
-        for it in self._cont:
+        for it in self._cont[self._cbase:self._cbase + CONT_N]:
             url = it.get("poster") or it.get("thumbnail") or ""
             if url and not plugin_imagecache.getCachedImage(url, target_size=(72, 100)):
                 done = False
@@ -635,10 +657,17 @@ class NovaPlayHub(Screen):
                 self._zone = "side"
             elif dx:
                 self._ci = max(0, min(n - 1, self._ci + dx))
+                old = self._cbase
+                if self._ci < self._cbase:
+                    self._cbase = self._ci
+                elif self._ci >= self._cbase + CONT_N:
+                    self._cbase = self._ci - CONT_N + 1
+                if abs(self._cbase - old) == 1:
+                    self._cont_slide = self._cbase - old
             elif dy > 0 and self._sites:
                 self._zone = "sites"
                 page = self._si // S_PAGE
-                self._si = min(len(self._sites) - 1, page * S_PAGE + min(self._ci, S_COLS - 1))
+                self._si = min(len(self._sites) - 1, page * S_PAGE + min(self._ci - self._cbase, S_COLS - 1))
         else:
             n = len(self._sites)
             local = self._si % S_PAGE
@@ -660,7 +689,7 @@ class NovaPlayHub(Screen):
                     self._si -= S_COLS
                 elif self._cont:
                     self._zone = "cont"
-                    self._ci = min(col, len(self._cont) - 1)
+                    self._ci = min(self._cbase + min(col, CONT_N - 1), len(self._cont) - 1)
                 elif page > 0:
                     self._si = max(0, self._si - S_COLS)
             elif dy > 0:
