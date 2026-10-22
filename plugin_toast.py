@@ -34,8 +34,27 @@ def toast_init(screen):
     screen._toastAnim.callback.append(lambda: _tick(screen))
     screen._toastHide = eTimer()
     screen._toastHide.callback.append(lambda: _hide(screen))
-    screen.onLayoutFinish.append(lambda: screen["toast"].hide())
-    screen.onClose.append(lambda: (_stop(screen._toastAnim), _stop(screen._toastHide)))
+    # Enigma2 exec()s anything in onLayoutFinish that isn't a bound method,
+    # so these must be real methods (a lambda crashed the screen on open)
+    h = _Hooks(screen)
+    screen._toast_hooks = h
+    screen.onLayoutFinish.append(h.layout)
+    screen.onClose.append(h.close)
+
+
+class _Hooks(object):
+    def __init__(self, screen):
+        self.screen = screen
+
+    def layout(self):
+        try:
+            self.screen["toast"].hide()
+        except Exception:
+            pass
+
+    def close(self):
+        _stop(self.screen._toastAnim)
+        _stop(self.screen._toastHide)
 
 
 def _stop(t):
