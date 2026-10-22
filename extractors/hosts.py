@@ -1233,18 +1233,21 @@ def resolve_streamwish(url, _depth=0):
             log("streamwish: stub page ({} bytes): {}".format(len(html), re.sub(r"\s+", " ", html)[:300]))
         page = final or url
         mt = re.search(r'https?://[^"\'\s<>]+/master\.txt[^"\'\s<>]*', html)
+        # [2026-10-22] the video pieces check the player page as Referer (box:
+        # playlists OK, first piece 403 without it)
         best = _best_media_url(html)
         if best:
-            return best
+            return _with_page_referer(best, page)
         for txt in _unpack_all(html):
             best = _best_media_url(txt)
             if best:
-                return best
+                return _with_page_referer(best, page)
             if not mt:
                 mt = re.search(r'https?://[^"\'\s<>]+/master\.txt[^"\'\s<>]*', txt)
         if mt:
             return _with_page_referer(mt.group(0), page)
-        return find_m3u8(html) or find_mp4(html)
+        f = find_m3u8(html) or find_mp4(html)
+        return _with_page_referer(f, page) if f else None
     except Exception as e:
         log("streamwish error: {}".format(e))
     return None

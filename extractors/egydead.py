@@ -106,6 +106,7 @@ resolve_mixdrop = _safe_import('resolve_mixdrop')
 resolve_doodstream = _safe_import('resolve_doodstream')
 resolve_streamwish = _safe_import('resolve_streamwish')
 resolve_vidhide = _safe_import('resolve_vidhide')
+megamax_list_mirrors = _safe_import('megamax_list_mirrors')
 resolve_voe = _safe_import('resolve_voe')
 resolve_byselapuix = _safe_import('resolve_byselapuix')
 resolve_vidguard = _safe_import('resolve_vidguard')
@@ -1142,6 +1143,57 @@ class EgyDeadExtractor(BaseExtractor):
         mm = re.search(r"(\d{3,4})p", g.get("label") or "")
         return (mm.group(1) + "p") if mm else "HD"
 
+    # [2026-10-22] MegaMax's download page (/download/<same id>) holds the
+    # source-quality file uploaded separately to these hosts, under their
+    # download-page addresses -- turned into each host's player address here
+    _MEGAMAX_DL_PLAYABLE = ("streamruby", "uqload", "mixdrop", "doodstream", "voe", "streamhg", "vidara")
+
+    @staticmethod
+    def _megamax_dl_to_player(driver, link):
+        d = (driver or "").lower()
+        m = None
+        if d == "streamruby":
+            m = re.search(r"/(?:d|e|embed-)/?([A-Za-z0-9]+)", link)
+            return "https://stmruby.com/embed-{}.html".format(m.group(1)) if m else None
+        if d == "mixdrop":
+            return re.sub(r"/f/", "/e/", link, count=1)
+        if d == "doodstream":
+            return re.sub(r"/d/", "/e/", link, count=1)
+        if d == "uqload":
+            m = re.search(r"uqload\.[a-z]+/(?:embed-)?([A-Za-z0-9]+)\.html", link)
+            return "https://uqload.vc/embed-{}.html".format(m.group(1)) if m else link
+        if d == "voe":
+            m = re.search(r"voe\.sx/(?:e/)?([A-Za-z0-9]+)", link)
+            return "https://voe.sx/e/{}".format(m.group(1)) if m else link
+        return link
+
+    def _megamax_download_servers(self, iframe_url, have_urls):
+        if not megamax_list_mirrors:
+            return []
+        try:
+            mirrors = megamax_list_mirrors(iframe_url, referer=self._get_base())
+        except Exception as e:
+            log("EgyDead: MegaMax download list failed: {}".format(e))
+            return []
+        out = []
+        for mm in mirrors:
+            driver = str(mm.get("driver") or "").lower()
+            if driver not in self._MEGAMAX_DL_PLAYABLE:
+                continue
+            link = self._megamax_dl_to_player(driver, mm.get("url") or "")
+            if not link or link in have_urls:
+                continue
+            have_urls.add(link)
+            label = str(mm.get("quality") or "source")
+            mq = re.search(r"(\d{3,4})p", label)
+            q = (mq.group(1) + "p") if mq else "HD"
+            dname = self._MEGAMAX_DRIVERS.get(driver, driver.title())
+            out.append({"name": "{} ({}, download copy)".format(dname, label), "url": link,
+                        "type": "embed", "quality": q})
+        if out:
+            log("EgyDead: MegaMax download page -> {} more server(s)".format(len(out)))
+        return out
+
     def _megamax_servers(self, iframe_url):
         """Server entries (quality x mirror). Each carries a private "_dl" download entry."""
         order = self._MEGAMAX_ORDER
@@ -1155,6 +1207,8 @@ class EgyDeadExtractor(BaseExtractor):
                 dname = self._MEGAMAX_DRIVERS.get(driver, driver.title() or "Server")
                 servers.append({"name": "{} ({})".format(dname, info), "url": link, "type": "embed", "quality": q,
                                 "_dl": {"resolution": q, "size": size_txt, "quality": dname, "url": link}})
+        if servers:
+            servers += self._megamax_download_servers(iframe_url, set(x["url"] for x in servers))
         return servers
 
     def _parse_download_servers(self, html):
