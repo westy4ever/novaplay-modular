@@ -57,6 +57,7 @@ from plugin_tmdb import _tmdb_enabled, _merge_tmdb_data
 from plugin_util import _split_episode_label                    # [PATCH 81]
 from plugin_screen_player import NovaPlaySimplePlayer, _play
 from plugin_widgets import StreamList
+from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 import plugin_health
 import plugin_imagecache
 from novaplay_thread import callInMainThread
@@ -414,6 +415,11 @@ class NovaPlayDetail(Screen):
         else:
             self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH)
         self._sv_items = []
+        self._sv_pop_key = None
+        self._sv_pop_slot = -1
+        self._sv_pop_f = 0
+        self._svPopT = eTimer()
+        self._svPopT.callback.append(self._svPopTick)
         Screen.__init__(self, session)
         self.session = session
         self._item   = item
@@ -604,6 +610,58 @@ class NovaPlayDetail(Screen):
             my_log("detail modern: selectionChanged hook failed: {}".format(e))
         self._svPaint()
 
+    # [pop-anim] the selected card grows 8 % (same smooth zoom as the
+    # posters / cards on the home and site screens)
+    _SV_PARTS = (("svEdge", -4, -4, _SV_W + 8, _SV_H + 8, True), ("svBg", 0, 0, _SV_W, _SV_H, True),
+                 ("svNum", 16, 14, 46, 46, True), ("svQ", _SV_W - 126, 14, 110, 30, False),
+                 ("svName", 16, 68, _SV_W - 32, 62, False), ("svInfo", 16, 118, _SV_W - 32, 24, False))
+
+    def _svPlace(self, i, p):
+        x0 = _SV_X0 + i * (_SV_W + _SV_GAP)
+        k = 1.0 + 0.08 * p
+        cx, cy = x0 - (_SV_W * k - _SV_W) / 2.0, _SV_Y - (_SV_H * k - _SV_H) / 2.0
+        for name, rx, ry, w, h, rs in self._SV_PARTS:
+            try:
+                inst = self["%s%d" % (name, i)].instance
+                if inst is None:
+                    continue
+                inst.move(ePoint(int(cx + rx * k), int(cy + ry * k)))
+                if rs:
+                    inst.resize(eSize(max(1, int(w * k)), max(1, int(h * k))))
+            except Exception:
+                pass
+
+    def _svPopFocus(self, slot, extra):
+        key = (slot,) + tuple(extra) + (id(self._sv_items),) if slot >= 0 else None
+        if key == self._sv_pop_key:
+            return
+        try:
+            self._svPopT.stop()
+        except Exception:
+            pass
+        if 0 <= self._sv_pop_slot < SV_CARDS:
+            self._svPlace(self._sv_pop_slot, 0.0)
+        self._sv_pop_key = key
+        self._sv_pop_slot = slot if (slot >= 0 and extra[1]) else -1
+        if self._sv_pop_slot < 0:
+            return
+        self._sv_pop_f = 0
+        try:
+            self._svPopT.start(POP_ANIM_INTERVAL, False)
+        except Exception:
+            self._svPlace(slot, 1.0)
+
+    def _svPopTick(self):
+        import math
+        if self._sv_pop_slot < 0 or getattr(self, "_closed", False):
+            self._svPopT.stop()
+            return
+        self._sv_pop_f += 1
+        t = min(1.0, self._sv_pop_f / float(max(1, POP_ANIM_FRAMES)))
+        self._svPlace(self._sv_pop_slot, math.sin(t * math.pi / 2))
+        if t >= 1.0:
+            self._svPopT.stop()
+
     def _svStep(self, d):
         n = len(self._sv_items)
         if not n:
@@ -688,6 +746,7 @@ class NovaPlayDetail(Screen):
                 info = "\u25cf Last watched"
             self["svInfo%d" % i].setText(_single_line_text(info, width=28, fallback=""))
             self["svInfo%d" % i].show()
+        self._svPopFocus(idx - base if n else -1, (base, n > 0 and bool(str((tuple(items[idx]) + ("", ""))[1] or ""))))
         pages = (n + SV_CARDS - 1) // SV_CARDS if n else 0
         self["svPos"].setText(u"{} / {}   \u00b7   \u25c0 \u25b6 choose   \u00b7   OK play".format(idx + 1, n) if n else "")
         self["svLeft"].show() if base > 0 else self["svLeft"].hide()
@@ -1322,7 +1381,7 @@ class NovaPlayDetail(Screen):
             self._closeLater.start(10, True)
 
     def _onCloseCleanup(self):
-        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer", "_clockTimer"):
+        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer", "_clockTimer", "_svPopT"):
             try:
                 timer = getattr(self, t, None)
                 if timer:
