@@ -626,6 +626,7 @@ class NovaPlaySite(Screen):
         self._applyLayout()
 
     def _openCategory(self, c, focus=True):
+        self._slide_dir = 0          # a new category appears in place (no slide)
         if c.get("_action") == "search_site":
             self._search()
             return
@@ -835,8 +836,7 @@ class NovaPlaySite(Screen):
         if missing:
             self._art_tries = 0
             self._art.start(1000, False)
-        if self._modern:
-            self._popFocus(view, n)
+        self._popFocus(view, n)
         self._scheduleInfo()
         self._applyLayout()
 
@@ -976,9 +976,21 @@ class NovaPlaySite(Screen):
         except Exception:
             pass
 
-    def _placeSlot(self, i, p):
+    def _placeSlot(self, i, p, xoff=0.0):
+        if not self._modern:
+            # Classic grid: no zoom, only the page slide moves it
+            x, y = _PX[i % P_COLS] + xoff, _PY[i // P_COLS]
+            self._mr("pBack%d" % i, x, y, PW, PH)
+            self._mr("pImg%d" % i, x, y, PW, PH)
+            self._mr("pEdge%d" % i, x - 4, y - 4, PW + 8, PH + 8)
+            self._mr("pRate%d" % i, x + 8, y + 8)
+            self._mr("pMark%d" % i, x, y + PH - 28, PW, 28)
+            self._mr("pName%d" % i, x, y + PH + 6)
+            self._mr("pYear%d" % i, x, y + PH + 36)
+            return
         x, y, w, h, dy = self._slotGeom(i, p)
-        bx, by = _MPX[i % M_COLS], _PY[i // M_COLS]
+        x += xoff
+        bx, by = _MPX[i % M_COLS] + xoff, _PY[i // M_COLS]
         self._mr("pBack%d" % i, x, y, w, h)
         self._mr("pImg%d" % i, x, y, w, h)
         self._mr("pEdge%d" % i, x - 6, y - 6, w + 12, h + 12)
@@ -988,10 +1000,20 @@ class NovaPlaySite(Screen):
         self._mr("pYear%d" % i, bx - 12, by + PH + 40 + dy)
 
     def _popFocus(self, view, n):
-        slot = self._pi - view * self._view if (self._zone == "posters" and n) else -1
+        slot = (self._pi - view * self._view if (self._zone == "posters" and n) else -1) if self._modern else -1
         key = (view, slot, id(self._posters))
         if key == self._pop_key:
             return                   # a repaint (art arrived) -- keep the zoom
+        old = self._pop_key
+        # [slide-anim] a new view of posters glides in sideways: the next
+        # view / page from the right, the previous one from the left
+        d = 0
+        if old and old[2] == key[2] and abs(view - old[0]) == 1:
+            d = view - old[0]
+        elif old and old[2] != key[2] and n:
+            d = getattr(self, "_slide_dir", 0)
+        if old and old[2] != key[2]:
+            self._slide_dir = 0
         try:
             self._pop.stop()
         except Exception:
@@ -1000,16 +1022,26 @@ class NovaPlaySite(Screen):
             self._placeSlot(self._pop_slot, 0.0)
         self._pop_key = key
         self._pop_slot = slot
-        if slot < 0:
+        self._grid_slide = d
+        if slot < 0 and not d:
             return
         self._pop_frame = 0
         self._pop_p = 0.0
         self._pop_last = None
-        self._placeSlot(slot, 0.0)
+        self._gridFrame(0.0)
         try:
             self._pop.start(POP_MS, False)
         except Exception:
-            self._placeSlot(slot, 1.0)
+            self._gridFrame(1.0)
+
+    def _gridFrame(self, p):
+        d = getattr(self, "_grid_slide", 0)
+        if d:
+            off = d * (1920 - 430) * (1.0 - p)
+            for i in range(self._view):
+                self._placeSlot(i, p if i == self._pop_slot else 0.0, off)
+        elif self._pop_slot >= 0:
+            self._placeSlot(self._pop_slot, p)
 
     # [carousel] the middle poster grows from a side poster's size to its
     # own on every move (same smooth pop as the grid / home carousel)
@@ -1074,7 +1106,7 @@ class NovaPlaySite(Screen):
             self._carPop.stop()
 
     def _popTick(self):
-        if self._pop_slot < 0 or self._carousel():
+        if (self._pop_slot < 0 and not getattr(self, "_grid_slide", 0)) or self._carousel():
             self._pop.stop()
             return
         self._pop_frame += 1
@@ -1083,13 +1115,17 @@ class NovaPlaySite(Screen):
         # don't jump several pixels at once
         import math
         self._pop_p = math.sin(t * math.pi / 2)
-        # skip frames that wouldn't change a single pixel (less redraw work)
-        size = self._slotGeom(self._pop_slot, self._pop_p)[2:4]
-        if size != getattr(self, "_pop_last", None) or t >= 1.0:
-            self._pop_last = size
-            self._placeSlot(self._pop_slot, self._pop_p)
+        if getattr(self, "_grid_slide", 0):
+            self._gridFrame(self._pop_p)
+        else:
+            # skip frames that wouldn't change a single pixel (less redraw work)
+            size = self._slotGeom(self._pop_slot, self._pop_p)[2:4]
+            if size != getattr(self, "_pop_last", None) or t >= 1.0:
+                self._pop_last = size
+                self._placeSlot(self._pop_slot, self._pop_p)
         if t >= 1.0:
             self._pop.stop()
+            self._grid_slide = 0
 
     # ─── [carousel] painting ────────────────────────────────────────────
 
@@ -1496,6 +1532,7 @@ class NovaPlaySite(Screen):
             return
         self._page += 1
         self._history.append((url, self._page))
+        self._slide_dir = 1
         self._fetch(url)
 
     def _prevPage(self):
@@ -1504,6 +1541,7 @@ class NovaPlaySite(Screen):
         self._history.pop()
         url, self._page = self._history[-1]
         self._focus_end = True
+        self._slide_dir = -1
         self._fetch(url)
 
     # ─── MENU: remove from Favorites / History ──────────────────────────
