@@ -388,7 +388,9 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
     # keys as a miss self-heals it: one re-fetch (now including the new
     # fields) the next time that exact title/year/type is looked up, then
     # the re-save below overwrites the stale file with the complete one.
-    if cached is not None and all(k in cached for k in ("runtime", "release_date", "certification")):
+    # [lang] entries saved before 'orig_lang' existed were filled Arabic-first
+    # even for English films -- refetch them once (also brings the cast)
+    if cached is not None and all(k in cached for k in ("runtime", "release_date", "certification", "orig_lang")):
         return cached
 
     # 2. Fetch from TMDB API
@@ -512,18 +514,25 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
     if not detail:
         detail = best
         
-    genres_source = detail_ar or detail_en or detail
+    # [lang] English for every film / series whose original language isn't
+    # Arabic (genres, plot, title) -- Arabic only for Arabic originals. The
+    # Arabic answer used to win for everything, so English films got Arabic
+    # genres in the TMDb details line.
+    orig_lang = str(detail_en.get("original_language") or detail_ar.get("original_language")
+                    or best.get("original_language") or "").lower()
+    prefer = (detail_en, detail_ar) if orig_lang != "ar" else (detail_ar, detail_en)
+    genres_source = next((d for d in prefer if d.get("genres")), detail)
     genres = ", ".join([g.get("name", "") for g in genres_source.get("genres") or [] if g.get("name")])
     localized_plot = (
-        (detail_ar.get("overview") or "").strip()
-        or (detail_en.get("overview") or "").strip()
+        (prefer[0].get("overview") or "").strip()
+        or (prefer[1].get("overview") or "").strip()
         or (best.get("overview") or "").strip()
     )
     localized_title = (
-        detail_ar.get("title")
-        or detail_ar.get("name")
-        or detail_en.get("title")
-        or detail_en.get("name")
+        prefer[0].get("title")
+        or prefer[0].get("name")
+        or prefer[1].get("title")
+        or prefer[1].get("name")
         or detail.get("title")
         or detail.get("name")
         or title
@@ -564,6 +573,7 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         "certification": certification,
         "tmdb_id": detail.get("id"),
         "tmdb_kind": media_kind,
+        "orig_lang": orig_lang,
         # [cast] top 6 actors (English names, TMDb profile photo paths)
         "cast": [{"name": c.get("name", ""), "character": c.get("character", ""),
                   "photo": c.get("profile_path") or ""}
@@ -582,6 +592,12 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
             title[:40], bool(result.get("plot")), bool(result.get("poster"))))
     
     return result
+
+def _mostly_arabic(text):
+    t = str(text or "")[:200]
+    letters = [c for c in t if c.isalpha()]
+    return bool(letters) and sum(1 for c in letters if "\u0600" <= c <= "\u06ff") > len(letters) * 0.4
+
 
 def _merge_tmdb_data(data):
     if not data or not data.get("title"):
@@ -605,6 +621,10 @@ def _merge_tmdb_data(data):
     # Fill-only: the site's own plot is authoritative; TMDB's overview
     # (often machine-translated ar) replaces nothing.
     if tmdb.get("plot") and not merged.get("plot"):
+        merged["plot"] = tmdb["plot"]
+    elif tmdb.get("plot") and str(tmdb.get("orig_lang") or "") not in ("", "ar") \
+            and _mostly_arabic(merged.get("plot")) and not _mostly_arabic(tmdb["plot"]):
+        # [lang] an English film: TMDb's English plot over the site's Arabic one
         merged["plot"] = tmdb["plot"]
     if tmdb.get("rating") and not merged.get("rating"):
         merged["rating"] = tmdb["rating"]

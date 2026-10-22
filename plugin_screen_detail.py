@@ -1934,7 +1934,9 @@ class NovaPlayDetail(Screen):
             tmdb_meta = []
             if _cert:               tmdb_meta.append(_cert)
             if _rd_fmt:             tmdb_meta.append(_rd_fmt)
-            if data.get("genres"): tmdb_meta.append(data["genres"])
+            # [lang] TMDb's own genres here (this is the TMDb line), never the site's
+            _tg = (data.get("_tmdb") or {}).get("genres") or ""
+            if _tg:                 tmdb_meta.append(_tg)
             if _rt_fmt:             tmdb_meta.append(_rt_fmt)
             # [no-repeat] no site name here (logo + "Source" fact show it)
             self["meta"].setText(_single_line_text("  ·  ".join(tmdb_meta), width=96, fallback=""))
@@ -1991,6 +1993,16 @@ class NovaPlayDetail(Screen):
         self._layoutHeader()
 
         plot_text, plot_source = _pick_plot_text_with_source(data, self._item)
+        # [lang] English film with an English TMDb plot: use it, not a longer
+        # Arabic site text (the picker just takes the longest)
+        try:
+            from plugin_tmdb import _mostly_arabic
+            _tm = data.get("_tmdb") or {}
+            if (_tm.get("plot") and str(_tm.get("orig_lang") or "") not in ("", "ar")
+                    and _mostly_arabic(plot_text) and not _mostly_arabic(_tm["plot"])):
+                plot_text, plot_source = _tm["plot"], "tmdb.plot(en)"
+        except Exception:
+            pass
         plot_text = re.sub(r"^\[.*?\]\s*|^(?:المصدر|Source):\s*.*?\|\s*", "", plot_text)
         _MID_SITES = ("EgyDead", "Wecima", "Akoam", "ArabSeed", "TopCinema", "TopCinemaa", "FaselHD", "Shaheed", "Shaheed4u")
         for _ms in _MID_SITES:
