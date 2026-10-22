@@ -152,6 +152,129 @@ def _quality_pref_key(title):
 _TORRENT_SEEDER_SITES = ("torrentio", "yts")
 
 
+# [theme] "Modern" screen style (Settings > Screen Style): the TMDb backdrop
+# fills the top of the screen (faded into the background on the left and
+# at the bottom), poster | title, details, facts, plot over it, and the
+# servers / episodes / qualities as a row of cards in a band at the bottom.
+SV_CARDS = 6
+_SV_W, _SV_H, _SV_GAP = 268, 150, 22
+_SV_X0 = (1920 - (SV_CARDS * _SV_W + (SV_CARDS - 1) * _SV_GAP)) // 2
+_SV_Y = 758
+_SV_GOLD, _SV_CARD, _SV_ON = "#F2C230", "#161C26", "#2A2717"
+
+
+def _detail_skin_modern():
+    p = ["""
+    <screen name="NovaPlayDetailModern" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="#0C1017">
+        <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="1" />
+        <widget name="backdrop" position="0,0" size="1920,690" backgroundColor="#0C1017" zPosition="1" />
+        <widget name="backdropImage" position="0,0" size="1920,690" zPosition="2" alphatest="blend" />
+        <widget name="siteLogo" position="40,40" size="180,64" zPosition="3" alphatest="blend" scale="1" />
+        <widget name="clock_time" position="1380,22" size="500,62" font="Bold;54" halign="right" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="clock_date" position="1280,90" size="600,30" font="Regular;22" halign="right" foregroundColor="#C9D0DA" transparent="1" zPosition="4" />
+
+        <eLabel position="34,134" size="352,520" backgroundColor="#262E3B" cornerRadius="18" zPosition="3" />
+        <eLabel position="38,138" size="344,512" backgroundColor="#161C26" cornerRadius="16" zPosition="3" />
+        <widget name="poster" position="52,152" size="316,470" zPosition="4" alphatest="blend" />
+        <widget name="posterYear" position="62,162" size="86,34" font="Bold;22" foregroundColor="#0C1017" backgroundColor="#F2C230" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="9" />
+        <widget name="posterRating" position="272,162" size="88,34" font="Bold;22" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="9" />
+
+        <widget name="title" position="420,140" size="1000,66" font="Bold;52" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="meta" position="420,212" size="1000,34" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="4" />
+        <widget name="proxy_warning" position="420,248" size="1000,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
+        <widget name="source" position="420,290" size="880,160" font="Regular;22" foregroundColor="#D6DCE5" transparent="1" halign="left" zPosition="4" />
+        <widget name="plot_title" position="420,462" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
+        <widget name="plot" position="420,494" size="880,180" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
+
+        <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
+        <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
+        <widget name="svPos" position="1230,706" size="620,36" font="Regular;20" halign="right" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="4" />
+        <widget name="menu" position="440,700" size="930,60" zPosition="0" scrollbarMode="showNever" transparent="1" backgroundColor="#121822" backgroundColorSelected="#121822" />
+        <widget name="svLeft" position="48,800" size="40,64" font="Regular;52" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
+        <widget name="svRight" position="1832,800" size="40,64" font="Regular;52" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
+        <widget name="menuAccent" position="0,0" size="2,2" backgroundColor="#121822" zPosition="0" />
+        <widget name="menuProgress" position="{px},936" size="180,6" backgroundColor="#F2C230" transparent="0" cornerRadius="3" zPosition="5" />
+    """.format(px=_SV_X0)]
+    for i in range(SV_CARDS):
+        x = _SV_X0 + i * (_SV_W + _SV_GAP)
+        p.append("""
+        <widget name="svEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="18" zPosition="3" />
+        <widget name="svBg{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" cornerRadius="16" zPosition="4" />
+        <widget name="svNum{i}" position="{nx},{ny}" size="46,46" font="Bold;22" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#262E3B" cornerRadius="12" zPosition="5" />
+        <widget name="svQ{i}" position="{qx},{ny}" size="110,30" font="Bold;18" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="{gold}" cornerRadius="8" zPosition="5" />
+        <widget name="svName{i}" position="{nx},{tny}" size="{tw},62" font="Regular;22" halign="left" valign="top" foregroundColor="#FFFFFF" backgroundColor="{card}" transparent="1" zPosition="5" />
+        <widget name="svInfo{i}" position="{nx},{iy}" size="{tw},24" font="Regular;17" halign="left" foregroundColor="#A3ADBB" backgroundColor="{card}" transparent="1" zPosition="5" />
+        """.format(i=i, x=x, y=_SV_Y, w=_SV_W, h=_SV_H, ex=x - 4, ey=_SV_Y - 4, ew=_SV_W + 8, eh=_SV_H + 8,
+                   nx=x + 16, ny=_SV_Y + 14, qx=x + _SV_W - 126, tny=_SV_Y + 68, iy=_SV_Y + 118, tw=_SV_W - 32,
+                   gold=_SV_GOLD, card=_SV_CARD))
+    p.append("""
+        <eLabel position="40,980" size="1840,72" backgroundColor="#121822" cornerRadius="18" zPosition="2" />
+        <eLabel position="64,998" size="34,34" backgroundColor="#E5484D" cornerRadius="9" zPosition="3" />
+        <widget name="key_red"    position="112,994" size="220,42" font="Regular;24" valign="center" foregroundColor="#D6DCE5" transparent="1" zPosition="4" />
+        <widget name="dotGreen" position="350,998" size="34,34" backgroundColor="#30A46C" cornerRadius="9" zPosition="3" />
+        <widget name="key_green"  position="398,994" size="200,42" font="Regular;24" valign="center" foregroundColor="#D6DCE5" transparent="1" zPosition="4" />
+        <eLabel position="616,998" size="34,34" backgroundColor="#F2C230" cornerRadius="9" zPosition="3" />
+        <widget name="key_yellow" position="664,994" size="230,42" font="Regular;24" valign="center" foregroundColor="#D6DCE5" transparent="1" zPosition="4" />
+        <widget name="dotBlue" position="912,998" size="34,34" backgroundColor="#3E7BFA" cornerRadius="9" zPosition="3" />
+        <widget name="key_blue"   position="960,994" size="230,42" font="Regular;24" valign="center" foregroundColor="#D6DCE5" transparent="1" zPosition="4" />
+        <widget name="status"     position="1200,994" size="656,42" font="Regular;21" valign="center" foregroundColor="#C9D0DA" transparent="1" halign="right" zPosition="4" />
+    </screen>""")
+    return "".join(p)
+
+
+_DETAIL_SKIN_MODERN = _detail_skin_modern()
+
+
+def _modern_backdrop(img, w, h, is_landscape):
+    """[theme] full-width header picture: cover-crop (a poster is blurred
+    instead), then faded into the screen background on the left (where the
+    title / facts / plot sit) and at the bottom (toward the server band)."""
+    from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+    try:
+        fitted = ImageOps.fit(img, (w, h), Image.LANCZOS, centering=(0.6, 0.3))
+    except Exception:
+        fitted = img.resize((w, h))
+    if not is_landscape:
+        try:
+            tiny = fitted.resize((max(1, w // 16), max(1, h // 16)), Image.BILINEAR)
+            fitted = tiny.filter(ImageFilter.GaussianBlur(radius=3)).resize((w, h), Image.BILINEAR)
+            fitted = ImageEnhance.Brightness(fitted).enhance(0.6)
+        except Exception:
+            pass
+    bg = Image.new("RGB", (w, h), (12, 16, 23))           # #0C1017
+    # left -> right: solid behind the text, clear over the right third
+    row = []
+    for x in range(w):
+        t = x / float(w)
+        if t < 0.42:
+            a = 238
+        elif t > 0.80:
+            a = 40
+        else:
+            a = int(238 - (t - 0.42) / 0.38 * 198)
+        row.append(a)
+    hm = Image.new("L", (w, 1))
+    hm.putdata(row)
+    hm = hm.resize((w, h))
+    # top -> bottom: fade out over the lower 40 %
+    col = []
+    for y in range(h):
+        t = y / float(h)
+        if t < 0.18:
+            col.append(int(150 * (1 - t / 0.18)))       # behind the clock
+        else:
+            col.append(0 if t < 0.6 else int(min(255, (t - 0.6) / 0.4 * 255)))
+    vm = Image.new("L", (1, h))
+    vm.putdata(col)
+    vm = vm.resize((w, h))
+    try:
+        from PIL import ImageChops
+        mask = ImageChops.lighter(hm, vm)
+    except Exception:
+        mask = hm
+    return Image.composite(bg, fitted, mask)
+
+
 class NovaPlayDetail(Screen):
     # [panel 2026-10-21] three columns like the other panel screens:
     # poster + facts | servers / episodes | backdrop + plot, header with the
@@ -233,6 +356,27 @@ class NovaPlayDetail(Screen):
         ), 360, 0, 4, 8),
     )
 
+    _REVEAL_GROUPS_MODERN = (
+        ("poster", (
+            ("poster", 52, 152),
+            ("posterYear", 62, 162),
+            ("posterRating", 272, 162),
+        ), -400, 0, 0, 8),
+        ("info", (
+            ("title", 420, 140),
+            ("meta", 420, 212),
+            ("proxy_warning", 420, 248),
+            ("source", 420, 290),
+            ("plot_title", 420, 462),
+            ("plot", 420, 494),
+        ), 260, 0, 2, 8),
+        ("band", (
+            ("menu_box", 40, 692),
+            ("section", 70, 702),
+            ("svPos", 1230, 706),
+        ), 0, 300, 3, 8),
+    )
+
     # [detail-accent] geometry of the menu widget, used to compute where
     # the accent bar should sit relative to the selected row.
     _MENU_X = 440
@@ -257,7 +401,19 @@ class NovaPlayDetail(Screen):
 
     def __init__(self, session, item, site="egydead", m_type="movie",
                  episode_chain=None, episode_index=-1, auto_server_idx=None, resume=False):
-        self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH)
+        # [theme] Modern: backdrop header + server cards in a bottom band
+        self._modern = _get_config("screen_style", "classic") == "modern"
+        if self._modern:
+            self.skin = _DETAIL_SKIN_MODERN
+            self.skinName = "NovaPlayDetailModern"
+            self._REVEAL_GROUPS = self._REVEAL_GROUPS_MODERN
+            self._PROG_X0 = _SV_X0
+            self._PROG_Y = 936
+            self._PROG_H = 6
+            self._PROG_SPAN = SV_CARDS * _SV_W + (SV_CARDS - 1) * _SV_GAP - self._PROG_W
+        else:
+            self.skin = NovaPlayDetail.skin.format(plugin_path=PLUGIN_PATH)
+        self._sv_items = []
         Screen.__init__(self, session)
         self.session = session
         self._item   = item
@@ -342,6 +498,13 @@ class NovaPlayDetail(Screen):
         self["menuProgress"] = Label("")
         self["menuAccent"].hide()
         self["menuProgress"].hide()
+        if self._modern:
+            self["svPos"] = Label("")
+            self["svLeft"] = Label(u"\u2039")
+            self["svRight"] = Label(u"\u203a")
+            for _i in range(SV_CARDS):
+                for _n in ("svEdge", "svBg", "svNum", "svQ", "svName", "svInfo"):
+                    self["%s%d" % (_n, _i)] = Label("")
         self["key_red"] = Label("Favorites")
         self["key_yellow"] = Label("Update TMDb")
         self["key_blue"] = Label("Download")
@@ -380,9 +543,11 @@ class NovaPlayDetail(Screen):
             "green":  self._playTrailer,
             "up":     self._navMenuUp,
             "down":   self._navMenuDown,
-            "left":   lambda: self["menu"].pageUp(),
-            "right":  lambda: self["menu"].pageDown(),
+            "left":   self._navLeft,
+            "right":  self._navRight,
         }, -1)
+        if self._modern:
+            self.onLayoutFinish.append(self._svInit)
         # [2026-10-21] CH+ / CH- step the torrent quality filter (like YTS's tabs)
         self["torFilterActions"] = ActionMap(["ChannelSelectBaseActions"], {
             "nextBouquet": lambda: self._stepTorrentFilter(1),
@@ -395,7 +560,11 @@ class NovaPlayDetail(Screen):
         self.onClose.append(self._onCloseCleanup)
 
     # ── [detail-accent] navigation helpers ─────────────────────────────
+    # [theme] Modern: the cards run left/right, so ◀ ▶ step one card and
+    # ▲ ▼ jump a whole row of cards; Classic keeps ▲ ▼ rows, ◀ ▶ pages.
     def _navMenuUp(self):
+        if self._modern:
+            return self._svStep(-SV_CARDS)
         try:
             self["menu"].up()
         except Exception:
@@ -403,11 +572,126 @@ class NovaPlayDetail(Screen):
         self._updateMenuAccent()
 
     def _navMenuDown(self):
+        if self._modern:
+            return self._svStep(SV_CARDS)
         try:
             self["menu"].down()
         except Exception:
             pass
         self._updateMenuAccent()
+
+    def _navLeft(self):
+        if self._modern:
+            return self._svStep(-1)
+        self["menu"].pageUp()
+
+    def _navRight(self):
+        if self._modern:
+            return self._svStep(1)
+        self["menu"].pageDown()
+
+    # ── [theme] Modern server cards ───────────────────────────────────
+    def _svInit(self):
+        try:
+            self["menu"].hide()
+            self["menuAccent"].hide()
+        except Exception:
+            pass
+        try:
+            # every selection move (incl. the auto-pick of the last server)
+            self["menu"].instance.selectionChanged.get().append(self._svPaint)
+        except Exception as e:
+            my_log("detail modern: selectionChanged hook failed: {}".format(e))
+        self._svPaint()
+
+    def _svStep(self, d):
+        n = len(self._sv_items)
+        if not n:
+            return
+        idx = self["menu"].getCurrentIndex()
+        t = idx + d
+        if abs(d) == 1:
+            t %= n                       # wrap around at the ends
+        else:
+            t = max(0, min(n - 1, t))
+        try:
+            self["menu"].instance.moveSelectionTo(t)
+        except Exception:
+            pass
+        self._svPaint()
+
+    def _svColor(self, name, bg=None, fg=None):
+        try:
+            from skin import parseColor
+            inst = self[name].instance
+            if inst is None:
+                return
+            if bg:
+                inst.setBackgroundColor(parseColor(bg))
+            if fg:
+                inst.setForegroundColor(parseColor(fg))
+            inst.invalidate()
+        except Exception:
+            pass
+
+    def _svPaint(self):
+        if not getattr(self, "_modern", False) or getattr(self, "_closed", False):
+            return
+        items = self._sv_items or []
+        n = len(items)
+        try:
+            idx = self["menu"].getCurrentIndex()
+        except Exception:
+            idx = 0
+        idx = max(0, min(idx, n - 1)) if n else 0
+        base = (idx // SV_CARDS) * SV_CARDS
+        for i in range(SV_CARDS):
+            g = base + i
+            names = ["%s%d" % (k, i) for k in ("svEdge", "svBg", "svNum", "svQ", "svName", "svInfo")]
+            if g >= n:
+                for k in names:
+                    self[k].hide()
+                continue
+            it = tuple(items[g]) + ("", "", "", "")
+            q, name, size, extra = (str(x or "") for x in it[:4])
+            q = re.sub(r"[\[\]]", "", q).strip()
+            sel = g == idx
+            if not name:
+                # placeholder row ("No servers available")
+                for k in names:
+                    self[k].hide()
+                self["svBg%d" % i].show()
+                self["svName%d" % i].setText(_wrap_ui_text(q, width=20, max_lines=2, fallback=""))
+                self["svName%d" % i].show()
+                continue
+            is_ep = bool(re.match(r"^S\d{1,3}E\d{1,4}$", q, re.I))
+            self["svEdge%d" % i].show() if sel else self["svEdge%d" % i].hide()
+            self["svBg%d" % i].show()
+            self._svColor("svBg%d" % i, bg=_SV_ON if sel else _SV_CARD)
+            self["svNum%d" % i].setText(str(g + 1))
+            self["svNum%d" % i].show()
+            badge = q.upper() if q else ""
+            if badge in ("", "AUTO"):
+                self["svQ%d" % i].hide()
+            else:
+                gold = badge.startswith("4K") or "2160" in badge
+                blue = is_ep or any(t in badge for t in ("HD", "1080", "720", "1440"))
+                self["svQ%d" % i].setText(_single_line_text(badge, width=9, fallback=""))
+                self._svColor("svQ%d" % i, bg=_SV_GOLD if gold else ("#3E7BFA" if blue else "#566070"),
+                              fg="#0C1017" if gold else "#FFFFFF")
+                self["svQ%d" % i].show()
+            self["svName%d" % i].setText(_wrap_ui_text(name, width=21, max_lines=2, fallback="—"))
+            self._svColor("svName%d" % i, fg=_SV_GOLD if sel else "#FFFFFF")
+            self["svName%d" % i].show()
+            info = " · ".join(x.replace("Size: ", "").replace("Seeders: ", "\u25b2 ") for x in (size, extra) if x)
+            if sel and self._last_server_idx == g and not info:
+                info = "\u25cf Last watched"
+            self["svInfo%d" % i].setText(_single_line_text(info, width=28, fallback=""))
+            self["svInfo%d" % i].show()
+        pages = (n + SV_CARDS - 1) // SV_CARDS if n else 0
+        self["svPos"].setText(u"{} / {}   \u00b7   \u25c0 \u25b6 choose   \u00b7   OK play".format(idx + 1, n) if n else "")
+        self["svLeft"].show() if base > 0 else self["svLeft"].hide()
+        self["svRight"].show() if base + SV_CARDS < n else self["svRight"].hide()
 
     # ── [detail-layout] stack title / meta / source / plot with no gaps ──
     _HDR_X = 525
@@ -519,6 +803,7 @@ class NovaPlayDetail(Screen):
         self._applyMenuRowHeight()
         try:
             self._menu_item_count = len(items)
+            self._sv_items = list(items)
             self["menu"].setList(items)
         except Exception as e:
             my_log("setMenu error: {}".format(e))
@@ -532,6 +817,7 @@ class NovaPlayDetail(Screen):
         self._applyMenuRowHeight()
         items = list(items)
         self._stagger_items = items
+        self._sv_items = items
         n = len(items)
         self._stagger_step = 1 if n <= 8 else (2 if n <= 16 else 3)
         self._menu_item_count = n
@@ -584,6 +870,8 @@ class NovaPlayDetail(Screen):
     def _updateMenuAccent(self):
         try: self["menuAccent"].hide()
         except Exception: pass
+        if getattr(self, "_modern", False):
+            self._svPaint()
 
     # ── [detail-progress] indeterminate bar while extracting ──────────
     def _startProgress(self):
@@ -1123,7 +1411,9 @@ class NovaPlayDetail(Screen):
 
             img = Image.open(src_path).convert("RGB")
 
-            if is_landscape and w < 1000:
+            if getattr(self, "_modern", False):
+                fitted = _modern_backdrop(img, w, h, is_landscape)
+            elif is_landscape and w < 1000:
                 # [panel] small backdrop card in the right column: a plain
                 # cover crop of the (same-aspect) TMDb photo, lightly dimmed
                 try:
@@ -1240,7 +1530,8 @@ class NovaPlayDetail(Screen):
                 except Exception:
                     pass
 
-            out_path = "{}_bd{}.jpg".format(os.path.splitext(src_path)[0], "" if w >= 1000 else "_s")
+            out_path = "{}_bd{}.jpg".format(os.path.splitext(src_path)[0],
+                                            "m" if getattr(self, "_modern", False) else ("" if w >= 1000 else "_s"))
             fitted.save(out_path, format="JPEG", quality=82)
             if is_tmp and out_path not in self._tmp_posters:
                 self._tmp_posters.append(out_path)
