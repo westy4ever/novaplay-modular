@@ -1731,7 +1731,31 @@ class NovaPlaySimplePlayer(Screen):
                     break
         except Exception:
             pass
-        return self._orderByPlayMemory(cands)
+        return self._preferSeekableForMp4(self._orderByPlayMemory(cands))
+
+    def _preferSeekableForMp4(self, cands):
+        """[2026-10-22] a plain MP4 file played with 5001 (gstplayer) can't be
+        jumped in: on the box it sent the proxy one request from byte 0 and
+        ignored the resume and every ◀▶▲▼ (Mixdrop). exteplayer3 (ffmpeg)
+        asks for byte ranges, so it goes first for MP4 files."""
+        try:
+            if not cands:
+                return cands
+            up = (_upstream_of(cands[0][1]) or "").lower().split("?")[0]
+            if any(x in up for x in (".m3u8", "master.txt", "/hls", "/playlist", ".mpd")):
+                return cands
+            if not up.endswith((".mp4", ".m4v", ".mov")):
+                return cands
+            ext = [c for c in cands if str(c[2]).startswith("5002 exteplayer3")]
+            # the proxy one first (a strict stream needs its headers on every request)
+            ext.sort(key=lambda c: 0 if "proxy" in str(c[2]) else 1)
+            if ext and cands[0] is not ext[0]:
+                cands = ext + [c for c in cands if c not in ext]
+                my_log("candidates: MP4 file -- exteplayer3 first so resume/seek work -> {}".format(
+                    ", ".join(str(c[2]) for c in cands[:3])))
+        except Exception as e:
+            my_log("mp4 player order failed (non-fatal): {}".format(e))
+        return cands
 
     def _orderByPlayMemory(self, cands):
         """[NEW] methods that played on this video server before go first; ones that
