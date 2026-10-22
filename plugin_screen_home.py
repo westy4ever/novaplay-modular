@@ -906,24 +906,52 @@ class NovaPlayHome(Screen):
         ch = int(sh + (h - sh) * p)
         return x + (w - cw) // 2, y + (h - ch) // 2, cw, ch
 
-    def _startCarouselPop(self):
+    def _slotGeomAt(self, k):
+        """Geometry of carousel slot k; k outside the strip = one step
+        further left / right off the visible slots (where a poster slides
+        in from)."""
+        n = self.carousel_slots
+        if 0 <= k < n:
+            return _CAROUSEL_GEOMETRY.get(k, (0, 0, 1, 1))
+        if k < 0:
+            g0, g1 = _CAROUSEL_GEOMETRY[0], _CAROUSEL_GEOMETRY[1]
+            return (g0[0] + k * (g1[0] - g0[0]), g0[1], g0[2], g0[3])
+        gl, g2 = _CAROUSEL_GEOMETRY[n - 1], _CAROUSEL_GEOMETRY[n - 2]
+        return (gl[0] + (k - n + 1) * (gl[0] - g2[0]), gl[1], gl[2], gl[3])
+
+    def _startCarouselPop(self, delta=0):
+        """[slide-anim] one step left / right: every poster glides from the
+        slot it was in to its new one (the one arriving in the middle grows
+        to full size on the way); bigger jumps just pop the middle one."""
         try:
             self._car_pop_timer.stop()
         except Exception:
             pass
+        self._car_delta = delta if abs(delta) == 1 else 0
         self._car_pop_frame = 0
-        self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(0.0))
+        self._carFrame(0.0)
         try:
             self._car_pop_timer.start(POP_ANIM_INTERVAL, False)
         except Exception:
             self._applyCarouselGeometry()
+
+    def _carFrame(self, p):
+        d = getattr(self, "_car_delta", 0)
+        if not d:
+            self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(p))
+            return
+        for s in range(self.carousel_slots):
+            a = self._slotGeomAt(s + d)
+            b = self._slotGeomAt(s)
+            g = [int(a[i] + (b[i] - a[i]) * p) for i in range(4)]
+            self._placeCarouselSlot(s, *g)
 
     def _carPopTick(self):
         frames = max(1, POP_ANIM_FRAMES)
         self._car_pop_frame += 1
         t = min(1.0, float(self._car_pop_frame) / float(frames))
         p = math.sin(t * math.pi / 2)
-        self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(p))
+        self._carFrame(p)
         if t >= 1.0:
             try:
                 self._car_pop_timer.stop()
@@ -950,6 +978,12 @@ class NovaPlayHome(Screen):
             # _updateCarouselSlot, where the actual label text (and thus
             # the chip width) is known.
             self._moveResize('cresumeMark%d' % widget_id, x + 10, y + h - 34, w - 20, 30)
+            try:
+                _li = self["clabel%d" % widget_id].instance
+                if _li is not None:
+                    _li.move(ePoint(int(x + 12), int(y + 22 + 28 + 4)))
+            except Exception:
+                pass
             if logical_slot == self.carousel_center:
                 focus_extra = 7
                 self._moveResize('cfocus%d' % self.carousel_center, x - focus_extra, y - focus_extra, w + (focus_extra * 2), h + (focus_extra * 2))
@@ -1438,7 +1472,7 @@ class NovaPlayHome(Screen):
         self.index = (self.index + delta) % total
         self._applyCarouselGeometry()
         self._paintCarousel()
-        self._startCarouselPop()
+        self._startCarouselPop(delta)
 
     def _syncCarouselFocusVisible(self):
         for i in range(self.carousel_slots):

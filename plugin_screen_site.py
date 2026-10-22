@@ -867,18 +867,40 @@ class NovaPlaySite(Screen):
         w, h = int(KW + (KCW - KW) * p), int(KH + (KCH - KH) * p)
         return x + (KCW - w) // 2, y + (KCH - h) // 2, w, h
 
+    def _placeCarSlot(self, s_, x, y, w, h):
+        self._mr("kBack%d" % s_, x, y, w, h)
+        self._mr("kImg%d" % s_, x, y, w, h)
+        self._mr("kEdge%d" % s_, x - 5, y - 5, w + 10, h + 10)
+        self._mr("kRate%d" % s_, x + 8, y + 8)
+
+    def _kGeom(self, k):
+        """slot k's box; off the strip = one more step left / right"""
+        if 0 <= k < K_SLOTS:
+            return (_KX[k], _KCY, KCW, KCH) if k == K_MID else (_KX[k], _KY, KW, KH)
+        if k < 0:
+            return (_KX[0] + k * (_KX[1] - _KX[0]), _KY, KW, KH)
+        return (_KX[-1] + (k - K_SLOTS + 1) * (_KX[-1] - _KX[-2]), _KY, KW, KH)
+
     def _placeCarCentre(self, p):
-        x, y, w, h = self._carGeom(p)
-        self._mr("kBack%d" % K_MID, x, y, w, h)
-        self._mr("kImg%d" % K_MID, x, y, w, h)
-        self._mr("kEdge%d" % K_MID, x - 5, y - 5, w + 10, h + 10)
-        self._mr("kRate%d" % K_MID, x + 8, y + 8)
+        d = getattr(self, "_car_delta", 0)
+        if not d:
+            self._placeCarSlot(K_MID, *self._carGeom(p))
+            return
+        # [slide-anim] every poster glides from its old slot to the new one
+        for s_ in range(K_SLOTS):
+            a, b = self._kGeom(s_ + d), self._kGeom(s_)
+            self._placeCarSlot(s_, *[int(a[i] + (b[i] - a[i]) * p) for i in range(4)])
 
     def _carPopFocus(self):
         key = (self._pi, id(self._posters), self._zone)
-        if key == getattr(self, "_car_key", None):
+        old = getattr(self, "_car_key", None)
+        if key == old:
             return
         self._car_key = key
+        d = 0
+        if old and old[1:] == key[1:] and abs(key[0] - old[0]) == 1:
+            d = key[0] - old[0]
+        self._car_delta = d
         self._car_frame = 0
         self._placeCarCentre(0.0)
         try:
