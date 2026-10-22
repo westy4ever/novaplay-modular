@@ -77,6 +77,7 @@ ROW_ON_M = "#353124"
 # [theme] Modern: the selected poster grows 8 % with an ease-out "pop",
 # the same animation as the home screen's poster grid
 POP_ZOOM, POP_FRAMES, POP_MS = 0.08, 12, 15     # ~180 ms, small even steps
+POP_STEPS, POP_STEP_MS = POP_FRAMES, POP_MS
 
 
 def _modern_style():
@@ -409,7 +410,8 @@ class NovaPlaySite(Screen):
         self._loadCategories()
 
     def _stop(self):
-        for t in (self._clock, self._art, self._infoTimer, self._pop, self._carPop, self._catPop):
+        for t in (self._clock, self._art, self._infoTimer, self._pop, self._carPop, self._catPop,
+                  getattr(self, "_frameT", None)):
             try:
                 t.stop()
             except Exception:
@@ -585,6 +587,7 @@ class NovaPlaySite(Screen):
         top = max(0, min(sel - CAT_ROWS // 2, n - CAT_ROWS)) if n > CAT_ROWS else 0
         side = self._zone == "cats"
         self._color("catEdge", bg=GOLD if side else EDGE)
+        self._framePop("catEdge", (40, 150, 350 if self._modern else 360, 810), side)
         for i in range(CAT_ROWS):
             g = top + i
             if g >= n:
@@ -827,6 +830,53 @@ class NovaPlaySite(Screen):
             self._popFocus(view, n)
         self._scheduleInfo()
         self._applyLayout()
+
+    # ─── [pop-anim] the panel's gold frame pops out while it has focus ──
+
+    def _framePop(self, name, box, on):
+        """box = (x, y, w, h) of the frame at rest; grows up to 7 px all
+        round, smoothly, when on; snaps back when off."""
+        st = getattr(self, "_frame_st", None)
+        if st is None:
+            st = self._frame_st = {}
+            self._frameT = eTimer()
+            self._frameT.callback.append(self._frameTick)
+        cur = st.get(name)
+        if cur and cur["on"] == on:
+            return
+        st[name] = {"on": on, "box": box, "f": 0}
+        if not on:
+            self._framePlace(name, box, 0.0)
+            return
+        try:
+            self._frameT.start(POP_STEP_MS, False)
+        except Exception:
+            self._framePlace(name, box, 1.0)
+
+    def _framePlace(self, name, box, p):
+        x, y, w, h = box
+        d = 7.0 * p
+        inst = self[name].instance
+        if inst is None:
+            return
+        try:
+            inst.move(ePoint(sc(x - d), sc(y - d)))
+            inst.resize(eSize(max(1, sc(w + 2 * d)), max(1, sc(h + 2 * d))))
+        except Exception:
+            pass
+
+    def _frameTick(self):
+        import math
+        busy = False
+        for name, st in self._frame_st.items():
+            if not st["on"] or st["f"] >= POP_STEPS:
+                continue
+            st["f"] += 1
+            t = min(1.0, st["f"] / float(POP_STEPS))
+            self._framePlace(name, st["box"], math.sin(t * math.pi / 2))
+            busy = busy or t < 1.0
+        if not busy:
+            self._frameT.stop()
 
     # ─── [pop-anim] category rows: the selected one grows 6 % ───────────
 

@@ -87,6 +87,7 @@ _S_W, _S_H = 346, 158
 # [pop-anim] the selected card grows 8 % (same smooth pop as the poster
 # grids): (widget, x, y, w, h, resize) relative to the card's corner
 POP_ZOOM = 0.08
+POP_STEPS, POP_STEP_MS = POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 _CONT_PARTS = (("kEdge", 0, 0, _CONT_W, _CONT_H, True), ("kBox", 3, 3, _CONT_W - 6, _CONT_H - 6, True),
                ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, 336, 36, False),
                ("kSub", 106, 58, 336, 30, False), ("kBar", 106, 100, 330, 6, False))
@@ -268,7 +269,7 @@ class NovaPlayHub(Screen):
         self._healthSweep()
 
     def _stopTimers(self):
-        for t in (self._clock, self._art, self._pop):
+        for t in (self._clock, self._art, self._pop, getattr(self, "_frameT", None)):
             try:
                 t.stop()
             except Exception:
@@ -361,6 +362,7 @@ class NovaPlayHub(Screen):
     def _paint(self):
         side = self._zone == "side"
         self._color("sideEdge", bg=GOLD if side else EDGE)
+        self._framePop("sideEdge", (40, 150, 360, 810), side)
         for i, (_k, _t, ic) in enumerate(SECTIONS):
             on = i == self._sec
             self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
@@ -376,6 +378,53 @@ class NovaPlayHub(Screen):
             self["hint"].setText("OK  Resume    MENU  Remove    ◀  Sections")
         else:
             self["hint"].setText("OK  Open site    MENU  Site options    ◀  Sections")
+
+    # ─── [pop-anim] the panel's gold frame pops out while it has focus ──
+
+    def _framePop(self, name, box, on):
+        """box = (x, y, w, h) of the frame at rest; grows up to 7 px all
+        round, smoothly, when on; snaps back when off."""
+        st = getattr(self, "_frame_st", None)
+        if st is None:
+            st = self._frame_st = {}
+            self._frameT = eTimer()
+            self._frameT.callback.append(self._frameTick)
+        cur = st.get(name)
+        if cur and cur["on"] == on:
+            return
+        st[name] = {"on": on, "box": box, "f": 0}
+        if not on:
+            self._framePlace(name, box, 0.0)
+            return
+        try:
+            self._frameT.start(POP_STEP_MS, False)
+        except Exception:
+            self._framePlace(name, box, 1.0)
+
+    def _framePlace(self, name, box, p):
+        x, y, w, h = box
+        d = 7.0 * p
+        inst = self[name].instance
+        if inst is None:
+            return
+        try:
+            inst.move(ePoint(sc(x - d), sc(y - d)))
+            inst.resize(eSize(max(1, sc(w + 2 * d)), max(1, sc(h + 2 * d))))
+        except Exception:
+            pass
+
+    def _frameTick(self):
+        import math
+        busy = False
+        for name, st in self._frame_st.items():
+            if not st["on"] or st["f"] >= POP_STEPS:
+                continue
+            st["f"] += 1
+            t = min(1.0, st["f"] / float(POP_STEPS))
+            self._framePlace(name, st["box"], math.sin(t * math.pi / 2))
+            busy = busy or t < 1.0
+        if not busy:
+            self._frameT.stop()
 
     # ─── [pop-anim] zoom on the selected card ───────────────────────────
 
