@@ -372,6 +372,9 @@ class NovaPlaySettings(Screen):
             lib.insert(2, ("screenstyle", "grid", "Screen Style",
                            "Modern" if _get_config("screen_style", "classic") == "modern" else "Classic",
                            "Classic, or Modern: 7 x 2 posters without the info panel (site and detail screens)"))
+            lib.insert(4, ("trailermode", "grid", "Trailer",
+                           "Download" if _get_config("trailer_mode", "stream") == "download" else "Stream first",
+                           "Stream first: starts at once (360p) when YouTube allows; Download: sharper 480p, waits"))
             _am = str(_get_config("anim_mode", "full") or "full")
             lib.insert(3, ("animmode", "grid", "Animations",
                            {"light": "Light", "off": "Off"}.get(_am, "Full"),
@@ -672,6 +675,9 @@ class NovaPlaySettings(Screen):
         elif key == "layout":
             _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
             _set_config("layout_style", "grid" if _get_config("layout_style", _dflt) == "carousel" else "carousel")
+            self._refresh()
+        elif key == "trailermode":
+            _set_config("trailer_mode", "stream" if _get_config("trailer_mode", "stream") == "download" else "download")
             self._refresh()
         elif key == "animmode":
             _order = ["full", "light", "off"]

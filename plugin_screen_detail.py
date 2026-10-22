@@ -239,6 +239,38 @@ def _detail_skin_modern():
 _DETAIL_SKIN_MODERN = _detail_skin_modern().replace("</screen>", TOAST_XML + "</screen>")
 
 
+def _trailer_stream_url(yt_dlp, youtube_url):
+    """[trailer-stream] the trailer's single combined H.264 + AAC format
+    (video and sound in one URL, the only kind the box players can stream)
+    -> 'url|User-Agent=...', or '' when YouTube has none for this video."""
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as ydl:
+            info = ydl.extract_info(youtube_url, download=False) or {}
+    except Exception as e:
+        my_log("trailer stream lookup: {}".format(e))
+        return ""
+    best = None
+    for f in info.get("formats") or []:
+        vc, ac = str(f.get("vcodec") or ""), str(f.get("acodec") or "")
+        if not vc.startswith("avc1") or ac in ("", "none") or not f.get("url"):
+            continue
+        if str(f.get("protocol") or "https") not in ("https", "http"):
+            continue
+        if (f.get("height") or 0) > _TRAILER_MAX_HEIGHT:
+            continue
+        if best is None or (f.get("height") or 0) > (best.get("height") or 0):
+            best = f
+    if not best:
+        return ""
+    ua = (best.get("http_headers") or {}).get("User-Agent") or ""
+    try:
+        from urllib.parse import quote
+        ua = quote(ua, safe="")
+    except Exception:
+        pass
+    return best["url"] + ("|User-Agent={}".format(ua) if ua else "")
+
+
 def _round_photo(path, size=116):
     """[cast] TMDb profile photo -> round PNG (transparent corners), cached."""
     if not path:
@@ -2875,6 +2907,22 @@ class NovaPlayDetail(Screen):
             trailer_dir = _trailer_cache_dir()
             cache_key = "{}_v{}".format(key, _TRAILER_CACHE_VERSION)
             local_path = os.path.join(trailer_dir, "{}.mp4".format(cache_key))
+            # [trailer-stream] Settings > Trailer = "Stream first": when the
+            # video still has ONE combined H.264 + AAC format (usually 360p)
+            # play its URL straight away instead of downloading; otherwise
+            # (or with "Download") fall through to the download below.
+            # A trailer already downloaded earlier always plays from disk.
+            if (not os.path.exists(local_path)
+                    and str(_get_config("trailer_mode", "stream") or "stream") == "stream"):
+                callInMainThread(self["status"].setText, "Opening the trailer...")
+                stream = _trailer_stream_url(yt_dlp, youtube_url)
+                if getattr(self, "_closed", False):
+                    return
+                if stream:
+                    trailer_title = "{} - Trailer".format(self._raw_title or self._item.get("title", ""))
+                    callInMainThread(self._onTrailerResolved, stream, trailer_title)
+                    return
+                my_log("trailer: no combined format to stream, downloading instead")
 
             if not os.path.exists(local_path):
                 callInMainThread(self["status"].setText, "Downloading the trailer...")
@@ -2946,7 +2994,12 @@ class NovaPlayDetail(Screen):
             # restore and nothing to save/resume on close, so closing this
             # screen (by EOF or by exit) just reveals the detail screen
             # underneath, same as any other screen on the stack.
-            candidates = [(4097, local_path, u"local trailer", False)]
+            if local_path.startswith("http"):
+                # [trailer-stream] a YouTube URL: the usual remote candidates
+                from plugin_screen_player import _build_remote_play_candidates
+                candidates = _build_remote_play_candidates(local_path)
+            else:
+                candidates = [(4097, local_path, u"local trailer", False)]
             self.session.open(NovaPlaySimplePlayer, trailer_title, candidates,
                                previous_service=None, resume_pos=0, item_url="",
                                next_episode=None, on_next=None,
