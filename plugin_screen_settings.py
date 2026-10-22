@@ -359,6 +359,9 @@ class NovaPlaySettings(Screen):
             lib.insert(1, ("layout", "grid", "Poster Layout",
                            "Carousel" if _get_config("layout_style", _dflt) == "carousel" else "Grid",
                            "Grid with info panel, or carousel over a big backdrop (GREEN on a site switches)"))
+            lib.insert(2, ("screenstyle", "grid", "Screen Style",
+                           "Modern" if _get_config("screen_style", "classic") == "modern" else "Classic",
+                           "Classic, or Modern: 7 x 2 posters without the info panel (site and detail screens)"))
             return lib
         if sec == "tools":
             return [
@@ -547,6 +550,9 @@ class NovaPlaySettings(Screen):
         elif key == "layout":
             _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
             _set_config("layout_style", "grid" if _get_config("layout_style", _dflt) == "carousel" else "carousel")
+            self._refresh()
+        elif key == "screenstyle":
+            _set_config("screen_style", "classic" if _get_config("screen_style", "classic") == "modern" else "modern")
             self._refresh()
         elif key == "watchedbw":
             _set_config("watched_poster_bw", not bool(_get_config("watched_poster_bw", False)))

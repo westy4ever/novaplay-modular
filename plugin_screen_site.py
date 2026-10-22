@@ -67,6 +67,18 @@ PW, PH = 178, 267
 _PX = tuple(430 + c * (PW + 15) for c in range(P_COLS))
 _PY = (222, 574)
 
+# [theme] "Modern" screen style (Settings > Screen style): no info panel,
+# 7 x 2 posters across the full width, the selected title's name / details
+# in a strip under the grid, glow background, gold-tinted category row
+M_COLS = 7
+M_VIEW = M_COLS * P_ROWS
+_MPX = tuple(430 + c * (PW + 34) for c in range(M_COLS))
+ROW_ON_M = "#353124"
+
+
+def _modern_style():
+    return _get_config("screen_style", "classic") == "modern"
+
 # [carousel] 7 posters along the bottom, the middle one larger, over a
 # full-screen darkened backdrop with the title / details / plot on top
 K_SLOTS, K_MID = 7, 3
@@ -163,10 +175,90 @@ def _skin():
     return "".join(parts)
 
 
+def _skin_modern():
+    parts = ["""
+    <screen name="NovaPlaySiteModern" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="{bg}">
+        <eLabel position="0,0" size="1920,1080" backgroundColor="{bg}" zPosition="0" />
+        <ePixmap position="0,0" size="1920,1080" pixmap="{p}/images/np_bg_modern.jpg" scale="1" zPosition="0" />
+        <widget name="kBackdrop" position="0,0" size="1920,1080" alphatest="blend" scale="1" zPosition="1" />
+        <widget name="logo" position="40,40" size="180,64" alphatest="blend" scale="1" zPosition="2" />
+        <widget name="title" position="240,30" size="1000,54" halign="left" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="subtitle" position="240,88" size="1000,32" halign="left" font="Regular;22" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="clock_time" position="1380,22" size="500,62" font="Bold;54" halign="right" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="clock_date" position="1280,90" size="600,30" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+
+        <widget name="catEdge" position="40,150" size="350,810" backgroundColor="{edge}" cornerRadius="22" zPosition="1" />
+        <widget name="catPanel" position="42,152" size="346,806" backgroundColor="{panel}" cornerRadius="20" zPosition="2" />
+        <widget name="catHead" position="68,168" size="300,30" font="Bold;18" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="catPage" position="68,912" size="300,30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+
+        <widget name="gridTitle" position="430,150" size="620,58" halign="left" font="Bold;40" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="gridMore" position="1060,164" size="380,34" font="Regular;22" halign="right" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="gridCount" position="1450,164" size="430,34" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <widget name="gridMsg" position="430,226" size="1450,602" font="Regular;28" halign="center" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="18" zPosition="2" />
+
+        <widget name="infoPanel" position="430,908" size="1450,54" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
+        <widget name="infoBar" position="430,908" size="7,54" backgroundColor="{gold}" cornerRadius="3" zPosition="2" />
+        <widget name="infoTitle" position="456,908" size="610,54" halign="left" valign="center" font="Bold;27" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="infoMeta" position="1076,908" size="470,54" valign="center" font="Regular;21" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="infoState" position="1556,908" size="300,54" halign="right" valign="center" font="Regular;20" foregroundColor="#30C48D" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="infoBack" position="0,0" size="2,2" backgroundColor="{bg}" zPosition="0" />
+        <widget name="infoImg" position="0,0" size="2,2" alphatest="blend" scale="1" zPosition="0" />
+        <widget name="infoPlot" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
+
+        <eLabel position="40,980" size="1840,72" backgroundColor="{panel}" cornerRadius="18" zPosition="3" />
+        <eLabel position="64,998" size="34,34" backgroundColor="#E5484D" cornerRadius="9" zPosition="4" />
+        <eLabel position="112,994" size="230,42" text="Previous page" font="Regular;24" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="4" />
+        <eLabel position="364,998" size="34,34" backgroundColor="#30A46C" cornerRadius="9" zPosition="4" />
+        <widget name="key_green" position="412,994" size="230,42" font="Regular;24" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="4" />
+        <eLabel position="664,998" size="34,34" backgroundColor="#F2C230" cornerRadius="9" zPosition="4" />
+        <eLabel position="712,994" size="200,42" text="Search" font="Regular;24" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="4" />
+        <eLabel position="934,998" size="34,34" backgroundColor="#3E7BFA" cornerRadius="9" zPosition="4" />
+        <eLabel position="982,994" size="200,42" text="Next page" font="Regular;24" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="4" />
+        <widget name="hint" position="1190,994" size="666,42" font="Regular;21" halign="right" valign="center" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="4" />
+    """.format(bg=BG, gold=GOLD, muted=MUTED, white=WHITE, panel=PANEL, card=CARD, edge=EDGE, text=TEXT, p=PLUGIN_PATH)]
+    for i in range(CAT_ROWS):
+        y = _CAT_Y0 + i * _CAT_STEP
+        parts.append("""
+        <widget name="cBg{i}" position="54,{y}" size="322,{h}" backgroundColor="{panel}" cornerRadius="14" zPosition="3" />
+        <widget name="cBar{i}" position="54,{by}" size="5,{bh}" backgroundColor="{gold}" cornerRadius="2" zPosition="5" />
+        <widget name="cText{i}" position="74,{y}" size="290,{h}" font="Regular;24" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        """.format(i=i, y=y, by=y + 10, bh=_CAT_H - 20, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
+    for i in range(M_VIEW):
+        x, y = _MPX[i % M_COLS], _PY[i // M_COLS]
+        parts.append("""
+        <widget name="pEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="14" zPosition="2" />
+        <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" cornerRadius="10" zPosition="3" />
+        <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#300C1017" cornerRadius="8" zPosition="5" />
+        <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
+        <widget name="pName{i}" halign="center" position="{nx},{ty}" size="{nw},32" font="Regular;21" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        <widget name="pYear{i}" halign="center" position="{nx},{yy}" size="{nw},26" font="Regular;17" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 6, ey=y - 6, ew=PW + 12, eh=PH + 12,
+                   rx=x + PW - 78, ry=y + 8, my=y + PH - 28, ty=y + PH + 10, yy=y + PH + 40,
+                   nx=x - 12, nw=PW + 24, gold=GOLD, card=CARD, white=WHITE, bg=BG, muted=MUTED))
+    # carousel widgets are shared with the classic skin
+    classic = _skin()
+    car = classic[classic.index('<widget name="kTitle"'):classic.rindex("</screen>")]
+    parts.append("        " + car)
+    parts.append("</screen>")
+    return "".join(parts)
+
+
+_SKIN_CLASSIC = scale_skin_xml(_skin())
+_SKIN_MODERN = scale_skin_xml(_skin_modern())
+
+
 class NovaPlaySite(Screen):
-    skin = scale_skin_xml(_skin())
+    skin = _SKIN_CLASSIC
 
     def __init__(self, session, site, title=None, items=None, loader=None, m_type="movie", library=None):
+        # [theme] pick the skin + grid geometry before the skin is applied
+        self._modern = _modern_style()
+        self._cols = M_COLS if self._modern else P_COLS
+        self._view = M_VIEW if self._modern else P_VIEW
+        self.skin = _SKIN_MODERN if self._modern else _SKIN_CLASSIC
+        self.skinName = "NovaPlaySiteModern" if self._modern else "NovaPlaySite"
         Screen.__init__(self, session)
         self._site = site
         self._m_type = m_type
@@ -209,6 +301,8 @@ class NovaPlaySite(Screen):
         self["kBackdrop"] = Pixmap()
         self["catPanel"] = Label("")
         self["infoPanel"] = Label("")
+        if self._modern:
+            self["infoBar"] = Label("")
         for n in ("kTitle", "kMeta", "kState", "kPlot", "kCount"):
             self[n] = Label("")
         for i in range(K_SLOTS):
@@ -224,7 +318,7 @@ class NovaPlaySite(Screen):
             self["cBg%d" % i] = Label("")
             self["cBar%d" % i] = Label("")
             self["cText%d" % i] = Label("")
-        for i in range(P_VIEW):
+        for i in range(self._view):
             for n in ("pEdge", "pBack", "pRate", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)] = Label("")
             self["pImg%d" % i] = Pixmap()
@@ -323,7 +417,7 @@ class NovaPlaySite(Screen):
     # ─── [carousel] layout switching ───────────────────────────────────
 
     _CAT_W = ["catEdge", "catPanel", "catHead", "catPage"]
-    _INFO_W = ["infoPanel", "infoBack", "infoImg", "infoTitle", "infoMeta", "infoState", "infoPlot"]
+    _INFO_W = ["infoPanel", "infoBar", "infoBack", "infoImg", "infoTitle", "infoMeta", "infoState", "infoPlot"]
     _GRID_W = ["gridTitle", "gridCount", "gridMore"]
     _CAR_W = ["kTitle", "kMeta", "kState", "kPlot", "kCount"]
 
@@ -350,9 +444,12 @@ class NovaPlaySite(Screen):
             # infoImg is shown by _paintBackdrop only when it has a picture
             if not getattr(self, "_info_img_ok", False):
                 self["infoImg"].hide()
+            if self._modern:
+                # [theme] the strip under the grid has no picture / plot
+                self._vis(["infoBack", "infoImg", "infoPlot"], False)
         self._vis(self._GRID_W, not car)
         if car:
-            for i in range(P_VIEW):
+            for i in range(self._view):
                 self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")], False)
         # carousel + category list open: a "peek" -- the section name, the
         # counter and the poster strip stay in view beside the panel (was a
@@ -471,7 +568,7 @@ class NovaPlaySite(Screen):
                 continue
             on = g == sel
             self["cBg%d" % i].show()
-            self._color("cBg%d" % i, bg=ROW_ON if on else PANEL)
+            self._color("cBg%d" % i, bg=(ROW_ON_M if self._modern else ROW_ON) if on else PANEL)
             self["cBar%d" % i].show() if (on and side) else self["cBar%d" % i].hide()
             self._color("cText%d" % i, fg=WHITE if on else (MUTED if c.get("type") == "error" else TEXT))
         pages = max(1, (n + CAT_ROWS - 1) // CAT_ROWS)
@@ -575,7 +672,7 @@ class NovaPlaySite(Screen):
     def _showMsg(self, text):
         self["gridMsg"].setText(text)
         self["gridMsg"].show()
-        for i in range(P_VIEW):
+        for i in range(self._view):
             for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)].hide()
         self["gridCount"].setText("")
@@ -598,9 +695,9 @@ class NovaPlaySite(Screen):
             self._paintCarousel()
             return
         self["gridMsg"].hide()
-        view = self._pi // P_VIEW
-        views = (n + P_VIEW - 1) // P_VIEW
-        base = view * P_VIEW
+        view = self._pi // self._view
+        views = (n + self._view - 1) // self._view
+        base = view * self._view
         self["gridCount"].setText("{} titles  ·  {}/{}".format(n, view + 1, views))
         more = []
         if view < views - 1 or self._next_url or self._site in _PAGED_SITES and self._cat_url:
@@ -609,7 +706,7 @@ class NovaPlaySite(Screen):
             more.append("page {}".format(self._page))
         self["gridMore"].setText("   ·   ".join(more))
         missing = False
-        for i in range(P_VIEW):
+        for i in range(self._view):
             g = base + i
             names = ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")
             if g >= n:
@@ -806,8 +903,8 @@ class NovaPlaySite(Screen):
         if self._carousel():
             window = self._posters[max(0, self._pi - K_MID):self._pi + K_MID + 1]
         else:
-            view = self._pi // P_VIEW
-            window = self._posters[view * P_VIEW:(view + 1) * P_VIEW]
+            view = self._pi // self._view
+            window = self._posters[view * self._view:(view + 1) * self._view]
         done = True
         for it in window:
             u = it.get("poster") or it.get("thumbnail") or ""
@@ -858,7 +955,10 @@ class NovaPlaySite(Screen):
             self._clearInfo()
             return
         title = _strip_arabic_from_english_title(it.get("title", "")) or it.get("title", "")
-        self["infoTitle"].setText(_wrap_ui_text(title, width=24, max_lines=2, fallback="—"))
+        if self._modern:
+            self["infoTitle"].setText(_single_line_text(title, width=40, fallback="—"))
+        else:
+            self["infoTitle"].setText(_wrap_ui_text(title, width=24, max_lines=2, fallback="—"))
         self["kTitle"].setText(_single_line_text(title, width=44, fallback="—"))
         self._paintMeta(it, {})
         self["infoState"].setText(self._stateText(it))
@@ -900,10 +1000,13 @@ class NovaPlaySite(Screen):
             bits.append(u"★ " + str(r)[:3])
         if meta.get("genres"):
             bits.append(meta["genres"])
-        self["infoMeta"].setText(_single_line_text("  ·  ".join(b for b in bits if b), width=40, fallback=""))
+        self["infoMeta"].setText(_single_line_text("  ·  ".join(b for b in bits if b), width=44 if self._modern else 40, fallback=""))
         self["kMeta"].setText(_single_line_text("  ·  ".join(b for b in bits if b), width=90, fallback=""))
 
     def _paintBackdrop(self, it):
+        if self._modern:
+            self._info_img_ok = False
+            return
         url = it.get("fanart") or it.get("backdrop") or ""
         if not url:
             self["infoImg"].hide()
@@ -1012,8 +1115,8 @@ class NovaPlaySite(Screen):
                 return
             self._paintPosters()
             return
-        local = self._pi % P_VIEW
-        col = local % P_COLS
+        local = self._pi % self._view
+        col = local % self._cols
         if dx < 0 and col == 0:
             self._zone = "cats"
             self._paintCats()
@@ -1027,16 +1130,16 @@ class NovaPlaySite(Screen):
                 return
             self._pi = max(0, t)
         elif dy > 0:
-            t = self._pi + P_COLS
+            t = self._pi + self._cols
             if t < n:
                 self._pi = t
-            elif self._pi // P_VIEW < (n - 1) // P_VIEW:
+            elif self._pi // self._view < (n - 1) // self._view:
                 self._pi = n - 1
             else:
                 self._nextPage()
                 return
         elif dy < 0:
-            t = self._pi - P_COLS
+            t = self._pi - self._cols
             if t >= 0:
                 self._pi = t
             elif self._page > 1 and len(self._history) > 1:
