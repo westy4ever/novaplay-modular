@@ -84,9 +84,9 @@ _CONT_TW = _CONT_W - 120          # title / details / bar width
 
 S_COLS, S_ROWS = 4, 3
 S_PAGE = S_COLS * S_ROWS
-_S_X = (430, 798, 1166, 1534)
+_S_X = (466, 816, 1166, 1516)     # [band] inside a dark band with ‹ ›
 _S_Y = (440, 618, 796)
-_S_W, _S_H = 346, 158
+_S_W, _S_H = 328, 158
 
 # [pop-anim] the selected card grows 8 % (same smooth pop as the poster
 # grids): (widget, x, y, w, h, resize) relative to the card's corner
@@ -99,7 +99,7 @@ _SIDE_PARTS = (("rowBg", 0, 0, 332, 66, True), ("rowBar", 0, 0, 5, 66, True),
                ("rowIcon", 18, 15, 36, 36, True), ("rowText", 70, 0, 256, 66, False))
 _SITE_PARTS = (("sEdge", 0, 0, _S_W, _S_H, True), ("sBox", 3, 3, _S_W - 6, _S_H - 6, True),
                ("sLogo", 18, 18, 132, 47, True), ("sDot", _S_W - 34, 34, 14, 14, False),
-               ("sName", 18, 74, 310, 36, False), ("sTag", 18, 112, 310, 30, False))
+               ("sName", 18, 74, _S_W - 36, 36, False), ("sTag", 18, 112, _S_W - 36, 30, False))
 
 
 def _skin():
@@ -123,6 +123,9 @@ def _skin():
         <eLabel position="430,148" size="900,58" text="Continue Watching" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="contCount" position="1380,162" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <eLabel position="420,208" size="1470,160" backgroundColor="{panel}" cornerRadius="20" zPosition="1" />
+        <eLabel position="420,430" size="1470,536" backgroundColor="{panel}" cornerRadius="20" zPosition="1" />
+        <widget name="siteLeft" position="424,665" size="34,64" font="Regular;52" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="5" />
+        <widget name="siteRight" position="1852,665" size="34,64" font="Regular;52" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="5" />
         <widget name="contLeft" position="424,256" size="34,64" font="Regular;52" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="5" />
         <widget name="contRight" position="1852,256" size="34,64" font="Regular;52" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="5" />
         <widget name="contEmpty" position="465,222" size="1380,132" font="Regular;26" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
@@ -168,10 +171,10 @@ def _skin():
         <widget name="sBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
         <widget name="sLogo{i}" position="{lx},{ly}" size="132,47" alphatest="blend" scale="1" zPosition="4" />
         <widget name="sDot{i}" position="{dx},{dy}" size="14,14" backgroundColor="{card}" cornerRadius="7" zPosition="4" />
-        <widget name="sName{i}" halign="left" position="{nx},{ny}" size="310,36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
-        <widget name="sTag{i}" position="{nx},{gy}" size="310,30" font="Regular;20" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="sName{i}" halign="left" position="{nx},{ny}" size="{tw},36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="sTag{i}" position="{nx},{gy}" size="{tw},30" font="Regular;20" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="4" />
         """.format(i=i, x=x, y=y, w=_S_W, h=_S_H, x3=x + 3, y3=y + 3, w3=_S_W - 6, h3=_S_H - 6,
-                   lx=x + 18, ly=y + 18, dx=x + _S_W - 34, dy=y + 34, nx=x + 18, ny=y + 74, gy=y + 112,
+                   lx=x + 18, ly=y + 18, dx=x + _S_W - 34, dy=y + 34, nx=x + 18, ny=y + 74, gy=y + 112, tw=_S_W - 36,
                    edge=EDGE, card=CARD, white=WHITE))
     parts.append("</screen>")
     return "".join(parts)
@@ -222,6 +225,8 @@ class NovaPlayHub(Screen):
         self["contCount"] = Label("")
         self["contEmpty"] = Label("")
         self["contLeft"] = Label(u"\u2039")
+        self["siteLeft"] = Label(u"\u2039")
+        self["siteRight"] = Label(u"\u203a")
         self["contRight"] = Label(u"\u203a")
         self["siteCount"] = Label("")
         self["key_blue"] = Label("Settings")
@@ -620,6 +625,8 @@ class NovaPlayHub(Screen):
         page = self._si // S_PAGE
         pages = max(1, (n + S_PAGE - 1) // S_PAGE)
         self["siteCount"].setText("{} sites  ·  Page {}/{}".format(n, page + 1, pages))
+        self["siteLeft"].show() if page > 0 else self["siteLeft"].hide()
+        self["siteRight"].show() if page + 1 < pages else self["siteRight"].hide()
         base = page * S_PAGE
         for i in range(S_PAGE):
             g = base + i
@@ -633,7 +640,7 @@ class NovaPlayHub(Screen):
             s = self._sites[g]
             sel = self._zone == "sites" and g == self._si
             self._color("sEdge%d" % i, bg=GOLD if sel else EDGE)
-            self["sName%d" % i].setText(_single_line_text(s["title"], width=22, fallback=s["key"]))
+            self["sName%d" % i].setText(_single_line_text(s["title"], width=20, fallback=s["key"]))
             self._color("sName%d" % i, fg=GOLD if sel else WHITE)
             self["sTag%d" % i].setText(_single_line_text(s.get("tagline") or "", width=30, fallback=""))
             self._color("sDot%d" % i, bg=DOT.get(plugin_health.get(s["key"]), CARD))

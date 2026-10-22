@@ -72,7 +72,7 @@ _PY = (222, 574)
 # in a strip under the grid, glow background, gold-tinted category row
 M_COLS = 7
 M_VIEW = M_COLS * P_ROWS
-_MPX = tuple(430 + c * (PW + 34) for c in range(M_COLS))
+_MPX = tuple(454 + c * (PW + 26) for c in range(M_COLS))   # [band] room for ‹ ›
 ROW_ON_M = "#353124"
 # [theme] Modern: the selected poster grows 8 % with an ease-out "pop",
 # the same animation as the home screen's poster grid
@@ -132,6 +132,9 @@ def _skin():
         <widget name="gridTitle" position="430,148" size="700,58" halign="left" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridCount" position="1080,162" size="300,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridMsg" position="430,226" size="950,602" font="Regular;28" halign="center" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
+        <widget name="gridBand" position="405,212" size="1000,692" backgroundColor="{panel}" cornerRadius="18" zPosition="1" />
+        <widget name="gridLeft" position="406,520" size="22,64" font="Regular;44" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
+        <widget name="gridRight" position="1382,520" size="22,64" font="Regular;44" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
         <widget name="gridMore" position="430,906" size="950,34" font="Regular;22" halign="center" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
 
         <widget name="infoPanel" position="1410,150" size="470,810" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
@@ -179,6 +182,8 @@ def _skin():
         <widget name="kState" position="80,272" size="1380,32" halign="left" font="Regular;24" foregroundColor="#30C48D" backgroundColor="{bg}" transparent="1" zPosition="5" />
         <widget name="kPlot" position="80,314" size="1060,170" font="Regular;26" foregroundColor="#E6EAF0" backgroundColor="{bg}" transparent="1" zPosition="5" />
         <widget name="kCount" position="1480,170" size="400,34" halign="right" font="Regular;24" foregroundColor="#C9D0DA" backgroundColor="{bg}" transparent="1" zPosition="5" />
+        <widget name="kLeft" position="112,693" size="44,64" font="Regular;60" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="{bg}" transparent="1" zPosition="8" />
+        <widget name="kRight" position="1764,693" size="44,64" font="Regular;60" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="{bg}" transparent="1" zPosition="8" />
     """.format(gold=GOLD, bg=BG))
     for s_ in range(K_SLOTS):
         x, y, w, h = _KG[s_]
@@ -214,6 +219,9 @@ def _skin_modern():
         <widget name="gridMore" position="1060,164" size="380,34" font="Regular;22" halign="right" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridCount" position="1450,164" size="430,34" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridMsg" position="430,226" size="1450,602" font="Regular;28" halign="center" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="18" zPosition="2" />
+        <widget name="gridBand" position="420,210" size="1470,696" backgroundColor="{panel}" cornerRadius="20" zPosition="1" />
+        <widget name="gridLeft" position="422,520" size="30,64" font="Regular;50" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
+        <widget name="gridRight" position="1858,520" size="30,64" font="Regular;50" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
 
         <widget name="infoPanel" position="430,908" size="1450,54" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
         <widget name="infoBar" position="430,908" size="7,54" backgroundColor="{gold}" cornerRadius="3" zPosition="2" />
@@ -311,6 +319,9 @@ class NovaPlaySite(Screen):
         self["gridCount"] = Label("")
         self["gridMsg"] = Label("")
         self["gridMore"] = Label("")
+        self["gridBand"] = Label("")
+        for _n, _t in (("gridLeft", u"\u2039"), ("gridRight", u"\u203a"), ("kLeft", u"\u2039"), ("kRight", u"\u203a")):
+            self[_n] = Label(_t)
         self["infoBack"] = Label("")
         self["infoImg"] = Pixmap()
         for n in ("infoTitle", "infoMeta", "infoState", "infoPlot"):
@@ -458,7 +469,7 @@ class NovaPlaySite(Screen):
 
     _CAT_W = ["catEdge", "catPanel", "catHead", "catPage"]
     _INFO_W = ["infoPanel", "infoBar", "infoBack", "infoImg", "infoTitle", "infoMeta", "infoState", "infoPlot"]
-    _GRID_W = ["gridTitle", "gridCount", "gridMore"]
+    _GRID_W = ["gridTitle", "gridCount", "gridMore", "gridBand"]
     _CAR_W = ["kTitle", "kMeta", "kState", "kPlot", "kCount"]
 
     def _vis(self, names, on):
@@ -488,6 +499,10 @@ class NovaPlaySite(Screen):
                 # [theme] the strip under the grid has no picture / plot
                 self._vis(["infoBack", "infoImg", "infoPlot"], False)
         self._vis(self._GRID_W, not car)
+        if car or not self._posters:
+            self._vis(["gridLeft", "gridRight"], False)
+        if not (car and self._zone == "posters" and self._posters):
+            self._vis(["kLeft", "kRight"], False)
         if car:
             for i in range(self._view):
                 self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")], False)
@@ -724,6 +739,7 @@ class NovaPlaySite(Screen):
                 self["%s%d" % (n, i)].hide()
         self["gridCount"].setText("")
         self["gridMore"].setText("")
+        self._vis(["gridLeft", "gridRight", "kLeft", "kRight"], False)
         self._posters = []
         self._clearInfo()
         self._applyLayout()
@@ -752,6 +768,10 @@ class NovaPlaySite(Screen):
         if self._page > 1:
             more.append("page {}".format(self._page))
         self["gridMore"].setText("   ·   ".join(more))
+        # [band] ‹ › beside the grid when there is more that way
+        _fwd = view < views - 1 or bool(self._next_url) or (self._site in _PAGED_SITES and bool(self._cat_url))
+        self["gridRight"].show() if _fwd else self["gridRight"].hide()
+        self["gridLeft"].show() if (view > 0 or self._page > 1) else self["gridLeft"].hide()
         missing = False
         for i in range(self._view):
             g = base + i
@@ -1147,6 +1167,11 @@ class NovaPlaySite(Screen):
         self["gridMsg"].hide()
         self._pi = max(0, min(self._pi, n - 1))
         more = u"  ·  page {}".format(self._page) if self._page > 1 else u""
+        # ‹ › at the ends of the strip when there are titles beyond it
+        _br = self._zone == "posters"
+        self["kLeft"].show() if (_br and (self._pi - K_MID > 0 or self._page > 1)) else self["kLeft"].hide()
+        self["kRight"].show() if (_br and (self._pi + K_MID < n - 1 or bool(self._next_url)
+                                           or (self._site in _PAGED_SITES and bool(self._cat_url)))) else self["kRight"].hide()
         self["kCount"].setText(u"{} / {}{}".format(self._pi + 1, n, more))
         missing = False
         browsing = self._zone == "posters"
