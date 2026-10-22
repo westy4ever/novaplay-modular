@@ -418,6 +418,7 @@ class NovaPlayDetail(Screen):
         self._sv_pop_key = None
         self._sv_pop_slot = -1
         self._sv_pop_f = 0
+        self._sv_slide = 0
         self._svPopT = eTimer()
         self._svPopT.callback.append(self._svPopTick)
         Screen.__init__(self, session)
@@ -616,8 +617,8 @@ class NovaPlayDetail(Screen):
                  ("svNum", 16, 14, 46, 46, True), ("svQ", _SV_W - 126, 14, 110, 30, False),
                  ("svName", 16, 68, _SV_W - 32, 62, False), ("svInfo", 16, 118, _SV_W - 32, 24, False))
 
-    def _svPlace(self, i, p):
-        x0 = _SV_X0 + i * (_SV_W + _SV_GAP)
+    def _svPlace(self, i, p, xoff=0.0):
+        x0 = _SV_X0 + i * (_SV_W + _SV_GAP) + xoff
         k = 1.0 + 0.08 * p
         cx, cy = x0 - (_SV_W * k - _SV_W) / 2.0, _SV_Y - (_SV_H * k - _SV_H) / 2.0
         for name, rx, ry, w, h, rs in self._SV_PARTS:
@@ -643,24 +644,37 @@ class NovaPlayDetail(Screen):
             self._svPlace(self._sv_pop_slot, 0.0)
         self._sv_pop_key = key
         self._sv_pop_slot = slot if (slot >= 0 and extra[1]) else -1
-        if self._sv_pop_slot < 0:
+        if self._sv_pop_slot < 0 and not self._sv_slide:
             return
         self._sv_pop_f = 0
+        self._svFrame(0.0)
         try:
             self._svPopT.start(POP_ANIM_INTERVAL, False)
         except Exception:
-            self._svPlace(slot, 1.0)
+            self._svFrame(1.0)
+
+    def _svFrame(self, p):
+        """[slide-anim] one step past the edge: the whole row glides one card
+        sideways while the newly selected card grows; otherwise just the zoom."""
+        d = self._sv_slide
+        if d:
+            off = d * (_SV_W + _SV_GAP) * (1.0 - p)
+            for i in range(SV_CARDS):
+                self._svPlace(i, p if i == self._sv_pop_slot else 0.0, off)
+        elif self._sv_pop_slot >= 0:
+            self._svPlace(self._sv_pop_slot, p)
 
     def _svPopTick(self):
         import math
-        if self._sv_pop_slot < 0 or getattr(self, "_closed", False):
+        if (self._sv_pop_slot < 0 and not self._sv_slide) or getattr(self, "_closed", False):
             self._svPopT.stop()
             return
         self._sv_pop_f += 1
         t = min(1.0, self._sv_pop_f / float(max(1, POP_ANIM_FRAMES)))
-        self._svPlace(self._sv_pop_slot, math.sin(t * math.pi / 2))
+        self._svFrame(math.sin(t * math.pi / 2))
         if t >= 1.0:
             self._svPopT.stop()
+            self._sv_slide = 0
 
     def _svStep(self, d):
         n = len(self._sv_items)
@@ -702,7 +716,23 @@ class NovaPlayDetail(Screen):
         except Exception:
             idx = 0
         idx = max(0, min(idx, n - 1)) if n else 0
-        base = (idx // SV_CARDS) * SV_CARDS
+        # [slide-anim] the row scrolls one card at a time: stepping past the
+        # last (first) visible card moves the window by one and slides
+        old = getattr(self, "_sv_base", 0)
+        if id(items) != getattr(self, "_sv_list_id", None):
+            self._sv_list_id = id(items)
+            base = min((idx // SV_CARDS) * SV_CARDS, max(0, n - SV_CARDS))
+            old = base
+        else:
+            base = old
+            if idx < base:
+                base = idx
+            elif idx >= base + SV_CARDS:
+                base = idx - SV_CARDS + 1
+            base = max(0, min(base, max(0, n - SV_CARDS)))
+        self._sv_base = base
+        if abs(base - old) == 1:
+            self._sv_slide = base - old
         for i in range(SV_CARDS):
             g = base + i
             names = ["%s%d" % (k, i) for k in ("svEdge", "svBg", "svNum", "svQ", "svName", "svInfo")]
