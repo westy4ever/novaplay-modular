@@ -99,7 +99,11 @@ _PY = (222, 574)
 # in a strip under the grid, glow background, gold-tinted category row
 M_COLS = 7
 M_VIEW = M_COLS * P_ROWS
-_MPX = tuple(454 + c * (PW + 26) for c in range(M_COLS))   # [band] room for ‹ ›
+# [bigger] no info strip under the Modern grid any more (the posters carry
+# the name, year, resume band): the posters use that height -- 186 x 279
+MPW, MPH = 186, 279
+_MPX = tuple(456 + c * (MPW + 16) for c in range(M_COLS))   # [band] room for ‹ ›
+_MPY = (222, 582)
 ROW_ON_M = "#353124"
 # [theme] Modern: the selected poster grows 8 % with an ease-out "pop",
 # the same animation as the home screen's poster grid
@@ -255,15 +259,15 @@ def _skin_modern():
         <widget name="gridMore" position="1060,164" size="380,34" font="Regular;22" halign="right" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridCount" position="1450,164" size="430,34" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="gridMsg" position="430,226" size="1450,602" font="Regular;28" halign="center" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="18" zPosition="2" />
-        <widget name="gridBand" position="420,210" size="1470,696" backgroundColor="{panel}" cornerRadius="20" zPosition="1" />
-        <widget name="gridLeft" position="422,520" size="30,64" font="Regular;50" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
-        <widget name="gridRight" position="1858,520" size="30,64" font="Regular;50" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
+        <widget name="gridBand" position="420,210" size="1470,752" backgroundColor="{panel}" cornerRadius="20" zPosition="1" />
+        <widget name="gridLeft" position="422,548" size="30,64" font="Regular;50" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
+        <widget name="gridRight" position="1858,548" size="30,64" font="Regular;50" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="6" />
 
-        <widget name="infoPanel" position="430,908" size="1450,54" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
-        <widget name="infoBar" position="430,908" size="7,54" backgroundColor="{gold}" cornerRadius="3" zPosition="2" />
-        <widget name="infoTitle" position="456,908" size="610,54" halign="left" valign="center" font="Bold;27" foregroundColor="{white}" backgroundColor="{panel}" transparent="1" zPosition="3" />
-        <widget name="infoMeta" position="1076,908" size="470,54" valign="center" font="Regular;21" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="3" />
-        <widget name="infoState" position="1556,908" size="300,54" halign="right" valign="center" font="Regular;20" foregroundColor="#30C48D" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="infoPanel" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
+        <widget name="infoBar" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
+        <widget name="infoTitle" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
+        <widget name="infoMeta" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
+        <widget name="infoState" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
         <widget name="infoBack" position="0,0" size="2,2" backgroundColor="{bg}" zPosition="0" />
         <widget name="infoImg" position="0,0" size="2,2" alphatest="blend" scale="1" zPosition="0" />
         <widget name="infoPlot" position="0,0" size="2,2" font="Regular;10" backgroundColor="{bg}" transparent="1" zPosition="0" />
@@ -287,7 +291,7 @@ def _skin_modern():
         <widget name="cText{i}" position="74,{y}" size="290,{h}" font="Regular;24" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
         """.format(i=i, y=y, ey=y - 2, eh=_CAT_H + 4, by=y + 10, bh=_CAT_H - 20, h=_CAT_H, panel=PANEL, gold=GOLD, text=TEXT))
     for i in range(M_VIEW):
-        x, y = _MPX[i % M_COLS], _PY[i // M_COLS]
+        x, y = _MPX[i % M_COLS], _MPY[i // M_COLS]
         parts.append("""
         <widget name="pEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="14" zPosition="2" />
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" cornerRadius="10" zPosition="3" />
@@ -298,10 +302,10 @@ def _skin_modern():
         <widget name="pLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="8" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
         <widget name="pName{i}" halign="center" position="{nx},{ty}" size="{nw},54" font="Regular;19" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
-        """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 6, ey=y - 6, ew=PW + 12, eh=PH + 12,
-                   rx=x + PW - 78, ry=y + 8, qx=x + PW - 92, qy=y + 40, yx=x + 8, ly=y + 38,
-                   my=y + PH - 28, ty=y + PH + 10,
-                   nx=x - 12, nw=PW + 24, gold=GOLD, card=CARD, white=WHITE, bg=BG, muted=MUTED))
+        """.format(i=i, x=x, y=y, w=MPW, h=MPH, ex=x - 6, ey=y - 6, ew=MPW + 12, eh=MPH + 12,
+                   rx=x + MPW - 78, ry=y + 8, qx=x + MPW - 92, qy=y + 40, yx=x + 8, ly=y + 38,
+                   my=y + MPH - 28, ty=y + MPH + 8,
+                   nx=x - 8, nw=MPW + 16, gold=GOLD, card=CARD, white=WHITE, bg=BG, muted=MUTED))
     # carousel widgets are shared with the classic skin
     classic = _skin()
     car = classic[classic.index('<widget name="kTitle"'):classic.rindex("</screen>")]
@@ -571,8 +575,8 @@ class NovaPlaySite(Screen):
             if not getattr(self, "_info_img_ok", False):
                 self["infoImg"].hide()
             if self._modern:
-                # [theme] the strip under the grid has no picture / plot
-                self._vis(["infoBack", "infoImg", "infoPlot"], False)
+                # [bigger] no info strip at all on Modern: the posters say it
+                self._vis(self._INFO_W, False)
         self._vis(self._GRID_W, not car)
         if car or not self._posters:
             self._vis(["gridLeft", "gridRight"], False)
@@ -905,7 +909,7 @@ class NovaPlaySite(Screen):
                 self._color(_w("Label"), bg="#3A4252", fg="#FFFFFF")
             # room left on that row: the poster width minus the quality badge
             # on the right (when there is one)
-            pw = _KG[i][2] if pre == "k" else PW
+            pw = _KG[i][2] if pre == "k" else (MPW if self._modern else PW)
             room = pw - 16 - (90 if _quality_badge(it) else 0)
             cw = max(40, min(room, 22 + 9 * len(chip)))
             self[_w("Label")].setText(_single_line_text(chip, width=max(4, (cw - 12) // 9), fallback=""))
@@ -1015,13 +1019,14 @@ class NovaPlaySite(Screen):
             if not purl and it.get("thumbnail"):
                 self._tmdbPoster(it)
                 purl = it["thumbnail"]
-            path = plugin_imagecache.getCachedImage(purl, target_size=(PW, PH)) if purl else ""
+            _ts = (MPW, MPH) if self._modern else (PW, PH)
+            path = plugin_imagecache.getCachedImage(purl, target_size=_ts) if purl else ""
             if purl and not path:
-                plugin_imagecache.requestImageAsync(purl, target_size=(PW, PH))
+                plugin_imagecache.requestImageAsync(purl, target_size=_ts)
                 missing = True
             if path and _get_config("watched_poster_bw", False) and self._isWatched(it):
                 try:
-                    _bw = plugin_imagecache.getBwVariant(purl, (PW, PH))
+                    _bw = plugin_imagecache.getBwVariant(purl, _ts)
                     if _bw:
                         path = _bw
                 except Exception:
@@ -1164,10 +1169,10 @@ class NovaPlaySite(Screen):
     # ─── [theme] Modern: pop zoom on the selected poster ────────────────
 
     def _slotGeom(self, i, p):
-        x, y = _MPX[i % M_COLS], _PY[i // M_COLS]
+        x, y = _MPX[i % M_COLS], _MPY[i // M_COLS]
         z = POP_ZOOM * p
-        w, h = int(PW * (1 + z)), int(PH * (1 + z))
-        return x - (w - PW) // 2, y - (h - PH) // 2, w, h, (h - PH) // 2
+        w, h = int(MPW * (1 + z)), int(MPH * (1 + z))
+        return x - (w - MPW) // 2, y - (h - MPH) // 2, w, h, (h - MPH) // 2
 
     def _mr(self, name, x, y, w=None, h=None):
         """move / resize a widget -- skipped when it would not change a pixel
@@ -1207,11 +1212,11 @@ class NovaPlaySite(Screen):
             return
         x, y, w, h, dy = self._slotGeom(i, p)
         x += xoff
-        bx, by = _MPX[i % M_COLS] + xoff, _PY[i // M_COLS]
+        bx, by = _MPX[i % M_COLS] + xoff, _MPY[i // M_COLS]
         self._mr("pBack%d" % i, x, y, w, h)
         if anim_light():
             # Light: the picture keeps its size (rescaling it is the costly part)
-            self._mr("pImg%d" % i, bx, by, PW, PH)
+            self._mr("pImg%d" % i, bx, by, MPW, MPH)
         else:
             self._mr("pImg%d" % i, x, y, w, h)
         self._mr("pEdge%d" % i, x - 6, y - 6, w + 12, h + 12)
@@ -1221,7 +1226,7 @@ class NovaPlaySite(Screen):
         self._mr("pLabel%d" % i, x + 8, y + 38)
         self._mr("pMark%d" % i, x, y + h - 28, w, 28)
         if text:
-            self._mr("pName%d" % i, bx - 12, by + PH + 10 + dy)
+            self._mr("pName%d" % i, bx - 8, by + MPH + 8 + dy)
 
     def _popFocus(self, view, n):
         slot = (self._pi - view * self._view if (self._zone == "posters" and n) else -1) if self._modern else -1
@@ -1480,7 +1485,8 @@ class NovaPlaySite(Screen):
         done = True
         for it in window:
             u = it.get("poster") or it.get("thumbnail") or ""
-            if u and not plugin_imagecache.getCachedImage(u, target_size=(PW, PH)):
+            if u and not plugin_imagecache.getCachedImage(
+                    u, target_size=(MPW, MPH) if (self._modern and not self._carousel()) else (PW, PH)):
                 done = False
                 break
         if done or self._art_tries > 20:
@@ -1526,6 +1532,8 @@ class NovaPlaySite(Screen):
         if not it:
             self._clearInfo()
             return
+        if self._modern and not self._carousel():
+            return                    # [bigger] no info strip -> no TMDb lookup per move
         title = _strip_arabic_from_english_title(it.get("title", "")) or it.get("title", "")
         if self._modern:
             self["infoTitle"].setText(_single_line_text(title, width=40, fallback="—"))
