@@ -201,6 +201,8 @@ def _build_remote_play_candidates(url):
                 q += "&origin=" + quote(headers["Origin"], safe="")
             if xor_key:
                 q += "&xor=" + quote(xor_key, safe="")
+            if _wants_ahead_cache(plain_url):
+                q += "&cache=1"
             proxied = "http://127.0.0.1:{}/stream?{}".format(_PROXY_PORT, q)
             # start downloading the playlists now (slow CDNs: 30-75 s on the box), so they
             # are ready by the time a proxy candidate asks for them
@@ -300,6 +302,25 @@ def _build_remote_play_candidates(url):
         # sends them on every request, so it goes first here
         candidates = [c for c in candidates if c[3]] + [c for c in candidates if not c[3]]
     return candidates
+
+
+# [2026-10-22] CDNs whose plain video files ffmpeg (exteplayer3) can't read
+# smoothly in its many short requests (Mixdrop: 0.36x real time, while one
+# long connection gets ~960 KB/s). For these the proxy downloads ahead to
+# the hard disk over one connection (novaplay_proxy read-ahead cache).
+_AHEAD_CACHE_HOSTS = ("mxcontent.",)
+
+
+def _wants_ahead_cache(plain_url):
+    try:
+        u = str(plain_url or "").lower()
+        if not any(h in urlparse(u).netloc for h in _AHEAD_CACHE_HOSTS):
+            return False
+        if any(x in u for x in (".m3u8", "/hls", "master.txt")):
+            return False
+        return novaplay_proxy.ahead_available()
+    except Exception:
+        return False
 
 
 def _upstream_of(svc_url):
@@ -1748,6 +1769,14 @@ class NovaPlaySimplePlayer(Screen):
             if not up.endswith((".mp4", ".m4v", ".mov")):
                 return cands
             ext = [c for c in cands if str(c[2]).startswith("5002 exteplayer3")]
+            if _wants_ahead_cache(_upstream_of(cands[0][1])):
+                # read-ahead cache host: through the proxy, which downloads ahead
+                ext.sort(key=lambda c: 0 if "proxy" in str(c[2]) else 1)
+                if ext and cands[0] is not ext[0]:
+                    cands = ext + [c for c in cands if c not in ext]
+                    my_log("candidates: MP4 via the proxy's read-ahead cache -> {}".format(
+                        ", ".join(str(c[2]) for c in cands[:3])))
+                return cands
             # [2026-10-22] direct "+ headers" first: through the proxy every piece
             # went CDN -> curl_cffi helper -> proxy -> player on the box's CPU and
             # each seek opened a new TLS connection along that chain -- playback

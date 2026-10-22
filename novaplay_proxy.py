@@ -871,6 +871,197 @@ class _CurlCffiResponseAdapter(object):
 
 
 # ─── HTTP handler ────────────────────────────────────────────────────────────
+# ─── read-ahead disk cache for plain video files ─────────────────────────
+# [2026-10-22] Mixdrop's CDN (mxcontent.net) gave the box ~960 KB/s on one
+# long connection (curl) but ffmpeg -- exteplayer3's engine -- read the same
+# file at 0.36x real time: it asks in many short ranged requests and each new
+# one started slowly. With &cache=1 the proxy downloads the file ahead over
+# ONE connection into a file on the hard disk and serves the player's ranged
+# requests from there; a jump outside what's downloaded restarts the download
+# at that point. Earlier downloaded parts are kept for jumping back.
+_AHEAD_DIRS = ("/media/hdd/NovaPlay/streamcache", "/media/usb/NovaPlay/streamcache")
+_AHEAD = {}                    # host+path -> _Ahead
+_AHEAD_LOCK = threading.Lock()
+_AHEAD_GAP = 4 * 1024 * 1024   # a request this close ahead of the download waits for it
+_AHEAD_MAX = 400 * 1024 * 1024 # don't run further than this ahead of the player
+_AHEAD_IDLE = 90               # stop downloading after this long without a reader
+
+
+def _ahead_dir():
+    for d in _AHEAD_DIRS:
+        base = d.rsplit("/", 2)[0]          # /media/hdd
+        if os.path.isdir(base) and os.access(base, os.W_OK):
+            try:
+                os.makedirs(d, exist_ok=True)
+                return d
+            except Exception:
+                continue
+    return None
+
+
+def ahead_available():
+    return _ahead_dir() is not None
+
+
+class _Ahead(object):
+    def __init__(self, key, url, headers, path):
+        self.key, self.url, self.path = key, url, path
+        self.headers = dict(headers)
+        self.fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o644)
+        self.cv = threading.Condition()
+        self.total = 0
+        self.ctype = "video/mp4"
+        self.done = []            # finished [a, b) byte ranges, merged
+        self.seg = None           # active download [start, cur)
+        self.gen = 0
+        self.err = None
+        self.reader_pos = 0
+        self.rid = 0              # newest reader; only it may move the download
+        self.last_use = time.time()
+
+    # all _locked methods: caller holds self.cv
+    def _covered_until_locked(self, pos):
+        for a, b in self.done:
+            if a <= pos < b:
+                return b
+        if self.seg and self.seg[0] <= pos < self.seg[1]:
+            return self.seg[1]
+        return None
+
+    def _merge_locked(self, a, b):
+        if b <= a:
+            return
+        out = []
+        for x, y in sorted(self.done + [(a, b)]):
+            if out and x <= out[-1][1]:
+                out[-1] = (out[-1][0], max(out[-1][1], y))
+            else:
+                out.append((x, y))
+        self.done = out
+
+    def _start_locked(self, off):
+        if self.seg:
+            self._merge_locked(self.seg[0], self.seg[1])
+        self.gen += 1
+        self.seg = [off, off]
+        self.err = None
+        g = self.gen
+        threading.Thread(target=self._run, args=(g, off), daemon=True).start()
+        _log("Proxy cache: downloading from {:.1f} MB ({})".format(off / 1e6, self.key[:60]))
+
+    def _run(self, g, off):
+        h = dict(self.headers)
+        h["Range"] = "bytes={}-".format(off)
+        h["Accept-Encoding"] = "identity"
+        h.pop("range", None)
+        try:
+            r = _np_urlopen(_urlreq.Request(self.url, headers=h), timeout=30)
+            cr = r.headers.get("Content-Range") or ""
+            total = 0
+            if "/" in cr:
+                try:
+                    total = int(cr.rsplit("/", 1)[1])
+                except ValueError:
+                    total = 0
+            if not total:
+                try:
+                    total = off + int(r.headers.get("Content-Length") or 0)
+                except ValueError:
+                    total = 0
+            with self.cv:
+                if total:
+                    self.total = total
+                self.ctype = r.headers.get("Content-Type") or self.ctype
+                self.cv.notify_all()
+            pos = off
+            while True:
+                with self.cv:
+                    while (g == self.gen and pos - self.reader_pos > _AHEAD_MAX
+                           and time.time() - self.last_use < _AHEAD_IDLE):
+                        self.cv.wait(1.0)
+                    if g != self.gen:
+                        break
+                    if time.time() - self.last_use > _AHEAD_IDLE:
+                        _log("Proxy cache: nobody reading, download paused at {:.1f} MB".format(pos / 1e6))
+                        break
+                chunk = r.read(256 * 1024)
+                if not chunk:
+                    break
+                os.pwrite(self.fd, chunk, pos)
+                pos += len(chunk)
+                _bump("bytes_cached", len(chunk))
+                with self.cv:
+                    if g != self.gen:
+                        break
+                    self.seg[1] = pos
+                    self.cv.notify_all()
+            try:
+                r.close()
+            except Exception:
+                pass
+        except Exception as e:
+            _log("Proxy cache: download error at {:.1f} MB: {}".format(off / 1e6, e))
+            with self.cv:
+                if g == self.gen:
+                    self.err = e
+                    self.cv.notify_all()
+
+    def close(self):
+        with self.cv:
+            self.gen += 1
+            self.cv.notify_all()
+        try:
+            os.close(self.fd)
+        except Exception:
+            pass
+        try:
+            os.remove(self.path)
+        except Exception:
+            pass
+
+
+def _ahead_for(url, headers):
+    """The cache for this file (one film at a time; a new film drops the old one)."""
+    d = _ahead_dir()
+    if not d:
+        return None
+    try:
+        p = urlparse(url)
+        key = p.netloc + p.path
+    except Exception:
+        return None
+    with _AHEAD_LOCK:
+        a = _AHEAD.get(key)
+        if a is not None:
+            a.url = url                      # a fresh token for the same file
+            a.headers = dict(headers)
+            return a
+        for old in list(_AHEAD.values()):
+            old.close()
+        _AHEAD.clear()
+        import hashlib
+        path = os.path.join(d, hashlib.md5(key.encode("utf-8")).hexdigest() + ".part")
+        try:
+            for f in os.listdir(d):          # leftovers from a crash
+                if f.endswith(".part"):
+                    try:
+                        os.remove(os.path.join(d, f))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        a = _Ahead(key, url, headers, path)
+        _AHEAD[key] = a
+        return a
+
+
+def drop_ahead_cache():
+    with _AHEAD_LOCK:
+        for a in list(_AHEAD.values()):
+            a.close()
+        _AHEAD.clear()
+
+
 class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
     # Deliberately left at HTTP/1.0 (default): keep-alive would require a
     # correct Content-Length on every relayed response (including chunked
@@ -890,6 +1081,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
         the url= query value."""
         self._np_xor = self._np_origin = ""   # per request (keep-alive reuses the handler)
         self._np_remux = self._np_init = ""
+        self._np_cache = ""
         self._np_t0 = 0.0
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query or "")
@@ -901,6 +1093,7 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             self._np_xor = (query.get("xor", [""])[0] or "").strip()
             self._np_origin = (query.get("origin", [""])[0] or "").strip()
             self._np_remux = (query.get("remux", [""])[0] or "").strip()
+            self._np_cache = (query.get("cache", [""])[0] or "").strip()
             self._np_init = (query.get("init", [""])[0] or "").strip()
             try:
                 self._np_t0 = float(query.get("t0", ["0"])[0] or 0)
@@ -983,6 +1176,9 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             # (moon.zenoak.top: "bytes=0-" / "bytes=552-" from the box's players)
             if range_hdr and _XOR_M3U8_RE.search(stream_url):
                 range_hdr = None
+            if getattr(self, "_np_cache", "") and method in ("GET", "HEAD"):
+                if self._serve_ahead(method, stream_url, headers, range_hdr):
+                    return
             if range_hdr:
                 headers["Range"] = range_hdr
 
@@ -1334,6 +1530,88 @@ class LocalProxyHandler(http.server.BaseHTTPRequestHandler):
             _PROXY_LAST_BYTES += len(data)
         except Exception as e:
             _log("Proxy: relay aborted: {}".format(e))
+
+    def _serve_ahead(self, method, stream_url, headers, range_hdr):
+        """Serve a plain video file from the read-ahead disk cache. False = not
+        possible here (no disk, no size), the caller relays normally."""
+        global _PROXY_LAST_HIT, _PROXY_LAST_BYTES, _PROXY_LAST_URL
+        ah = _ahead_for(stream_url, headers)
+        if ah is None:
+            return False
+        start, end = 0, None
+        m = re.match(r"bytes=(\d+)-(\d*)", (range_hdr or "").strip())
+        if m:
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else None
+        _PROXY_LAST_HIT = time.time()
+        _PROXY_LAST_URL = stream_url
+        _bump("requests")
+        with ah.cv:
+            ah.rid += 1
+            my = ah.rid
+            ah.cv.notify_all()      # an older reader waiting for data gives up
+            ah.last_use = time.time()
+            ah.reader_pos = start
+            if (not ah.total or start < ah.total) and ah._covered_until_locked(start) is None and not (
+                    ah.seg and ah.seg[0] <= start <= ah.seg[1] + _AHEAD_GAP and ah.err is None):
+                ah._start_locked(start)
+            t_end = time.time() + 30
+            while not ah.total and ah.err is None and time.time() < t_end:
+                ah.cv.wait(1.0)
+            total, err, ctype = ah.total, ah.err, ah.ctype
+        if not total:
+            _log("Proxy cache: no file size ({}), relaying instead".format(err))
+            return False
+        if start >= total:
+            self.send_response(416)
+            self.send_header("Content-Range", "bytes */{}".format(total))
+            self.end_headers()
+            return True
+        if end is None or end >= total:
+            end = total - 1
+        _log("Proxy cache: {} {:.1f}-{:.1f} MB of {:.1f} MB".format(
+            method, start / 1e6, end / 1e6, total / 1e6))
+        self.send_response(206 if range_hdr else 200)
+        self.send_header("Content-Type", ctype or "video/mp4")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if range_hdr:
+            self.send_header("Content-Range", "bytes {}-{}/{}".format(start, end, total))
+        self.end_headers()
+        if method == "HEAD":
+            return True
+        pos = start
+        try:
+            while pos <= end:
+                with ah.cv:
+                    ah.last_use = time.time()
+                    if my == ah.rid:
+                        ah.reader_pos = pos
+                    upto = ah._covered_until_locked(pos)
+                    if upto is None:
+                        if my != ah.rid:
+                            break       # the player moved on to a newer request
+                        near = ah.seg and ah.seg[0] <= pos <= ah.seg[1] + _AHEAD_GAP and ah.err is None
+                        if not near:
+                            ah._start_locked(pos)
+                        if not ah.cv.wait(15.0) and ah._covered_until_locked(pos) is None:
+                            if ah.err is not None or time.time() - _PROXY_LAST_HIT > 60:
+                                break
+                        continue
+                n = min(upto, end + 1) - pos
+                while n > 0:
+                    chunk = os.pread(ah.fd, min(n, 256 * 1024), pos)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    pos += len(chunk)
+                    n -= len(chunk)
+                    _PROXY_LAST_BYTES += len(chunk)
+                    _PROXY_LAST_HIT = time.time()
+        except Exception as e:
+            # the player closed this request (it seeks by opening a new one)
+            _log("Proxy cache: reader left at {:.1f} MB ({})".format(pos / 1e6, e.__class__.__name__))
+        return True
 
     def _serve_xor_manifest(self, method, stream_url, headers, xor_key):
         global _PROXY_LAST_BYTES
