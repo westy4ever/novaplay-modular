@@ -1737,7 +1737,8 @@ class NovaPlaySimplePlayer(Screen):
         """[2026-10-22] a plain MP4 file played with 5001 (gstplayer) can't be
         jumped in: on the box it sent the proxy one request from byte 0 and
         ignored the resume and every ◀▶▲▼ (Mixdrop). exteplayer3 (ffmpeg)
-        asks for byte ranges, so it goes first for MP4 files."""
+        asks for byte ranges, so it goes first for MP4 files -- directly with
+        the stream's headers, the proxy as the fallback."""
         try:
             if not cands:
                 return cands
@@ -1747,8 +1748,12 @@ class NovaPlaySimplePlayer(Screen):
             if not up.endswith((".mp4", ".m4v", ".mov")):
                 return cands
             ext = [c for c in cands if str(c[2]).startswith("5002 exteplayer3")]
-            # the proxy one first (a strict stream needs its headers on every request)
-            ext.sort(key=lambda c: 0 if "proxy" in str(c[2]) else 1)
+            # [2026-10-22] direct "+ headers" first: through the proxy every piece
+            # went CDN -> curl_cffi helper -> proxy -> player on the box's CPU and
+            # each seek opened a new TLS connection along that chain -- playback
+            # stuttered and jumps were slow. ffmpeg sends the headers on every
+            # request itself (box: "+ headers" resumed at exactly 1052 s).
+            ext.sort(key=lambda c: 0 if "headers" in str(c[2]) else 1)
             if ext and cands[0] is not ext[0]:
                 cands = ext + [c for c in cands if c not in ext]
                 my_log("candidates: MP4 file -- exteplayer3 first so resume/seek work -> {}".format(
