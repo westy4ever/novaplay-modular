@@ -42,7 +42,7 @@ import plugin_health
 from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _get_saved_position, _is_favorite,
                           _entry_from_item, _toggle_favorite_entry)
-from plugin_gridlist import resolve_icon_path, scale_skin_xml
+from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc
 from plugin_util import (_site_label, _site_search_item, _single_line_text, _wrap_ui_text,
                          _dedupe_items, _rank_search_items, _strip_arabic_from_english_title)
 from plugin_tmdb import _tmdb_search_metadata, fill_item_rating_async
@@ -350,6 +350,9 @@ class NovaPlaySite(Screen):
         self._infoTimer.callback.append(self._loadInfo)
         self._pop = eTimer()
         self._pop.callback.append(self._popTick)
+        self._carPop = eTimer()
+        self._carPop.callback.append(self._carPopTick)
+        self._car_frame = 0
         self._pop_key = None         # (view, slot) of the zoomed poster
         self._pop_slot = -1
         self._pop_frame = 0
@@ -387,7 +390,7 @@ class NovaPlaySite(Screen):
         self._loadCategories()
 
     def _stop(self):
-        for t in (self._clock, self._art, self._infoTimer, self._pop):
+        for t in (self._clock, self._art, self._infoTimer, self._pop, self._carPop):
             try:
                 t.stop()
             except Exception:
@@ -816,9 +819,9 @@ class NovaPlaySite(Screen):
         if inst is None:
             return
         try:
-            inst.move(ePoint(int(x), int(y)))
+            inst.move(ePoint(sc(x), sc(y)))
             if w is not None:
-                inst.resize(eSize(max(1, int(w)), max(1, int(h))))
+                inst.resize(eSize(max(1, sc(w)), max(1, sc(h))))
         except Exception:
             pass
 
@@ -856,6 +859,44 @@ class NovaPlaySite(Screen):
             self._pop.start(POP_MS, False)
         except Exception:
             self._placeSlot(slot, 1.0)
+
+    # [carousel] the middle poster grows from a side poster's size to its
+    # own on every move (same smooth pop as the grid / home carousel)
+    def _carGeom(self, p):
+        x, y = _KX[K_MID], _KCY
+        w, h = int(KW + (KCW - KW) * p), int(KH + (KCH - KH) * p)
+        return x + (KCW - w) // 2, y + (KCH - h) // 2, w, h
+
+    def _placeCarCentre(self, p):
+        x, y, w, h = self._carGeom(p)
+        self._mr("kBack%d" % K_MID, x, y, w, h)
+        self._mr("kImg%d" % K_MID, x, y, w, h)
+        self._mr("kEdge%d" % K_MID, x - 5, y - 5, w + 10, h + 10)
+        self._mr("kRate%d" % K_MID, x + 8, y + 8)
+
+    def _carPopFocus(self):
+        key = (self._pi, id(self._posters), self._zone)
+        if key == getattr(self, "_car_key", None):
+            return
+        self._car_key = key
+        self._car_frame = 0
+        self._placeCarCentre(0.0)
+        try:
+            self._carPop.start(POP_MS, False)
+        except Exception:
+            self._placeCarCentre(1.0)
+
+    def _carPopTick(self):
+        if not self._carousel():
+            self._carPop.stop()
+            self._placeCarCentre(1.0)
+            return
+        import math
+        self._car_frame += 1
+        t = min(1.0, self._car_frame / float(POP_FRAMES))
+        self._placeCarCentre(math.sin(t * math.pi / 2))
+        if t >= 1.0:
+            self._carPop.stop()
 
     def _popTick(self):
         if self._pop_slot < 0 or self._carousel():
@@ -935,6 +976,7 @@ class NovaPlaySite(Screen):
         if missing:
             self._art_tries = 0
             self._art.start(1000, False)
+        self._carPopFocus()
         self._scheduleInfo()
         self._applyLayout()
 

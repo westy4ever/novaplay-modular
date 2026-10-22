@@ -399,8 +399,8 @@ HOME_POP_OUT       = sc(8)              # cyan glow ring width around the select
 HOME_POP_OUT_ICON  = sc(8)              # icon widget enlargement when selected
 
 # [pop-anim] eased pop-out animation on selection change
-POP_ANIM_FRAMES    = 8                  # frames per pop-out animation
-POP_ANIM_INTERVAL  = 25                 # ms between frames (8 * 25 = 200ms total)
+POP_ANIM_FRAMES    = 12                 # frames per pop-out animation
+POP_ANIM_INTERVAL  = 15                 # ms between frames (12 * 15 = 180ms, small even steps)
 
 
 class HomeMenuGrid(_BaseCardGrid):

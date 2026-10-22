@@ -53,6 +53,7 @@ blank placeholder, and gets swapped for the real TMDB poster the next
 time the artwork poll timer redraws once it's ready.
 """
 
+import math
 import os
 import threading
 import time
@@ -317,6 +318,9 @@ class NovaPlayHome(Screen):
         self._cont_pop_frame = 0
 
         # [pop-anim] poster-grid animated pop-out on selection change
+        self._car_pop_timer = eTimer()                  # [pop-anim] carousel centre
+        self._car_pop_timer.callback.append(self._carPopTick)
+        self._car_pop_frame = 0
         self._poster_pop_timer = eTimer()
         self._poster_pop_timer.callback.append(self._posterPopTick)
         self._poster_pop_frame = 0
@@ -889,8 +893,46 @@ class NovaPlayHome(Screen):
 
     def _applyCarouselGeometry(self):
         for logical_slot in range(self.carousel_slots):
-            widget_id = logical_slot
             x, y, w, h = _CAROUSEL_GEOMETRY.get(logical_slot, (0, 0, 1, 1))
+            self._placeCarouselSlot(logical_slot, x, y, w, h)
+
+    def _centreGeometry(self, p):
+        """[pop-anim] the centre poster between a side poster's size (p=0)
+        and its full size (p=1), kept centred on the same spot."""
+        c = self.carousel_center
+        x, y, w, h = _CAROUSEL_GEOMETRY.get(c, (0, 0, 1, 1))
+        _sx, _sy, sw, sh = _CAROUSEL_GEOMETRY.get(c - 1, (x, y, w, h))
+        cw = int(sw + (w - sw) * p)
+        ch = int(sh + (h - sh) * p)
+        return x + (w - cw) // 2, y + (h - ch) // 2, cw, ch
+
+    def _startCarouselPop(self):
+        try:
+            self._car_pop_timer.stop()
+        except Exception:
+            pass
+        self._car_pop_frame = 0
+        self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(0.0))
+        try:
+            self._car_pop_timer.start(POP_ANIM_INTERVAL, False)
+        except Exception:
+            self._applyCarouselGeometry()
+
+    def _carPopTick(self):
+        frames = max(1, POP_ANIM_FRAMES)
+        self._car_pop_frame += 1
+        t = min(1.0, float(self._car_pop_frame) / float(frames))
+        p = math.sin(t * math.pi / 2)
+        self._placeCarouselSlot(self.carousel_center, *self._centreGeometry(p))
+        if t >= 1.0:
+            try:
+                self._car_pop_timer.stop()
+            except Exception:
+                pass
+
+    def _placeCarouselSlot(self, logical_slot, x, y, w, h):
+        if True:
+            widget_id = logical_slot
             is_big = (logical_slot == self.carousel_center)
             pad = 12 if is_big else 8
             self._moveResize('cposter%d' % widget_id, x, y, w, h)
@@ -1020,6 +1062,8 @@ class NovaPlayHome(Screen):
         self._focus_zone = "grid"
         self._listVisible = False            # [catlist-effects]
         self._hideCatOverlays()
+        try: self._car_pop_timer.stop()                       # [pop-anim]
+        except Exception: pass
         try: self._poster_pop_timer.stop()                    # [pop-anim]
         except Exception: pass
         self._poster_pop_p = 1.0
@@ -1092,6 +1136,8 @@ class NovaPlayHome(Screen):
         try: self._pop_timer.stop()                           # [pop-anim]
         except Exception: pass
         try: self._cont_pop_timer.stop()                      # [pop-anim]
+        except Exception: pass
+        try: self._car_pop_timer.stop()                       # [pop-anim]
         except Exception: pass
         try: self._poster_pop_timer.stop()                    # [pop-anim]
         except Exception: pass
@@ -1392,6 +1438,7 @@ class NovaPlayHome(Screen):
         self.index = (self.index + delta) % total
         self._applyCarouselGeometry()
         self._paintCarousel()
+        self._startCarouselPop()
 
     def _syncCarouselFocusVisible(self):
         for i in range(self.carousel_slots):
@@ -1429,7 +1476,7 @@ class NovaPlayHome(Screen):
         self._poster_pop_frame += 1
         p_raw = min(1.0, float(self._poster_pop_frame) / float(frames))
         # ease-out cubic: fast at the start, gentle landing
-        p = 1.0 - (1.0 - p_raw) ** 3
+        p = math.sin(p_raw * math.pi / 2)      # ease-out sine (soft start)
         self._poster_pop_p = p
         try:
             self._updatePosterPixmaps(p)
@@ -1984,7 +2031,7 @@ class NovaPlayHome(Screen):
         self._pop_frame += 1
         p_raw = min(1.0, float(self._pop_frame) / float(frames))
         # ease-out cubic: fast at the start, gentle landing
-        p = 1.0 - (1.0 - p_raw) ** 3
+        p = math.sin(p_raw * math.pi / 2)      # ease-out sine (soft start)
         try:
             self._applyPopGeometry(p)
         except Exception as e:
@@ -2205,7 +2252,7 @@ class NovaPlayHome(Screen):
         frames = max(1, POP_ANIM_FRAMES)
         self._cont_pop_frame += 1
         p_raw = min(1.0, float(self._cont_pop_frame) / float(frames))
-        p = 1.0 - (1.0 - p_raw) ** 3
+        p = math.sin(p_raw * math.pi / 2)      # ease-out sine (soft start)
         try:
             self._applyContinueLayout(self._cont_index, p)
         except Exception as e:
