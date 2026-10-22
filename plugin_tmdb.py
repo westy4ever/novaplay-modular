@@ -564,6 +564,10 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         "certification": certification,
         "tmdb_id": detail.get("id"),
         "tmdb_kind": media_kind,
+        # [cast] top 6 actors (English names, TMDb profile photo paths)
+        "cast": [{"name": c.get("name", ""), "character": c.get("character", ""),
+                  "photo": c.get("profile_path") or ""}
+                 for c in ((detail_en.get("credits") or detail_ar.get("credits") or {}).get("cast") or [])[:6]],
     }
     
     # 3. Cache only trustworthy matches. Weak matches (no plot AND no

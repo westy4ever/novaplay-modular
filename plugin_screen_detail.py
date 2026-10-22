@@ -163,6 +163,10 @@ _SV_W, _SV_H, _SV_GAP = 268, 150, 22
 _SV_X0 = (1920 - (SV_CARDS * _SV_W + (SV_CARDS - 1) * _SV_GAP)) // 2
 _SV_Y = 758
 _SV_GOLD, _SV_CARD, _SV_ON = "#F2C230", "#161C26", "#2A2717"
+# [cast] 2 rows x 3 round TMDb photos with names, right of the plot
+CAST_N = 6
+_CAST_X = (1356, 1526, 1696)
+_CAST_Y = (196, 432)
 
 
 def _detail_skin_modern():
@@ -181,13 +185,15 @@ def _detail_skin_modern():
         <widget name="posterYear" position="62,162" size="86,34" font="Bold;22" foregroundColor="#0C1017" backgroundColor="#F2C230" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="9" />
         <widget name="posterRating" position="272,162" size="88,34" font="Bold;22" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="9" />
 
-        <widget name="title" position="420,140" size="1000,66" font="Bold;52" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
-        <widget name="meta" position="420,212" size="1000,34" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="4" />
-        <widget name="proxy_warning" position="420,248" size="1000,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
+        <widget name="title" position="420,140" size="900,66" font="Bold;52" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="meta" position="420,212" size="900,34" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="4" />
+        <widget name="proxy_warning" position="420,248" size="900,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
         <widget name="source" position="420,290" size="880,160" font="Regular;22" foregroundColor="#D6DCE5" transparent="1" halign="left" zPosition="4" />
         <widget name="plot_title" position="420,462" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
         <widget name="plot" position="420,494" size="880,180" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
 
+        <eLabel position="1336,140" size="544,532" backgroundColor="#121822" cornerRadius="20" zPosition="2" />
+        <widget name="castTitle" position="1364,152" size="480,32" font="Bold;19" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="4" />
         <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
         <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
         <widget name="svPos" position="1230,706" size="620,36" font="Regular;20" halign="right" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="4" />
@@ -197,6 +203,12 @@ def _detail_skin_modern():
         <widget name="menuAccent" position="0,0" size="2,2" backgroundColor="#121822" zPosition="0" />
         <widget name="menuProgress" position="{px},936" size="180,6" backgroundColor="#F2C230" transparent="0" cornerRadius="3" zPosition="5" />
     """.format(px=_SV_X0)]
+    for i in range(CAST_N):
+        x, y = _CAST_X[i % 3], _CAST_Y[i // 3]
+        p.append("""
+        <widget name="castImg{i}" position="{ix},{y}" size="116,116" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="castName{i}" position="{x},{ny}" size="164,54" font="Regular;18" halign="center" valign="top" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
+        """.format(i=i, x=x, ix=x + 24, y=y, ny=y + 122))
     for i in range(SV_CARDS):
         x = _SV_X0 + i * (_SV_W + _SV_GAP)
         p.append("""
@@ -225,6 +237,33 @@ def _detail_skin_modern():
 
 
 _DETAIL_SKIN_MODERN = _detail_skin_modern().replace("</screen>", TOAST_XML + "</screen>")
+
+
+def _round_photo(path, size=116):
+    """[cast] TMDb profile photo -> round PNG (transparent corners), cached."""
+    if not path:
+        return ""
+    url = "https://image.tmdb.org/t/p/w185" + path
+    try:
+        base = _poster_cache_path(url)
+        out = os.path.splitext(base)[0] + "_r%d.png" % size
+        if os.path.exists(out):
+            return out
+        data = _fetch_poster_bytes(url, "https://www.themoviedb.org/")
+        from PIL import Image, ImageDraw, ImageOps
+        import io
+        img = ImageOps.fit(Image.open(io.BytesIO(data)).convert("RGB"), (size, size), Image.LANCZOS,
+                           centering=(0.5, 0.3))
+        mask = Image.new("L", (size * 3, size * 3), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, size * 3 - 1, size * 3 - 1), fill=255)
+        mask = mask.resize((size, size), Image.LANCZOS)          # smooth edge
+        res = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        res.paste(img, (0, 0), mask)
+        res.save(out, format="PNG")
+        return out
+    except Exception as e:
+        my_log("cast photo {}: {}".format(path, e))
+        return ""
 
 
 def _modern_backdrop(img, w, h, is_landscape):
@@ -507,6 +546,11 @@ class NovaPlayDetail(Screen):
         self["menuAccent"].hide()
         self["menuProgress"].hide()
         if self._modern:
+            self["castTitle"] = Label("")
+            for _i in range(CAST_N):
+                self["castImg%d" % _i] = Pixmap()
+                self["castName%d" % _i] = Label("")
+            self._cast_token = None
             self["svPos"] = Label("")
             self["svLeft"] = Label(u"\u2039")
             self["svRight"] = Label(u"\u203a")
@@ -606,6 +650,10 @@ class NovaPlayDetail(Screen):
             self["menuAccent"].hide()
         except Exception:
             pass
+        self["castTitle"].setText("CAST")
+        for i in range(CAST_N):
+            self["castImg%d" % i].hide()
+            self["castName%d" % i].hide()
         try:
             # every selection move (incl. the auto-pick of the last server)
             self["menu"].instance.selectionChanged.get().append(self._svPaint)
@@ -677,6 +725,49 @@ class NovaPlayDetail(Screen):
         if t >= 1.0:
             self._svPopT.stop()
             self._sv_slide = 0
+
+    # ── [cast] round TMDb photos of the main actors (Modern only) ────────
+    def _loadCast(self, tmdb):
+        key = (tmdb.get("tmdb_kind"), tmdb.get("tmdb_id"))
+        if key == self._cast_token:
+            return
+        self._cast_token = key
+
+        def _worker():
+            cast = tmdb.get("cast")
+            if not cast:
+                try:
+                    from plugin_tmdb import _tmdb_request
+                    cr = _tmdb_request("/{}/{}/credits".format(key[0], key[1])) or {}
+                    cast = [{"name": c.get("name", ""), "photo": c.get("profile_path") or ""}
+                            for c in (cr.get("cast") or [])[:CAST_N]]
+                except Exception as e:
+                    my_log("detail cast: {}".format(e))
+                    cast = []
+            out = []
+            for c in cast[:CAST_N]:
+                out.append((c.get("name", ""), _round_photo(c.get("photo"))))
+            callInMainThread(self._paintCast, key, out)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _paintCast(self, key, cast):
+        if getattr(self, "_closed", False) or key != self._cast_token:
+            return
+        for i in range(CAST_N):
+            if i < len(cast):
+                name, path = cast[i]
+                self["castName%d" % i].setText(_wrap_ui_text(name, width=16, max_lines=2, fallback=""))
+                self["castName%d" % i].show()
+                inst = self["castImg%d" % i].instance
+                if path and inst is not None:
+                    inst.setPixmapFromFile(path)
+                    self["castImg%d" % i].show()
+                else:
+                    self["castImg%d" % i].hide()
+            else:
+                self["castName%d" % i].hide()
+                self["castImg%d" % i].hide()
+        self["castTitle"].setText("CAST" if cast else "")
 
     def _svStep(self, d):
         n = len(self._sv_items)
@@ -1864,6 +1955,8 @@ class NovaPlayDetail(Screen):
         # than offering a trailer that can never resolve.
         self._tmdb_id = (data.get("_tmdb") or {}).get("tmdb_id")
         self._tmdb_kind = (data.get("_tmdb") or {}).get("tmdb_kind")
+        if getattr(self, "_modern", False) and self._tmdb_id:
+            self._loadCast(data.get("_tmdb") or {})
         if self._tmdb_id:
             self["key_green"].setText("Trailer")
         else:
