@@ -1167,6 +1167,13 @@ class EgyDeadExtractor(BaseExtractor):
             return "https://voe.sx/e/{}".format(m.group(1)) if m else link
         return link
 
+    def _mm_listed(self, url):
+        """True for a MegaMax /download/<id> link whose mirrors are already in
+        the server list (one by one) -- the single auto-pick entry for it would
+        just repeat them."""
+        m = re.search(r"/download/([A-Za-z0-9_-]+)", url or "")
+        return bool(m and m.group(1) in getattr(self, "_mm_listed_ids", set()))
+
     def _megamax_download_servers(self, iframe_url, have_urls):
         if not megamax_list_mirrors:
             return []
@@ -1192,6 +1199,12 @@ class EgyDeadExtractor(BaseExtractor):
                         "type": "embed", "quality": q})
         if out:
             log("EgyDead: MegaMax download page -> {} more server(s)".format(len(out)))
+        if mirrors:
+            m = re.search(r"/(?:iframe|download)/([A-Za-z0-9_-]+)", iframe_url or "")
+            if m:
+                if not hasattr(self, "_mm_listed_ids"):
+                    self._mm_listed_ids = set()
+                self._mm_listed_ids.add(m.group(1))
         return out
 
     def _megamax_servers(self, iframe_url):
@@ -1443,7 +1456,7 @@ class EgyDeadExtractor(BaseExtractor):
                 merged = 0
                 for d in real_downloads:
                     d_url = d.get("url", "")
-                    if not d_url or d_url in seen_urls:
+                    if not d_url or d_url in seen_urls or self._mm_listed(d_url):
                         continue
                     seen_urls.add(d_url)
                     result["servers"].append({
@@ -1548,7 +1561,7 @@ class EgyDeadExtractor(BaseExtractor):
             merged = 0
             for d in real_downloads:
                 d_url = d.get("url", "")
-                if not d_url or d_url in seen_urls:
+                if not d_url or d_url in seen_urls or self._mm_listed(d_url):
                     continue
                 seen_urls.add(d_url)
                 result["servers"].append({
