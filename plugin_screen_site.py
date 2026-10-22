@@ -1717,7 +1717,7 @@ class NovaPlaySite(Screen):
             return
         self._history.pop()
         url, self._page = self._history[-1]
-        self._focus_end = True
+        self._focus_end = False          # the previous page opens on its first title
         self._slide_dir = -1
         self._fetch(url)
 
