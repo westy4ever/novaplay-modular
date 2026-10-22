@@ -11,10 +11,32 @@ from Screens.Screen import Screen
 from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
-from Components.MenuList import MenuList
+from enigma import ePoint, eSize, gFont
+try:
+    from skin import parseColor
+except Exception:
+    parseColor = None
 
 from plugin_common import PLUGIN_PATH
-from plugin_gridlist import scale_skin_xml
+from plugin_gridlist import scale_skin_xml, sc
+from plugin_rowzoom import RowZoom
+
+# [rows] suggestions as separate rows (zoom like the category rows)
+SG_ROWS = 8
+_SG_X, _SG_Y0, _SG_STEP, _SG_W, _SG_H = 58, 446, 60, 1804, 54
+
+
+def _sg_rows_xml():
+    out = []
+    for i in range(SG_ROWS):
+        y = _SG_Y0 + i * _SG_STEP
+        out.append(
+            '<widget name="sgBg{i}" position="{x},{y}" size="{w},{h}" backgroundColor="#222B3A" cornerRadius="12" zPosition="3" />'
+            '<widget name="sgBar{i}" position="{x},{by}" size="5,{bh}" backgroundColor="#F2C230" cornerRadius="2" zPosition="5" />'
+            '<widget name="sgText{i}" position="{tx},{y}" size="1200,{h}" font="Regular;30" valign="center" foregroundColor="#D6DCE5" backgroundColor="#121822" transparent="1" zPosition="5" />'
+            '<widget name="sgMeta{i}" position="{mx},{y}" size="520,{h}" font="Regular;22" halign="right" valign="center" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="5" />'
+            .format(i=i, x=_SG_X, y=y, w=_SG_W, h=_SG_H, by=y + 10, bh=_SG_H - 20, tx=_SG_X + 28, mx=_SG_X + _SG_W - 540))
+    return "\n        ".join(out)
 from plugin_state import (_library_search_suggestions, _save_search_query,
                           _clear_search_history, _remove_search_query)
 from novaplay_choice import NovaMessageBox as MessageBox
@@ -44,7 +66,7 @@ class NovaPlaySearch(Screen):
 
         <widget name="suggestions_box" position="40,388" size="1840,572" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
         <widget name="suggestions_title" position="74,404" size="900,30" font="Regular;20" foregroundColor="#A3ADBB" transparent="1" zPosition="3" />
-        <widget name="suggestions" position="58,446" size="1804,500" zPosition="3" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;30" itemHeight="50" />
+        {rows}
 
         <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
         <eLabel position="72,1003" size="22,22" backgroundColor="#E5484D" cornerRadius="11" zPosition="3" />
@@ -57,7 +79,7 @@ class NovaPlaySearch(Screen):
         <widget name="key_blue" position="846,994" size="240,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="3" />
         <widget name="hint" position="1100,994" size="750,40" font="Regular;22" valign="center" foregroundColor="#C9D0DA" transparent="1" zPosition="3" halign="right" />
     </screen>
-    """.format(p=PLUGIN_PATH))
+    """.format(p=PLUGIN_PATH, rows=_sg_rows_xml()))
 
     def __init__(self, session, current_site="egydead", default_scope="all", query=""):
         Screen.__init__(self, session)
@@ -75,7 +97,13 @@ class NovaPlaySearch(Screen):
         self["scope"] = Label("")
         self["suggestions_box"] = Label("")
         self["suggestions_title"] = Label("Quick suggestions")
-        self["suggestions"] = MenuList([])
+        for _i in range(SG_ROWS):
+            for _n in ("sgBg", "sgBar", "sgText", "sgMeta"):
+                self["%s%d" % (_n, _i)] = Label("")
+        self._sel = 0
+        self._top = 0
+        self._zoom = RowZoom(self, self._placeRow)
+        self._fonts = {}
         self["hint"] = Label("OK  Search / pick    ◀ ▶  Scope    MENU  Remove one")
         self["key_red"] = Label("Clear")
         self["key_green"] = Label("Search now")
@@ -107,27 +135,75 @@ class NovaPlaySearch(Screen):
         self["key_red"].setText("Clear text" if self._query.strip() else "Clear history")
         preview = self._query or "Type a movie, series or actor name"
         self["query"].setText(_wrap_ui_text(preview, width=42, max_lines=2))
-        self["scope"].setText(_search_scope_label(self._scope if self._scope else "all"))
+        self["scope"].setText(u"\u2039  {}  \u203a".format(_search_scope_label(self._scope if self._scope else "all")))
         self._refresh_suggestion_list()
 
     def _refresh_suggestion_list(self):
-        if not self._suggestions:
-            self["suggestions_title"].setText("QUICK SUGGESTIONS")
-            self["suggestions"].setList(["No suggestions yet"])
-            return
-        self["suggestions_title"].setText("QUICK SUGGESTIONS  ·  {}".format(len(self._suggestions)))
-        rows = []
-        for item in self._suggestions:
-            meta = []
-            if item.get("source"): meta.append(item.get("source"))
-            if item.get("kind"): meta.append(item.get("kind"))
-            if item.get("year"): meta.append(item.get("year"))
-            label = _single_line_text(item.get("title", ""), width=60, fallback="Suggestion")
-            meta_text = "  ·  ".join([x for x in meta if x])
-            if meta_text:
-                label = "{}      {}".format(label, meta_text)
-            rows.append(label)
-        self["suggestions"].setList(rows)
+        n = len(self._suggestions)
+        self._sel = max(0, min(self._sel, n - 1))
+        if self._sel < self._top:
+            self._top = self._sel
+        elif self._sel >= self._top + SG_ROWS:
+            self._top = self._sel - SG_ROWS + 1
+        self._top = max(0, min(self._top, max(0, n - SG_ROWS)))
+        self["suggestions_title"].setText("QUICK SUGGESTIONS  ·  {}".format(n) if n else "QUICK SUGGESTIONS")
+        for i in range(SG_ROWS):
+            g = self._top + i
+            names = ["%s%d" % (k, i) for k in ("sgBg", "sgBar", "sgText", "sgMeta")]
+            if not n and i == 0:
+                for k in names:
+                    self[k].hide()
+                self["sgText0"].setText("No suggestions yet")
+                self["sgText0"].show()
+                continue
+            if g >= n:
+                for k in names:
+                    self[k].hide()
+                continue
+            item = self._suggestions[g]
+            on = g == self._sel
+            meta = [x for x in (item.get("source"), item.get("kind"), item.get("year")) if x]
+            self["sgText%d" % i].setText(_single_line_text(item.get("title", ""), width=60, fallback="Suggestion"))
+            self["sgMeta%d" % i].setText("  ·  ".join(str(x) for x in meta))
+            self["sgText%d" % i].show()
+            self["sgMeta%d" % i].show()
+            self["sgBg%d" % i].show() if on else self["sgBg%d" % i].hide()
+            self["sgBar%d" % i].show() if on else self["sgBar%d" % i].hide()
+            self._fg("sgText%d" % i, "#F2C230" if on else "#D6DCE5")
+        self._zoom.focus(self._sel - self._top if n else -1, (self._top, n))
+
+    def _fg(self, name, color):
+        inst = self[name].instance
+        if inst is not None and parseColor is not None:
+            try:
+                inst.setForegroundColor(parseColor(color))
+                inst.invalidate()
+            except Exception:
+                pass
+
+    def _placeRow(self, i, p):
+        """[rows] the selected suggestion grows like a category row"""
+        y = _SG_Y0 + i * _SG_STEP
+        dw, dh = 20.0 * p, float(_SG_STEP - _SG_H) * p
+        x0, y0, w, h = _SG_X - dw / 2.0, y - dh / 2.0, _SG_W + dw, _SG_H + dh
+        for name, x, yy, ww, hh in (("sgBg", x0, y0, w, h), ("sgBar", x0, y0 + 10, 5, h - 20),
+                                    ("sgText", x0 + 28, y0, 1200, h), ("sgMeta", x0 + w - 540, y0, 520, h)):
+            inst = self["%s%d" % (name, i)].instance
+            if inst is None:
+                continue
+            try:
+                inst.move(ePoint(sc(x), sc(yy)))
+                inst.resize(eSize(max(1, sc(ww)), max(1, sc(hh))))
+            except Exception:
+                pass
+        size = sc(30 + 2 * p)
+        inst = self["sgText%d" % i].instance
+        if inst is not None and self._fonts.get(i) != size:
+            try:
+                inst.setFont(gFont("Regular", size))
+                self._fonts[i] = size
+            except Exception:
+                pass
 
     def _refresh_suggestions(self):
         self._suggestions = _library_search_suggestions(self._query, self._current_site, limit=8)
@@ -215,7 +291,7 @@ class NovaPlaySearch(Screen):
 
     def _remove_suggestion(self):
         """MENU: remove the selected previous search."""
-        idx = self["suggestions"].getSelectedIndex()
+        idx = self._sel
         if not (self._suggestions and 0 <= idx < len(self._suggestions)):
             return
         it = self._suggestions[idx]
@@ -235,13 +311,17 @@ class NovaPlaySearch(Screen):
         self._refresh()
 
     def _suggestion_up(self):
-        if self._suggestions: self["suggestions"].up()
+        if self._suggestions:
+            self._sel = (self._sel - 1) % len(self._suggestions)
+            self._refresh_suggestion_list()
 
     def _suggestion_down(self):
-        if self._suggestions: self["suggestions"].down()
+        if self._suggestions:
+            self._sel = (self._sel + 1) % len(self._suggestions)
+            self._refresh_suggestion_list()
 
     def _submit_or_edit(self):
-        idx = self["suggestions"].getSelectedIndex()
+        idx = self._sel
         if self._suggestions and idx >= 0 and idx < len(self._suggestions):
             chosen = self._suggestions[idx]
             q = (chosen.get("query") or chosen.get("title") or "").strip()

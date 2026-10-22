@@ -22,11 +22,16 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.GUIComponent import GUIComponent
 from Components.MultiContent import MultiContentEntryText
-from enigma import (eTimer, eListbox, eListboxPythonMultiContent, gFont,
+from enigma import (eTimer, eListbox, eListboxPythonMultiContent, gFont, ePoint, eSize,
                     RT_HALIGN_LEFT, RT_HALIGN_CENTER, RT_HALIGN_RIGHT, RT_VALIGN_CENTER)
+try:
+    from skin import parseColor
+except Exception:
+    parseColor = None
 
 from plugin_common import PLUGIN_PATH
-from plugin_gridlist import scale_skin_xml
+from plugin_gridlist import scale_skin_xml, sc
+from plugin_rowzoom import RowZoom
 import plugin_downloads
 
 
@@ -51,6 +56,29 @@ _CHIP = {
 }
 _ROW_H = 92
 _LIST_W = 1804
+
+
+# [cards] one card per download, the selected one zooms (like the other screens)
+DL_ROWS = 6
+_DX, _DY0, _DSTEP, _DW, _DH = 58, 170, 120, 1804, 112
+
+
+def _dl_rows_xml():
+    out = []
+    for i in range(DL_ROWS):
+        y = _DY0 + i * _DSTEP
+        out.append(
+            '<widget name="dEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="#F2C230" cornerRadius="16" zPosition="2" />'
+            '<widget name="dBg{i}" position="{x},{y}" size="{w},{h}" backgroundColor="#161C26" cornerRadius="14" zPosition="3" />'
+            '<widget name="dChip{i}" position="{cx},{cy}" size="160,34" font="Regular;19" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#2E3A4D" cornerRadius="8" zPosition="4" />'
+            '<widget name="dTitle{i}" position="{tx},{ty}" size="1290,40" font="Regular;27" valign="center" foregroundColor="#FFFFFF" backgroundColor="#161C26" transparent="1" zPosition="4" />'
+            '<widget name="dRight{i}" position="{rx},{ty}" size="250,40" font="Regular;21" halign="right" valign="center" foregroundColor="#C9D0DA" backgroundColor="#161C26" transparent="1" zPosition="4" />'
+            '<widget name="dDetail{i}" position="{tx},{dy}" size="1580,28" font="Regular;19" valign="center" foregroundColor="#A3ADBB" backgroundColor="#161C26" transparent="1" zPosition="4" />'
+            '<widget name="dTrack{i}" position="{tx},{by}" size="1580,6" backgroundColor="#2A3240" cornerRadius="3" zPosition="4" />'
+            '<widget name="dBar{i}" position="{tx},{by}" size="6,6" backgroundColor="#F2C230" cornerRadius="3" zPosition="5" />'
+            .format(i=i, x=_DX, y=y, w=_DW, h=_DH, ex=_DX - 3, ey=y - 3, ew=_DW + 6, eh=_DH + 6,
+                    cx=_DX + 16, cy=y + 16, tx=_DX + 196, ty=y + 10, rx=_DX + _DW - 266, dy=y + 52, by=y + 90))
+    return "\n        ".join(out)
 
 
 _VIDEO_EXT = (".mp4", ".mkv", ".ts", ".avi", ".m4v", ".webm", ".mov", ".mpg")
@@ -144,7 +172,8 @@ class NovaPlayDownloads(Screen):
         <eLabel position="146,30" size="800,52" text="Downloads" font="Bold;40" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="1" zPosition="2" />
         <widget name="header" position="146,86" size="1700,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
         <eLabel position="40,150" size="1840,810" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
-        <widget name="list" position="58,170" size="1804,700" scrollbarMode="showOnDemand" backgroundColor="#121822" backgroundColorSelected="#2B3648" transparent="0" zPosition="2" />
+        <widget name="dEmpty" position="58,170" size="1804,112" font="Regular;27" valign="center" foregroundColor="#A3ADBB" backgroundColor="#161C26" cornerRadius="14" zPosition="2" />
+        {rows}
         <eLabel position="58,888" size="1804,1" backgroundColor="#2A3240" zPosition="2" />
         <widget name="footer" position="74,900" size="1770,44" font="Regular;22" valign="center" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
         <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="1" />
@@ -153,23 +182,35 @@ class NovaPlayDownloads(Screen):
         <eLabel position="412,1003" size="22,22" backgroundColor="#3E7BFA" cornerRadius="11" zPosition="2" />
         <widget name="key_blue" position="446,994" size="300,40" font="Regular;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="2" />
         <widget name="key_exit" position="900,994" size="950,40" font="Regular;24" valign="center" foregroundColor="#C9D0DA" transparent="1" halign="right" zPosition="2" />
-    </screen>""".format(p=PLUGIN_PATH))
+    </screen>""".format(p=PLUGIN_PATH, rows=_dl_rows_xml()))
 
     def __init__(self, session):
         Screen.__init__(self, session)
         self.skinName = ["NovaPlayDownloads"]
         self["header"] = Label("Downloads")
         self["footer"] = Label("")
-        self["list"] = DownloadList()
+        self["dEmpty"] = Label("   No downloads yet — files saved by NovaPlay appear here")
+        for _i in range(DL_ROWS):
+            for _n in ("dEdge", "dBg", "dChip", "dTitle", "dRight", "dDetail", "dTrack", "dBar"):
+                self["%s%d" % (_n, _i)] = Label("")
+        self._sel = 0
+        self._top = 0
+        self._rows = []
+        self._fonts = {}
+        self._zoom = RowZoom(self, self._placeRow)
         self["key_red"] = Label("Cancel / Delete")
         self["key_blue"] = Label("Clear finished")
-        self["key_exit"] = Label("OK  Options    EXIT  Close")
+        self["key_exit"] = Label(u"\u25b2 \u25bc  Select    OK  Options    EXIT  Close")
         self._tasks = []
         self._row_map = []
         self._last_rows = None                     # [FIX-DL]
         self._flash_until = 0
 
-        self["actions"] = ActionMap(["OkCancelActions", "ColorActions"], {
+        self["actions"] = ActionMap(["OkCancelActions", "ColorActions", "DirectionActions"], {
+            "up":     lambda: self._step(-1),
+            "down":   lambda: self._step(1),
+            "left":   lambda: self._step(-DL_ROWS),
+            "right":  lambda: self._step(DL_ROWS),
             "ok":     self._onOk,
             "cancel": self.close,
             "red":    self._onCancelActive,
@@ -180,7 +221,7 @@ class NovaPlayDownloads(Screen):
         self._refresh_timer.callback.append(self._refresh)
         self._refresh_timer.start(1000, False)
         self.onClose.append(self._stopTimer)        # [FIX-DL] timer used to outlive the screen
-        self._refresh()
+        self.onLayoutFinish.append(self._refresh)
 
     # ── rendering ─────────────────────────────────────────────────────
     def _refresh(self):
@@ -256,33 +297,117 @@ class NovaPlayDownloads(Screen):
         return (getattr(t, "title", "") or "video")
 
     def _current_index(self):
-        try:
-            return int(self["list"].getSelectedIndex())
-        except Exception:
-            return -1
+        return self._sel
 
-    def _set_rows(self, rows):
-        """setList() sends the cursor back to the top on Enigma2 and this screen refreshes
-        every second - remember the selection and restore it; skip when nothing changed."""
-        if rows == self._last_rows:
+    def _step(self, d):
+        n = len(self._row_map)
+        if not n:
             return
-        idx = self._current_index()
+        if abs(d) == 1:
+            self._sel = (self._sel + d) % n
+        else:
+            self._sel = max(0, min(n - 1, self._sel + d))
+        self._last_rows = None
+        self._set_rows(self._rows)
+
+    def _color(self, name, bg=None, fg=None):
+        inst = self[name].instance
+        if inst is None or parseColor is None:
+            return
         try:
-            self["list"].setList(rows)
+            if bg:
+                inst.setBackgroundColor(parseColor(bg))
+            if fg:
+                inst.setForegroundColor(parseColor(fg))
+            inst.invalidate()
         except Exception:
-            return
-        self._last_rows = list(rows)
-        if idx > 0:
+            pass
+
+    def _placeRow(self, i, p):
+        """[cards] the selected download card grows a little (smooth)"""
+        y = _DY0 + i * _DSTEP
+        dw, dh = 20.0 * p, float(_DSTEP - _DH) * p
+        x0, y0, w, h = _DX - dw / 2.0, y - dh / 2.0, _DW + dw, _DH + dh
+        dy = dh / 2.0
+        for name, x, yy, ww, hh in (("dEdge", x0 - 3, y0 - 3, w + 6, h + 6), ("dBg", x0, y0, w, h),
+                                    ("dChip", x0 + 16, y0 + 16 + dy / 2, None, None),
+                                    ("dTitle", x0 + 196, y0 + 10 + dy / 2, None, None),
+                                    ("dRight", x0 + w - 266, y0 + 10 + dy / 2, None, None),
+                                    ("dDetail", x0 + 196, y0 + 52 + dy, None, None),
+                                    ("dTrack", x0 + 196, y0 + 90 + dy, None, None),
+                                    ("dBar", x0 + 196, y0 + 90 + dy, None, None)):
+            inst = self["%s%d" % (name, i)].instance
+            if inst is None:
+                continue
             try:
-                self["list"].moveToIndex(min(idx, len(rows) - 1))
+                inst.move(ePoint(sc(x), sc(yy)))
+                if ww is not None:
+                    inst.resize(eSize(max(1, sc(ww)), max(1, sc(hh))))
+            except Exception:
+                pass
+        size = sc(27 + 2 * p)
+        inst = self["dTitle%d" % i].instance
+        if inst is not None and self._fonts.get(i) != size:
+            try:
+                inst.setFont(gFont("Regular", size))
+                self._fonts[i] = size
             except Exception:
                 pass
 
+    def _set_rows(self, rows):
+        """paint the visible cards (the 1 s refresh only repaints when something changed)"""
+        self._rows = rows
+        if rows == self._last_rows:
+            return
+        self._last_rows = list(rows)
+        data = [r for r in rows if not isinstance(r, str)]
+        n = len(data)
+        self._sel = max(0, min(self._sel, n - 1))
+        if self._sel < self._top:
+            self._top = self._sel
+        elif self._sel >= self._top + DL_ROWS:
+            self._top = self._sel - DL_ROWS + 1
+        self._top = max(0, min(self._top, max(0, n - DL_ROWS)))
+        self["dEmpty"].show() if not n else self["dEmpty"].hide()
+        for i in range(DL_ROWS):
+            g = self._top + i
+            names = ["%s%d" % (k, i) for k in ("dEdge", "dBg", "dChip", "dTitle", "dRight", "dDetail", "dTrack", "dBar")]
+            if g >= n:
+                for k in names:
+                    self[k].hide()
+                continue
+            status, title, right, detail, pct = data[g]
+            label, bg, fg = _CHIP.get(status, (status, 0x2E3A4D, 0xD6DCE5))
+            sel = g == self._sel
+            for k in names[1:6]:
+                self[k].show()
+            self["dEdge%d" % i].show() if sel else self["dEdge%d" % i].hide()
+            self["dChip%d" % i].setText(label)
+            self._color("dChip%d" % i, bg="#%06X" % bg, fg="#%06X" % fg)
+            self["dTitle%d" % i].setText(title)
+            self._color("dTitle%d" % i, fg="#F2C230" if sel else "#FFFFFF")
+            self["dRight%d" % i].setText(right)
+            self._color("dRight%d" % i, fg="#F2C230" if status == "downloading" else "#C9D0DA")
+            self["dDetail%d" % i].setText(detail)
+            self._color("dDetail%d" % i, fg="#FF8A8A" if status == "error" else "#A3ADBB")
+            if status == "downloading":
+                self["dTrack%d" % i].show()
+                inst = self["dBar%d" % i].instance
+                if inst is not None and pct > 0:
+                    try:
+                        inst.resize(eSize(max(6, sc(1580 * min(100, pct) / 100.0)), max(1, sc(6))))
+                    except Exception:
+                        pass
+                    self["dBar%d" % i].show()
+                else:
+                    self["dBar%d" % i].hide()
+            else:
+                self["dTrack%d" % i].hide()
+                self["dBar%d" % i].hide()
+        self._zoom.focus(self._sel - self._top if n else -1, (self._top, n))
+
     def _selected_task(self):
-        try:
-            idx = self["list"].getSelectedIndex()
-        except Exception:
-            idx = -1
+        idx = self._sel
         if 0 <= idx < len(self._row_map):
             return self._row_map[idx]
         return None
