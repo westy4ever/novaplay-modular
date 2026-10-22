@@ -196,13 +196,15 @@ def _skin():
         <widget name="pEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="10" zPosition="2" />
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" zPosition="3" />
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="pRate{i}" position="{rx},{ry}" size="78,30" font="Bold;19" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="5" />
-        <widget name="pQual{i}" position="{qx},{ry}" size="84,26" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="6" zPosition="5" />
+        <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="5" />
+        <widget name="pQual{i}" position="{qx},{qy}" size="84,24" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="6" zPosition="5" />
+        <widget name="pYear{i}" position="{yx},{ry}" size="64,26" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#C0392B" cornerRadius="6" zPosition="5" />
+        <widget name="pLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="6" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
-        <widget name="pName{i}" halign="left" position="{x},{ty}" size="{w},32" font="Regular;22" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
-        <widget name="pYear{i}" position="{x},{yy}" size="{w},26" font="Regular;18" foregroundColor="#A3ADBB" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        <widget name="pName{i}" halign="center" position="{x},{ty}" size="{w},54" font="Regular;19" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 4, ey=y - 4, ew=PW + 8, eh=PH + 8,
-                   rx=x + 8, ry=y + 8, qx=x + PW - 92, my=y + PH - 28, ty=y + PH + 6, yy=y + PH + 36,
+                   rx=x + PW - 78, ry=y + 8, qx=x + PW - 92, qy=y + 40, yx=x + 8, ly=y + 38,
+                   my=y + PH - 28, ty=y + PH + 6,
                    gold=GOLD, card=CARD, white=WHITE, bg=BG))
     parts.append("""
         <widget name="kTitle" position="80,160" size="1380,66" halign="left" font="Bold;50" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="5" />
@@ -219,9 +221,14 @@ def _skin():
         <widget name="kEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="10" zPosition="5" />
         <widget name="kBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" zPosition="6" />
         <widget name="kImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="7" />
-        <widget name="kRate{i}" position="{rx},{ry}" size="78,30" font="Bold;19" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="8" />
+        <widget name="kRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="8" />
+        <widget name="kQual{i}" position="{qx},{qy}" size="84,24" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="6" zPosition="8" />
+        <widget name="kYear{i}" position="{yx},{ry}" size="64,26" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#C0392B" cornerRadius="6" zPosition="8" />
+        <widget name="kLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="6" zPosition="8" />
+        <widget name="kMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#301E7A4A" zPosition="8" />
         """.format(i=s_, x=x, y=y, w=w, h=h, ex=x - 5, ey=y - 5, ew=w + 10, eh=h + 10,
-                   rx=x + 8, ry=y + 8, gold=GOLD, card=CARD))
+                   rx=x + w - 78, ry=y + 8, qx=x + w - 92, qy=y + 40, yx=x + 8, ly=y + 38, my=y + h - 28,
+                   gold=GOLD, card=CARD))
     parts.append(TOAST_XML)
     parts.append("</screen>")
     return "".join(parts)
@@ -286,12 +293,14 @@ def _skin_modern():
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" cornerRadius="10" zPosition="3" />
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
         <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#300C1017" cornerRadius="8" zPosition="5" />
-        <widget name="pQual{i}" position="{qx},{ry}" size="84,26" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="8" zPosition="5" />
+        <widget name="pQual{i}" position="{qx},{qy}" size="84,24" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="8" zPosition="5" />
+        <widget name="pYear{i}" position="{yx},{ry}" size="64,26" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#C0392B" cornerRadius="8" zPosition="5" />
+        <widget name="pLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="8" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
-        <widget name="pName{i}" halign="center" position="{nx},{ty}" size="{nw},32" font="Regular;21" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
-        <widget name="pYear{i}" halign="center" position="{nx},{yy}" size="{nw},26" font="Regular;17" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="3" />
+        <widget name="pName{i}" halign="center" position="{nx},{ty}" size="{nw},54" font="Regular;19" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 6, ey=y - 6, ew=PW + 12, eh=PH + 12,
-                   rx=x + PW - 78, ry=y + 8, qx=x + 8, my=y + PH - 28, ty=y + PH + 10, yy=y + PH + 40,
+                   rx=x + PW - 78, ry=y + 8, qx=x + PW - 92, qy=y + 40, yx=x + 8, ly=y + 38,
+                   my=y + PH - 28, ty=y + PH + 10,
                    nx=x - 12, nw=PW + 24, gold=GOLD, card=CARD, white=WHITE, bg=BG, muted=MUTED))
     # carousel widgets are shared with the classic skin
     classic = _skin()
@@ -365,7 +374,7 @@ class NovaPlaySite(Screen):
         for n in ("kTitle", "kMeta", "kState", "kPlot", "kCount"):
             self[n] = Label("")
         for i in range(K_SLOTS):
-            for n in ("kEdge", "kBack", "kRate"):
+            for n in ("kEdge", "kBack", "kRate", "kQual", "kYear", "kLabel", "kMark"):
                 self["%s%d" % (n, i)] = Label("")
             self["kImg%d" % i] = Pixmap()
         # [carousel] same setting as the classic home's Poster Layout
@@ -379,7 +388,7 @@ class NovaPlaySite(Screen):
             self["cBar%d" % i] = Label("")
             self["cText%d" % i] = Label("")
         for i in range(self._view):
-            for n in ("pEdge", "pBack", "pRate", "pQual", "pMark", "pName", "pYear"):
+            for n in ("pEdge", "pBack", "pRate", "pQual", "pLabel", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)] = Label("")
             self["pImg%d" % i] = Pixmap()
 
@@ -466,7 +475,7 @@ class NovaPlaySite(Screen):
             self._vis(["cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
         # same for the poster slots (gold focus frames) until posters load
         for i in range(self._view):
-            self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear")], False)
+            self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pLabel", "pMark", "pName", "pYear")], False)
         self._applyLayout()
         self._tick()
         self._clock.start(10000, False)
@@ -571,7 +580,7 @@ class NovaPlaySite(Screen):
             self._vis(["kLeft", "kRight"], False)
         if car:
             for i in range(self._view):
-                self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear")], False)
+                self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pLabel", "pMark", "pName", "pYear")], False)
         # carousel + category list open: a "peek" -- the section name, the
         # counter and the poster strip stay in view beside the panel (was a
         # large empty hint card in the middle of the screen)
@@ -583,7 +592,7 @@ class NovaPlaySite(Screen):
             self["gridTitle"].show()
         if not (browsing or peek):
             for i in range(K_SLOTS):
-                self._vis(["kEdge%d" % i, "kBack%d" % i, "kImg%d" % i, "kRate%d" % i], False)
+                self._vis(["%s%d" % (_n, i) for _n in ("kEdge", "kBack", "kImg", "kRate", "kQual", "kYear", "kLabel", "kMark")], False)
         if not car or not self._bd_path:
             self["kBackdrop"].hide()
         if car and self._posters:
@@ -809,7 +818,7 @@ class NovaPlaySite(Screen):
         self["gridMsg"].setText(text)
         self["gridMsg"].show()
         for i in range(self._view):
-            for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear"):
+            for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pLabel", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)].hide()
         self["gridCount"].setText("")
         self["gridMore"].setText("")
@@ -829,7 +838,7 @@ class NovaPlaySite(Screen):
         self._vis(["gridLeft", "gridRight", "kLeft", "kRight"], False)
         car = self._carousel()
         for i in range(self._view):
-            for n in ("pEdge", "pImg", "pRate", "pQual", "pMark", "pName", "pYear"):
+            for n in ("pEdge", "pImg", "pRate", "pQual", "pLabel", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)].hide()
             if car:
                 self["pBack%d" % i].hide()
@@ -837,7 +846,7 @@ class NovaPlaySite(Screen):
                 self._color("pBack%d" % i, bg=SKELETON)
                 self["pBack%d" % i].show()
         for s_ in range(K_SLOTS):
-            for n in ("kEdge", "kImg", "kRate"):
+            for n in ("kEdge", "kImg", "kRate", "kQual", "kYear", "kLabel", "kMark"):
                 self["%s%d" % (n, s_)].hide()
             if car and _KX[s_] >= 420:
                 self._color("kBack%d" % s_, bg=SKELETON)
@@ -861,6 +870,99 @@ class NovaPlaySite(Screen):
         if self._page > 1 or self._hasPages():
             parts.append(u"page {}".format(self._page))
         return u"  \u203a  ".join(_single_line_text(p, width=30, fallback="") for p in parts if p)
+
+    def _isWatched(self, it):
+        try:
+            from plugin_watched import is_watched
+            return bool(it.get("url")) and is_watched(it.get("url"))
+        except Exception:
+            return False
+
+    def _paintBadges(self, pre, i, it):
+        """[badges] same corners as the Home posters, grid and carousel:
+        top-left red year + the site's label chip (or Series / Episode),
+        top-right ★ rating + quality, bottom the green Resume band (and
+        ✓ Watched only when watched posters aren't black & white).
+        -> the band text ('' = none)."""
+        def _w(n):
+            return "%s%s%d" % (pre, n, i)
+        yr = str(it.get("year") or "")[:4]
+        if yr.isdigit():
+            self[_w("Year")].setText(yr)
+            self[_w("Year")].show()
+        else:
+            self[_w("Year")].hide()
+        lb = str(it.get("label") or "").strip()
+        kind = {"series": "Series", "episode": "Episode", "season": "Season"}.get(it.get("type", ""), "")
+        chip = lb or kind
+        if chip:
+            lc = str(it.get("label_color") or "").strip()
+            if lb and re.match(r"^#?[0-9a-fA-F]{6}$", lc):
+                self._color(_w("Label"), bg="#" + lc.lstrip("#"), fg="#FFFFFF")
+            elif lb:
+                self._color(_w("Label"), bg=GOLD, fg="#0C1017")
+            else:
+                self._color(_w("Label"), bg="#3A4252", fg="#FFFFFF")
+            # room left on that row: the poster width minus the quality badge
+            # on the right (when there is one)
+            pw = _KG[i][2] if pre == "k" else PW
+            room = pw - 16 - (90 if _quality_badge(it) else 0)
+            cw = max(40, min(room, 22 + 9 * len(chip)))
+            self[_w("Label")].setText(_single_line_text(chip, width=max(4, (cw - 12) // 9), fallback=""))
+            inst = self[_w("Label")].instance
+            if inst is not None:
+                try:
+                    inst.resize(eSize(sc(cw), sc(24)))
+                except Exception:
+                    pass
+            self[_w("Label")].show()
+        else:
+            self[_w("Label")].hide()
+        r = str(it.get("rating") or "").strip()
+        try:
+            rv = float(r)
+        except Exception:
+            rv = 0.0
+        if rv > 0:
+            self[_w("Rate")].setText(u"★ " + r[:3])
+            self._color(_w("Rate"), fg=_rate_color(rv))
+            self[_w("Rate")].show()
+        else:
+            self[_w("Rate")].hide()
+            if not it.get("rating"):
+                try:
+                    fill_item_rating_async(it, on_done=self._repaintSoon)
+                except Exception:
+                    pass
+        qb = _quality_badge(it)
+        if qb:
+            self[_w("Qual")].setText(qb[0])
+            self._color(_w("Qual"), bg=qb[1], fg=qb[2])
+            self[_w("Qual")].show()
+        else:
+            self[_w("Qual")].hide()
+        mark = ""
+        url = it.get("url", "")
+        try:
+            from plugin_watched import is_watched
+            if url and is_watched(url) and not _get_config("watched_poster_bw", False):
+                mark = u"\u2713 Watched"
+        except Exception:
+            pass
+        if not mark:
+            try:
+                pos = int(_get_saved_position(url) or 0)
+                if pos > 30:
+                    m, s_ = divmod(pos, 60)
+                    mark = u"Resume {}:{:02d}".format(m, s_) if m < 60 else u"Resume {}h{:02d}".format(m // 60, m % 60)
+            except Exception:
+                pass
+        if mark:
+            self[_w("Mark")].setText(mark)
+            self[_w("Mark")].show()
+        else:
+            self[_w("Mark")].hide()
+        return mark
 
     def _hasPages(self):
         """the open category has more site pages (so 'page 1' is worth showing)"""
@@ -893,7 +995,7 @@ class NovaPlaySite(Screen):
         missing = False
         for i in range(self._view):
             g = base + i
-            names = ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear")
+            names = ("pEdge", "pBack", "pImg", "pRate", "pQual", "pLabel", "pMark", "pName", "pYear")
             if g >= n:
                 for nm in names:
                     self["%s%d" % (nm, i)].hide()
@@ -903,60 +1005,11 @@ class NovaPlaySite(Screen):
             self["pEdge%d" % i].show() if sel else self["pEdge%d" % i].hide()
             self["pBack%d" % i].show()
             self["pName%d" % i].show()
-            self["pName%d" % i].setText(_single_line_text(_strip_arabic_from_english_title(it.get("title", "")) or it.get("title", ""),
-                                                          width=16, fallback="—"))
+            # [badges] name only, up to 2 lines (the year is a badge now)
+            self["pName%d" % i].setText(_wrap_ui_text(_strip_arabic_from_english_title(it.get("title", "")) or it.get("title", ""),
+                                                      width=18 if self._modern else 16, max_lines=2, fallback="—"))
             self._color("pName%d" % i, fg=GOLD if sel else WHITE)
-            _yr = str(it.get("year") or "")[:4]
-            _kd = _KIND.get(it.get("type", ""), "")
-            self["pYear%d" % i].setText("  ·  ".join(b for b in (_yr, _kd) if b))
-            self["pYear%d" % i].show()
-            # rating
-            r = str(it.get("rating") or "").strip()
-            try:
-                rv = float(r)
-            except Exception:
-                rv = 0.0
-            if rv > 0:
-                self["pRate%d" % i].setText(u"★ " + r[:3])
-                self._color("pRate%d" % i, fg=_rate_color(rv))
-                self["pRate%d" % i].show()
-            else:
-                self["pRate%d" % i].hide()
-                if not it.get("rating"):
-                    try:
-                        fill_item_rating_async(it, on_done=self._repaintSoon)
-                    except Exception:
-                        pass
-            # quality badge (4K / 1080p / CAM ...) when the site says so
-            qb = _quality_badge(it)
-            if qb:
-                self["pQual%d" % i].setText(qb[0])
-                self._color("pQual%d" % i, bg=qb[1], fg=qb[2])
-                self["pQual%d" % i].show()
-            else:
-                self["pQual%d" % i].hide()
-            # watched / resume band
-            mark = ""
-            url = it.get("url", "")
-            try:
-                from plugin_watched import is_watched
-                if url and is_watched(url):
-                    mark = u"✓ Watched"
-            except Exception:
-                pass
-            if not mark:
-                try:
-                    pos = int(_get_saved_position(url) or 0)
-                    if pos > 30:
-                        m, s = divmod(pos, 60)
-                        mark = u"Resume {}:{:02d}".format(m, s) if m < 60 else u"Resume {}h{:02d}".format(m // 60, m % 60)
-                except Exception:
-                    pass
-            if mark:
-                self["pMark%d" % i].setText(mark)
-                self["pMark%d" % i].show()
-            else:
-                self["pMark%d" % i].hide()
+            mark = self._paintBadges("p", i, it)
             # image
             purl = it.get("poster") or ""
             if not purl and it.get("thumbnail"):
@@ -966,7 +1019,7 @@ class NovaPlaySite(Screen):
             if purl and not path:
                 plugin_imagecache.requestImageAsync(purl, target_size=(PW, PH))
                 missing = True
-            if path and mark == u"✓ Watched" and _get_config("watched_poster_bw", False):
+            if path and _get_config("watched_poster_bw", False) and self._isWatched(it):
                 try:
                     _bw = plugin_imagecache.getBwVariant(purl, (PW, PH))
                     if _bw:
@@ -1144,12 +1197,13 @@ class NovaPlaySite(Screen):
             self._mr("pBack%d" % i, x, y, PW, PH)
             self._mr("pImg%d" % i, x, y, PW, PH)
             self._mr("pEdge%d" % i, x - 4, y - 4, PW + 8, PH + 8)
-            self._mr("pRate%d" % i, x + 8, y + 8)
-            self._mr("pQual%d" % i, x + PW - 92, y + 8)
+            self._mr("pRate%d" % i, x + PW - 78, y + 8)
+            self._mr("pQual%d" % i, x + PW - 92, y + 40)
+            self._mr("pYear%d" % i, x + 8, y + 8)
+            self._mr("pLabel%d" % i, x + 8, y + 38)
             self._mr("pMark%d" % i, x, y + PH - 28, PW, 28)
             if text:
                 self._mr("pName%d" % i, x, y + PH + 6)
-                self._mr("pYear%d" % i, x, y + PH + 36)
             return
         x, y, w, h, dy = self._slotGeom(i, p)
         x += xoff
@@ -1162,11 +1216,12 @@ class NovaPlaySite(Screen):
             self._mr("pImg%d" % i, x, y, w, h)
         self._mr("pEdge%d" % i, x - 6, y - 6, w + 12, h + 12)
         self._mr("pRate%d" % i, x + w - 78, y + 8)
-        self._mr("pQual%d" % i, x + 8, y + 8)
+        self._mr("pQual%d" % i, x + w - 92, y + 40)
+        self._mr("pYear%d" % i, x + 8, y + 8)
+        self._mr("pLabel%d" % i, x + 8, y + 38)
         self._mr("pMark%d" % i, x, y + h - 28, w, 28)
         if text:
             self._mr("pName%d" % i, bx - 12, by + PH + 10 + dy)
-            self._mr("pYear%d" % i, bx - 12, by + PH + 40 + dy)
 
     def _popFocus(self, view, n):
         slot = (self._pi - view * self._view if (self._zone == "posters" and n) else -1) if self._modern else -1
@@ -1230,7 +1285,11 @@ class NovaPlaySite(Screen):
         else:
             self._mr("kImg%d" % s_, x, y)        # Light: move only, resize at the end
         self._mr("kEdge%d" % s_, x - 5, y - 5, w + 10, h + 10)
-        self._mr("kRate%d" % s_, x + 8, y + 8)
+        self._mr("kRate%d" % s_, x + w - 78, y + 8)
+        self._mr("kQual%d" % s_, x + w - 92, y + 40)
+        self._mr("kYear%d" % s_, x + 8, y + 8)
+        self._mr("kLabel%d" % s_, x + 8, y + 38)
+        self._mr("kMark%d" % s_, x, y + h - 28, w, 28)
 
     def _kGeom(self, k):
         """slot k's box; off the strip = one more step left / right"""
@@ -1340,7 +1399,7 @@ class NovaPlaySite(Screen):
         browsing = self._zone == "posters"
         for s_ in range(K_SLOTS):
             g = self._pi + (s_ - K_MID)
-            names = ["kEdge%d" % s_, "kBack%d" % s_, "kImg%d" % s_, "kRate%d" % s_]
+            names = ["%s%d" % (_n, s_) for _n in ("kEdge", "kBack", "kImg", "kRate", "kQual", "kYear", "kLabel", "kMark")]
             # categories open: keep the strip in view right of the panel (slot 0
             # sits under it), without the gold focus frame
             if not (0 <= g < n) or (not browsing and _KX[s_] < 420):
@@ -1360,22 +1419,7 @@ class NovaPlaySite(Screen):
                 self["kImg%d" % s_].show()
             else:
                 self["kImg%d" % s_].hide()
-            r_ = str(it.get("rating") or "").strip()
-            try:
-                rv = float(r_)
-            except Exception:
-                rv = 0.0
-            if rv > 0:
-                self["kRate%d" % s_].setText(u"★ " + r_[:3])
-                self._color("kRate%d" % s_, fg=_rate_color(rv))
-                self["kRate%d" % s_].show()
-            else:
-                self["kRate%d" % s_].hide()
-                if not it.get("rating"):
-                    try:
-                        fill_item_rating_async(it, on_done=self._repaintSoon)
-                    except Exception:
-                        pass
+            self._paintBadges("k", s_, it)
         if missing:
             self._art_tries = 0
             self._art.start(1000, False)
