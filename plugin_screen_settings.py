@@ -29,7 +29,7 @@ from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
-from enigma import eTimer
+from enigma import eTimer, ePoint, eSize, gFont
 
 try:
     from skin import parseColor
@@ -37,7 +37,7 @@ except Exception:
     parseColor = None
 
 from plugin_common import _PLUGIN_VERSION, PLUGIN_PATH, my_log
-from plugin_gridlist import scale_skin_xml
+from plugin_gridlist import scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 from plugin_state import (_get_config, _set_config, _PLUGIN_OWNER, _favorite_items,
                           _history_items, _DEFAULT_TMDB_API_KEY)
 from plugin_util import _site_label, _site_tagline
@@ -81,7 +81,7 @@ def _skin():
         <widget name="clock_date" position="1280,90" size="600,32" font="Regular;22" halign="right" foregroundColor="{muted}" backgroundColor="#0C1017" transparent="1" zPosition="2" />
 
         <widget name="sideEdge" position="40,150" size="360,810" backgroundColor="{gold}" cornerRadius="16" zPosition="1" />
-        <eLabel position="42,152" size="356,806" backgroundColor="{panel}" cornerRadius="14" zPosition="2" />
+        <widget name="sidePanel" position="42,152" size="356,806" backgroundColor="{panel}" cornerRadius="14" zPosition="2" />
         <eLabel position="68,174" size="300,30" text="SECTIONS" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <eLabel position="68,690" size="304,1" backgroundColor="#2A3240" zPosition="3" />
         <eLabel position="68,704" size="300,30" text="SYSTEM" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
@@ -236,6 +236,7 @@ class NovaPlaySettings(Screen):
         self["clock_time"] = Label("")
         self["clock_date"] = Label("")
         self["sideEdge"] = Label("")
+        self["sidePanel"] = Label("")
         self["sysinfo"] = Label("")
         self["secTitle"] = Label("")
         self["secCount"] = Label("")
@@ -281,6 +282,15 @@ class NovaPlaySettings(Screen):
         self._clock.callback.append(self._tick)
         self.onLayoutFinish.append(self._start)
         self.onClose.append(self._clock.stop)
+        # [pop-anim] same smooth zoom as the home / site screens
+        self._popT = eTimer()
+        self._popT.callback.append(self._popTick)
+        self._pop_item = None
+        self._pop_f = 0
+        self._frame_on = None
+        self._frame_f = 0
+        self._side_font = {}
+        self.onClose.append(self._popT.stop)
 
     # ─── lifecycle ──────────────────────────────────────────────────────
 
@@ -415,6 +425,7 @@ class NovaPlaySettings(Screen):
         for i, (_k, _t, ic) in enumerate(self.SECTIONS):
             on = i == self._sec
             self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
+            self["rowBg%d" % i].show() if on else self["rowBg%d" % i].hide()
             self["rowBar%d" % i].show() if on else self["rowBar%d" % i].hide()
             self._color("rowText%d" % i, fg=WHITE if on else TEXT)
             self._icon("rowIcon%d" % i, "side_%s_%s.png" % (ic, "on" if on else "off"))
@@ -443,10 +454,115 @@ class NovaPlaySettings(Screen):
             self["cValue%d" % i].setText(str(value))
             self["cDesc%d" % i].setText(desc)
             self._icon("cIcon%d" % i, "card_%s.png" % ic)
+        self._popFocus()
         if side:
             self["hint"].setText("OK  Open    ▲ ▼  Section    EXIT  Close")
         else:
             self["hint"].setText("OK  Change    ◀  Sections    EXIT  Close")
+
+    # ─── [pop-anim] zoom: section row, card, panel frame ────────────────
+
+    def _mr(self, name, x, y, w, h):
+        inst = self[name].instance
+        if inst is None:
+            return
+        try:
+            inst.move(ePoint(sc(x), sc(y)))
+            inst.resize(eSize(max(1, sc(w)), max(1, sc(h))))
+        except Exception:
+            pass
+
+    def _placeRow(self, i, p):
+        W, H = 332, 66
+        dw, dh = 20.0 * p, float(_SIDE_STEP - H) * p
+        x0, y0 = 54 - dw / 2.0, _SIDE_Y0 + i * _SIDE_STEP - dh / 2.0
+        w, h = W + dw, H + dh
+        ic = 36 + 6 * p
+        self._mr("rowBg%d" % i, x0, y0, w, h)
+        self._mr("rowBar%d" % i, x0, y0, 5, h)
+        self._mr("rowIcon%d" % i, x0 + 18, y0 + (h - ic) / 2.0, ic, ic)
+        self._mr("rowText%d" % i, x0 + 70 + 6 * p, y0, w - 76, h)
+        size = sc(28 + 3 * p)
+        inst = self["rowText%d" % i].instance
+        if inst is not None and self._side_font.get(i) != size:
+            try:
+                inst.setFont(gFont("Regular", size))
+                self._side_font[i] = size
+            except Exception:
+                pass
+
+    _CARD_PARTS = (("cEdge", 0, 0, _CW, _CH, True), ("cBox", 3, 3, _CW - 6, _CH - 6, True),
+                   ("cIconBg", 22, 22, 72, 72, True), ("cIcon", 36, 36, 44, 44, True),
+                   ("cTitle", 112, 26, 336, 40, False), ("cValue", 112, 68, 336, 34, False),
+                   ("cDesc", 24, 114, 424, 96, False))
+
+    def _placeCard(self, i, p):
+        x0, y0 = _CX[i % COLS], _CY[i // COLS]
+        k = 1.0 + 0.08 * p
+        cx, cy = x0 - (_CW * k - _CW) / 2.0, y0 - (_CH * k - _CH) / 2.0
+        for name, rx, ry, w, h, rs in self._CARD_PARTS:
+            inst = self["%s%d" % (name, i)].instance
+            if inst is None:
+                continue
+            try:
+                inst.move(ePoint(sc(cx + rx * k), sc(cy + ry * k)))
+                if rs:
+                    inst.resize(eSize(max(1, sc(w * k)), max(1, sc(h * k))))
+            except Exception:
+                pass
+
+    def _placeItem(self, item, p):
+        if item[0] == "side":
+            self._placeRow(item[1], p)
+        else:
+            self._placeCard(item[1], p)
+
+    def _placeFrame(self, p):
+        d = 7.0 * p
+        self._mr("sideEdge", 40 - d, 150 - d, 360 + 2 * d, 810 + 2 * d)
+        self._mr("sidePanel", 42 - d, 152 - d, 356 + 2 * d, 806 + 2 * d)
+
+    def _popFocus(self):
+        side = self._zone == "side"
+        if side:
+            item = ("side", self._sec)
+        elif self._items:
+            item = ("cards", self._card, self._sec)
+        else:
+            item = None
+        restart = False
+        if item != self._pop_item:
+            if self._pop_item:
+                self._placeItem(self._pop_item, 0.0)
+            self._pop_item = item
+            self._pop_f = 0
+            restart = item is not None
+        if side != self._frame_on:
+            self._frame_on = side
+            self._frame_f = 0
+            if not side:
+                self._placeFrame(0.0)
+            restart = restart or side
+        if restart:
+            try:
+                self._popT.start(POP_ANIM_INTERVAL, False)
+            except Exception:
+                pass
+
+    def _popTick(self):
+        import math
+        n = float(max(1, POP_ANIM_FRAMES))
+        busy = False
+        if self._pop_item and self._pop_f < n:
+            self._pop_f += 1
+            self._placeItem(self._pop_item, math.sin(min(1.0, self._pop_f / n) * math.pi / 2))
+            busy = busy or self._pop_f < n
+        if self._frame_on and self._frame_f < n:
+            self._frame_f += 1
+            self._placeFrame(math.sin(min(1.0, self._frame_f / n) * math.pi / 2))
+            busy = busy or self._frame_f < n
+        if not busy:
+            self._popT.stop()
 
     def _paintAbout(self):
         api_key = (_get_config("tmdb_api_key", "") or "").strip()
