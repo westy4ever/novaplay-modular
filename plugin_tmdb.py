@@ -647,28 +647,48 @@ def _tmdb_fetch_trailer_key(media_kind, tmdb_id):
     """
     if not tmdb_id or not media_kind:
         return ""
+    url = _tmdb_fetch_trailer_url(media_kind, tmdb_id)
+    m = re.search(r"[?&]v=([\w-]+)", url or "")
+    return m.group(1) if m else ""
+
+
+def _tmdb_fetch_trailer_url(media_kind, tmdb_id):
+    """[trailers] best trailer page URL from TMDb's video list: YouTube or
+    Vimeo, English / Arabic / no-language videos (the list used to be English
+    only, so Arabic titles found nothing). Ranked: official trailer, trailer,
+    teaser, other -- then English, Arabic, the rest."""
+    if not tmdb_id or not media_kind:
+        return ""
     data = _tmdb_request_language(
         "/{}/{}/videos".format(media_kind, tmdb_id),
         language="en-US",
+        params={"include_video_language": "en,ar,null"},
         accept_any=True,
     ) or {}
     vids = [v for v in (data.get("results") or [])
-            if (v.get("site") or "").lower() == "youtube" and v.get("key")]
+            if (v.get("site") or "").lower() in ("youtube", "vimeo") and v.get("key")]
     if not vids:
         return ""
 
     def _rank(v):
         vtype = (v.get("type") or "").lower()
         if vtype == "trailer" and v.get("official"):
-            return 0
-        if vtype == "trailer":
-            return 1
-        if vtype == "teaser":
-            return 2
-        return 3
+            r = 0
+        elif vtype == "trailer":
+            r = 1
+        elif vtype == "teaser":
+            r = 2
+        else:
+            r = 3
+        lang = (v.get("iso_639_1") or "").lower()
+        site = 0 if (v.get("site") or "").lower() == "youtube" else 1
+        return (r, {"en": 0, "ar": 1}.get(lang, 2), site)
 
     vids.sort(key=_rank)
-    return vids[0].get("key", "")
+    best = vids[0]
+    if (best.get("site") or "").lower() == "vimeo":
+        return "https://vimeo.com/{}".format(best["key"])
+    return "https://www.youtube.com/watch?v={}".format(best["key"])
 
 def _tmdb_search_suggestions(query, limit=8):
     query = re.sub(r"\s+", " ", query or "").strip()

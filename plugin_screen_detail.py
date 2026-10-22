@@ -239,6 +239,26 @@ def _detail_skin_modern():
 _DETAIL_SKIN_MODERN = _detail_skin_modern().replace("</screen>", TOAST_XML + "</screen>")
 
 
+def _youtube_search_trailer(yt_dlp, query):
+    """[trailers] first YouTube search result for `query` -> watch URL, ''
+    when nothing (used only when TMDb lists no trailer)."""
+    if not query:
+        return ""
+    try:
+        opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "noplaylist": True}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info("ytsearch3:" + query, download=False) or {}
+        for e in info.get("entries") or []:
+            vid = e.get("id")
+            dur = e.get("duration") or 0
+            if vid and (not dur or dur <= 600):        # a trailer, not a full film / review
+                my_log("trailer search '{}' -> {}".format(query[:60], vid))
+                return "https://www.youtube.com/watch?v={}".format(vid)
+    except Exception as e:
+        my_log("trailer search: {}".format(e))
+    return ""
+
+
 def _trailer_stream_url(yt_dlp, youtube_url):
     """[trailer-stream] the trailer's single combined H.264 + AAC format
     (video and sound in one URL, the only kind the box players can stream)
@@ -1998,10 +2018,9 @@ class NovaPlayDetail(Screen):
         self._tmdb_kind = (data.get("_tmdb") or {}).get("tmdb_kind")
         if getattr(self, "_modern", False) and self._tmdb_id:
             self._loadCast(data.get("_tmdb") or {})
-        if self._tmdb_id:
-            self["key_green"].setText("Trailer")
-        else:
-            self["key_green"].setText("")
+        # [trailers] always offered: without a TMDb match NovaPlay searches
+        # YouTube for the title instead
+        self["key_green"].setText("Trailer")
         self._syncKeyDots()
 
         try:
@@ -2848,6 +2867,17 @@ class NovaPlayDetail(Screen):
             my_log("Error opening player: {}".format(e))
             self["status"].setText("Player error: {}".format(str(e)[:60]))
 
+    def _trailerQuery(self):
+        """[trailers] YouTube search words: the English title when there is
+        one, the year, and 'trailer' (Arabic titles get 'اعلان' too)."""
+        data = self._data or {}
+        tm = data.get("_tmdb") or {}
+        title = (_strip_arabic_from_english_title(self._raw_title or self._item.get("title", ""))
+                 or self._raw_title or self._item.get("title", "") or tm.get("title", ""))
+        year = str(data.get("year") or self._item.get("year") or "")[:4]
+        arabic = any(u"\u0600" <= c <= u"\u06ff" for c in title)
+        return u"{} {} {}".format(title, year, u"اعلان trailer" if arabic else "official trailer").strip()
+
     def _playTrailer(self):
         """
         [detail-trailer] Green-key handler. Confirmed directly on the
@@ -2860,9 +2890,6 @@ class NovaPlayDetail(Screen):
         """
         if getattr(self, "_closed", False):
             return
-        if not getattr(self, "_tmdb_id", None):
-            self["status"].setText("No trailer available for this title")
-            return
         if getattr(self, "_trailer_busy", False):
             return
         self._trailer_busy = True
@@ -2873,20 +2900,30 @@ class NovaPlayDetail(Screen):
 
     def _bgResolveTrailer(self):
         try:
-            from plugin_tmdb import _tmdb_fetch_trailer_key
-            key = _tmdb_fetch_trailer_key(self._tmdb_kind, self._tmdb_id)
-            if getattr(self, "_closed", False):
-                return
-            if not key:
-                callInMainThread(self._onTrailerFailed, "No trailer on YouTube for this title")
-                return
-
-            youtube_url = "https://www.youtube.com/watch?v={}".format(key)
             try:
                 import yt_dlp
             except ImportError:
                 callInMainThread(self._onTrailerFailed, "yt-dlp is not installed on the box")
                 return
+            youtube_url = ""
+            if getattr(self, "_tmdb_id", None):
+                from plugin_tmdb import _tmdb_fetch_trailer_url
+                youtube_url = _tmdb_fetch_trailer_url(self._tmdb_kind, self._tmdb_id)
+            if getattr(self, "_closed", False):
+                return
+            if not youtube_url:
+                # [trailers] TMDb has none (or no TMDb match): search YouTube
+                callInMainThread(self["status"].setText, "Searching YouTube for the trailer...")
+                youtube_url = _youtube_search_trailer(yt_dlp, self._trailerQuery())
+            if getattr(self, "_closed", False):
+                return
+            if not youtube_url:
+                callInMainThread(self._onTrailerFailed, "No trailer found for this title")
+                return
+            # cache key: the video id (YouTube) or vimeo_<id>
+            _m = re.search(r"[?&]v=([\w-]+)", youtube_url) or re.search(r"vimeo\.com/(\d+)", youtube_url)
+            key = (("vimeo_" if "vimeo" in youtube_url else "") + _m.group(1)) if _m else \
+                re.sub(r"\W+", "_", youtube_url)[-40:]
 
             # [FIX] confirmed directly on a real device, across two
             # different trailers: requiring a single progressive (audio+
