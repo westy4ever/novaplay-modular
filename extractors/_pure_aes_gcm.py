@@ -207,3 +207,84 @@ def aes256_gcm_decrypt(key, iv, ciphertext_and_tag):
         raise ValueError("AES-GCM tag verification failed (ciphertext corrupt or key wrong)")
 
     return bytes(plaintext)
+
+
+# ─── [2026-10-22] any-size AES key schedule + CBC decrypt (Streamp2p) ─────
+# Streamp2p (megamax.strp2p.site, EgyDead's "Streamp2p" MegaMax mirror)
+# encrypts its API replies with AES-128-CBC; the box has neither
+# `cryptography` nor `pycryptodome`. Checked against `cryptography` on the
+# real captured reply and the FIPS-197 Appendix C.1 AES-128 vector.
+
+def aes_key_schedule(key):
+    """Round keys (list of 16-byte bytes) for a 16/24/32-byte key."""
+    Nk = len(key) // 4
+    if Nk not in (4, 6, 8):
+        raise ValueError("AES key must be 16, 24 or 32 bytes")
+    Nb, Nr = 4, Nk + 6
+    w = [list(key[4 * i:4 * i + 4]) for i in range(Nk)]
+    for i in range(Nk, Nb * (Nr + 1)):
+        temp = list(w[i - 1])
+        if i % Nk == 0:
+            temp = temp[1:] + temp[:1]
+            temp = [_SBOX[b] for b in temp]
+            temp[0] ^= _RCON[i // Nk]
+        elif Nk > 6 and i % Nk == 4:
+            temp = [_SBOX[b] for b in temp]
+        w.append([(w[i - Nk][j] ^ temp[j]) & 0xFF for j in range(4)])
+    return [bytes(w[r * 4] + w[r * 4 + 1] + w[r * 4 + 2] + w[r * 4 + 3]) for r in range(Nr + 1)]
+
+
+_INV_SBOX = None
+
+
+def _inv_tables():
+    global _INV_SBOX
+    if _INV_SBOX is None:
+        inv = [0] * 256
+        for i, v in enumerate(_SBOX):
+            inv[v] = i
+        _INV_SBOX = inv
+    return _INV_SBOX
+
+
+def aes_decrypt_block(round_keys, block):
+    inv = _inv_tables()
+    nr = len(round_keys) - 1
+    s = bytearray(a ^ b for a, b in zip(block, round_keys[nr]))
+    for rnd in range(nr - 1, -1, -1):
+        # InvShiftRows (state is column-major: index = row + 4*col)
+        t = bytearray(16)
+        for c in range(4):
+            for r in range(4):
+                t[r + 4 * ((c + r) % 4)] = s[r + 4 * c]
+        # InvSubBytes + AddRoundKey
+        s = bytearray(inv[x] ^ k for x, k in zip(t, round_keys[rnd]))
+        if rnd:
+            m = bytearray(16)
+            for c in range(4):
+                a0, a1, a2, a3 = s[4 * c:4 * c + 4]
+                m[4 * c] = _gmul(a0, 14) ^ _gmul(a1, 11) ^ _gmul(a2, 13) ^ _gmul(a3, 9)
+                m[4 * c + 1] = _gmul(a0, 9) ^ _gmul(a1, 14) ^ _gmul(a2, 11) ^ _gmul(a3, 13)
+                m[4 * c + 2] = _gmul(a0, 13) ^ _gmul(a1, 9) ^ _gmul(a2, 14) ^ _gmul(a3, 11)
+                m[4 * c + 3] = _gmul(a0, 11) ^ _gmul(a1, 13) ^ _gmul(a2, 9) ^ _gmul(a3, 14)
+            s = m
+    return bytes(s)
+
+
+def aes_cbc_decrypt(key, iv, data, unpad=True):
+    """AES-CBC decrypt (any key size), PKCS#7 padding removed when unpad."""
+    if len(data) % 16:
+        raise ValueError("ciphertext is not a multiple of 16 bytes")
+    rk = aes_key_schedule(key)
+    out = bytearray()
+    prev = iv
+    for i in range(0, len(data), 16):
+        blk = data[i:i + 16]
+        dec = aes_decrypt_block(rk, blk)
+        out += bytes(a ^ b for a, b in zip(dec, prev))
+        prev = blk
+    if unpad and out:
+        n = out[-1]
+        if 1 <= n <= 16 and out[-n:] == bytes([n]) * n:
+            out = out[:-n]
+    return bytes(out)

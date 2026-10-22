@@ -4858,6 +4858,87 @@ def resolve_megamax(url, referer=None):
 
 # ─── Host dispatcher ──────────────────────────────────────────────────────────
 
+
+# ─── Streamp2p (megamax.strp2p.site) ─────────────────────────────────────
+_STRP2P_KEY = b"kiemtienmua911ca"
+_STRP2P_IV = b"1234567890oiuytr"
+
+
+def _strp2p_decrypt(hex_text):
+    data = bytes.fromhex((hex_text or "").strip())
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        d = Cipher(algorithms.AES(_STRP2P_KEY), modes.CBC(_STRP2P_IV)).decryptor()
+        out = d.update(data) + d.finalize()
+        n = out[-1] if out else 0
+        out = out[:-n] if 1 <= n <= 16 else out
+    except Exception:
+        from ._pure_aes_gcm import aes_cbc_decrypt
+        out = aes_cbc_decrypt(_STRP2P_KEY, _STRP2P_IV, data)
+    return json.loads(out.decode("utf-8", "replace"))
+
+
+def resolve_strp2p(url, referer=None):
+    """[2026-10-22] Streamp2p -- MegaMax's own player, EgyDead's "Streamp2p"
+    mirror (megamax.strp2p.site/#<id>, a JW-player SPA). From the EgyDead
+    capture: GET /api/v1/video?id=<id>&w=&h=&r=<embedding host> answers hex,
+    AES-128-CBC (key "kiemtienmua911ca", iv "1234567890oiuytr") over JSON with
+    "cfNative" (a plain HLS playlist served by strp2p itself), "source" (the
+    origin's master.m3u8) and "cf" + "pk" (the P2P/CDN playlist the browser
+    used, pieces disguised as .woff2). The plain ones are tried first."""
+    try:
+        p = urlparse(url)
+        origin = "{}://{}".format(p.scheme or "https", p.netloc)
+        vid = (p.fragment or "").strip("/") or (parse_qs(p.query).get("id") or [""])[0]
+        if not vid:
+            m = re.search(r"/(?:e|v|embed)/([A-Za-z0-9]+)", p.path)
+            vid = m.group(1) if m else ""
+        if not vid:
+            log("strp2p: no video id in {}".format(url[:80]))
+            return None
+        r_host = urlparse(referer).netloc if referer else "q7v3k8m2p1.top"
+        hdrs = {"Referer": origin + "/", "Accept": "*/*", "Accept-Language": FRAME_ACCEPT_LANGUAGE}
+        body, _f = fetch("{}/api/v1/video?id={}&w=1920&h=1080&r={}".format(origin, vid, r_host),
+                         referer=origin + "/", extra_headers=hdrs, timeout=15, max_retries=1)
+        if not body or not re.match(r"^\s*[0-9a-fA-F]{32,}\s*$", body):
+            log("strp2p: unexpected video reply ({} bytes): {}".format(len(body or ""), (body or "")[:120]))
+            return None
+        data = _strp2p_decrypt(body)
+        pk = data.get("pk") or {}
+        cands = []
+        if data.get("cfNative"):
+            cands.append(("cfNative", data["cfNative"]))
+        if data.get("source"):
+            cands.append(("source", data["source"]))
+        if data.get("cf") and pk.get("k"):
+            sep = "&" if "?" in data["cf"] else "?"
+            cands.append(("cf", "{}{}k={}&kx={}".format(data["cf"], sep, pk.get("k"), pk.get("kx", ""))))
+        log("strp2p: {} '{}' -> {}".format(vid, str(data.get("title") or "")[:50],
+                                          ", ".join(n for n, _u in cands) or "no links"))
+        import novaplay_proxy
+        suffix = "|Referer={0}/&Origin={0}".format(origin)
+        for name, link in cands:
+            try:
+                text, _ff = fetch(link, referer=origin + "/", timeout=12, max_retries=0,
+                                  extra_headers={"Origin": origin, "Accept": "*/*",
+                                                 "Accept-Language": FRAME_ACCEPT_LANGUAGE})
+            except Exception as e:
+                text = None
+                log("strp2p: {} failed: {}".format(name, e))
+            if not text or "#EXTM3U" not in text:
+                log("strp2p: {} gave no playlist ({} bytes)".format(name, len(text or "")))
+                continue
+            novaplay_proxy.remember_playlist(link, text, link, keep=3 * 3600)
+            # disguised (.woff/.txt) or fMP4 pieces only play through the proxy
+            needs_proxy = bool(re.search(r"\.woff2?\b|#EXT-X-MAP|\.txt\b", text))
+            log("strp2p: playing {} ({}{})".format(name, link[:90], ", via proxy" if needs_proxy else ""))
+            return link + suffix + ("&X-NP-Proxy=1" if needs_proxy else "")
+        return None
+    except Exception as e:
+        log("strp2p error: {}".format(e))
+        return None
+
+
 HOST_RESOLVERS = {
     # ─── OnlyFlix server tabs — vidsrc-family players (2026-09-24) ──────
     "vidfast.vc":   resolve_vidvm_family,
@@ -4988,6 +5069,8 @@ HOST_RESOLVERS = {
     # a real network capture of arabseed.wine's single "MegaMax" server
     # -- only this specific vanity domain is mapped, on direct evidence.
     "q7v3k8m2p1.top":  resolve_megamax,
+    # [2026-10-22] MegaMax's own P2P player (EgyDead's "Streamp2p" mirror)
+    "strp2p":          resolve_strp2p,
     "dhcplay":         resolve_dhcplay,
     "dhcplay.com":     resolve_dhcplay,
     "mycima.cv":       resolve_azrak_mycima,   # [PATCH 121]

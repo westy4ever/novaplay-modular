@@ -974,8 +974,12 @@ class EgyDeadExtractor(BaseExtractor):
     _MEGAMAX_DRIVERS = {
         "streamruby": "StreamRuby", "streamhg": "StreamWish", "uqload": "Uqload", "mixdrop": "MixDrop",
         "byse": "Byse", "doodstream": "DoodStream", "vidara": "Vidara", "earnvids": "VidHide", "voe": "Voe",
+        # [2026-10-22] seen in the House of Lies capture: MegaMax's own P2P player
+        # (megamax.strp2p.site, hosts.resolve_strp2p) and VidMoly
+        "streamp2p": "MegaMax P2P", "vidmoly": "VidMoly",
     }
-    _MEGAMAX_ORDER = ("streamruby", "mixdrop", "voe", "streamhg", "earnvids", "doodstream", "byse", "vidara", "uqload")
+    _MEGAMAX_ORDER = ("streamruby", "mixdrop", "streamp2p", "voe", "streamhg", "earnvids", "doodstream",
+                      "vidmoly", "byse", "vidara", "uqload")
 
     _MEGAMAX_IFRAME_RE = re.compile(r'^https?://[^/]+/iframe/[A-Za-z0-9_-]+/?(?:\?.*)?$', re.I)
 
@@ -983,6 +987,7 @@ class EgyDeadExtractor(BaseExtractor):
         "streamruby", "stmruby", "streamhg", "streamwish", "uqload",
         "mixdrop", "byse", "doodstream", "vidara", "earnvids", "voe",
         "cybervynx", "streamtape", "govid", "vidguard", "egybestvid",
+        "strp2p", "vidmoly", "vidhide",
     )
 
     def _is_megamax_iframe(self, url):
@@ -1090,6 +1095,10 @@ class EgyDeadExtractor(BaseExtractor):
                     link = str((mm or {}).get("link") or "").strip()
                     if link.startswith("//"):
                         link = "https:" + link
+                    # Streamp2p keeps its id after "#" (".../#ry8lyd"); NOVA reads "#"
+                    # in a stream address as headers, so carry it as ?id= instead
+                    if "strp2p" in link and "/#" in link:
+                        link = link.replace("/#", "/?id=", 1)
                     if link.startswith("http"):
                         mirrors.append((str((mm or {}).get("driver") or "").lower(), link))
                 try:
