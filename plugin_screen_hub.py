@@ -91,7 +91,7 @@ POP_STEPS, POP_STEP_MS = POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 _CONT_PARTS = (("kEdge", 0, 0, _CONT_W, _CONT_H, True), ("kBox", 3, 3, _CONT_W - 6, _CONT_H - 6, True),
                ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, 336, 36, False),
                ("kSub", 106, 58, 336, 30, False), ("kBar", 106, 100, 330, 6, False))
-_SIDE_PARTS = (("rowEdge", -2, -2, 336, 70, True), ("rowBg", 0, 0, 332, 66, True), ("rowBar", 0, 0, 5, 66, True),
+_SIDE_PARTS = (("rowBg", 0, 0, 332, 66, True), ("rowBar", 0, 0, 5, 66, True),
                ("rowIcon", 18, 15, 36, 36, True), ("rowText", 70, 0, 256, 66, False))
 _SITE_PARTS = (("sEdge", 0, 0, _S_W, _S_H, True), ("sBox", 3, 3, _S_W - 6, _S_H - 6, True),
                ("sLogo", 18, 18, 132, 47, True), ("sDot", _S_W - 34, 34, 14, 14, False),
@@ -137,7 +137,6 @@ def _skin():
     for i in range(ROWS):
         y = _SIDE_Y0 + i * _SIDE_STEP
         parts.append("""
-        <widget name="rowEdge{i}" position="52,{ey}" size="336,70" backgroundColor="{gold}" cornerRadius="12" zPosition="3" />
         <widget name="rowBg{i}" position="54,{y}" size="332,66" backgroundColor="{panel}" cornerRadius="10" zPosition="4" />
         <widget name="rowBar{i}" position="54,{y}" size="5,66" backgroundColor="{gold}" zPosition="5" />
         <widget name="rowIcon{i}" position="72,{iy}" size="36,36" alphatest="blend" scale="1" zPosition="5" />
@@ -217,7 +216,6 @@ class NovaPlayHub(Screen):
         self["hint"] = Label("")
         for i in range(ROWS):
             self["rowBg%d" % i] = Label("")
-            self["rowEdge%d" % i] = Label("")
             self["rowBar%d" % i] = Label("")
             self["rowIcon%d" % i] = Pixmap()
             self["rowText%d" % i] = Label(SECTIONS[i][1])
@@ -370,7 +368,6 @@ class NovaPlayHub(Screen):
             on = i == self._sec
             self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
             self["rowBg%d" % i].show() if on else self["rowBg%d" % i].hide()
-            self["rowEdge%d" % i].hide()      # no outline on the row (panel frame only)
             self["rowBar%d" % i].show() if on else self["rowBar%d" % i].hide()
             self._color("rowText%d" % i, fg=WHITE if on else TEXT)
             self._pix("rowIcon%d" % i, os.path.join(_ICONS, "side_%s_%s.png" % (ic, "on" if on else "off")))
@@ -452,10 +449,8 @@ class NovaPlayHub(Screen):
             dw, dh = 20.0 * p, float(_SIDE_STEP - H) * p
             x0, y0 = 54 - dw / 2.0, _SIDE_Y0 + i * _SIDE_STEP - dh / 2.0
             w, h = W + dw, H + dh
-            o = 2 + 2 * p
             ic = 36 + 6 * p
-            for name, x, y, ww, hh in (("rowEdge", x0 - o, y0 - o, w + 2 * o, h + 2 * o),
-                                       ("rowBg", x0, y0, w, h), ("rowBar", x0, y0, 5, h),
+            for name, x, y, ww, hh in (("rowBg", x0, y0, w, h), ("rowBar", x0, y0, 5, h),
                                        ("rowIcon", x0 + 18, y0 + (h - ic) / 2.0, ic, ic),
                                        ("rowText", x0 + 70 + 6 * p, y0, w - 76, h)):
                 inst = self["%s%d" % (name, i)].instance

@@ -156,7 +156,6 @@ def _skin():
     for i in range(CAT_ROWS):
         y = _CAT_Y0 + i * _CAT_STEP
         parts.append("""
-        <widget name="cEdge{i}" position="52,{ey}" size="336,{eh}" backgroundColor="{gold}" cornerRadius="12" zPosition="3" />
         <widget name="cBg{i}" position="54,{y}" size="332,{h}" backgroundColor="{panel}" cornerRadius="10" zPosition="4" />
         <widget name="cBar{i}" position="54,{y}" size="5,{h}" backgroundColor="{gold}" zPosition="5" />
         <widget name="cText{i}" position="72,{y}" size="304,{h}" font="Regular;25" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
@@ -239,7 +238,6 @@ def _skin_modern():
     for i in range(CAT_ROWS):
         y = _CAT_Y0 + i * _CAT_STEP
         parts.append("""
-        <widget name="cEdge{i}" position="52,{ey}" size="326,{eh}" backgroundColor="{gold}" cornerRadius="16" zPosition="3" />
         <widget name="cBg{i}" position="54,{y}" size="322,{h}" backgroundColor="{panel}" cornerRadius="14" zPosition="4" />
         <widget name="cBar{i}" position="54,{by}" size="5,{bh}" backgroundColor="{gold}" cornerRadius="2" zPosition="5" />
         <widget name="cText{i}" position="74,{y}" size="290,{h}" font="Regular;24" halign="left" valign="center" foregroundColor="{text}" backgroundColor="{panel}" transparent="1" zPosition="5" />
@@ -336,7 +334,6 @@ class NovaPlaySite(Screen):
         self["hint"] = Label("")
         for i in range(CAT_ROWS):
             self["cBg%d" % i] = Label("")
-            self["cEdge%d" % i] = Label("")
             self["cBar%d" % i] = Label("")
             self["cText%d" % i] = Label("")
         for i in range(self._view):
@@ -386,6 +383,13 @@ class NovaPlaySite(Screen):
     # ─── lifecycle ──────────────────────────────────────────────────────
 
     def _start(self):
+        # nothing of the category rows shows until the categories arrive
+        # (the skin draws every row's gold bar / box by default)
+        for i in range(CAT_ROWS):
+            self._vis(["cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
+        # same for the poster slots (gold focus frames) until posters load
+        for i in range(self._view):
+            self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")], False)
         self._applyLayout()
         self._tick()
         self._clock.start(10000, False)
@@ -474,7 +478,7 @@ class NovaPlaySite(Screen):
         self._vis(self._CAT_W, not browsing)
         if browsing:
             for i in range(CAT_ROWS):
-                self._vis(["cEdge%d" % i, "cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
+                self._vis(["cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
         self._vis(self._INFO_W, not car)
         if not car:
             # infoImg is shown by _paintBackdrop only when it has a picture
@@ -595,14 +599,12 @@ class NovaPlaySite(Screen):
             g = top + i
             if g >= n:
                 self["cBg%d" % i].hide(); self["cBar%d" % i].hide(); self["cText%d" % i].hide()
-                self["cEdge%d" % i].hide()
                 continue
             c = items[g]
             self["cText%d" % i].show()
             self["cText%d" % i].setText(_single_line_text(c.get("title", ""), width=24, fallback="—"))
             if c.get("type") == "separator":
                 self["cBg%d" % i].hide(); self["cBar%d" % i].hide()
-                self["cEdge%d" % i].hide()
                 self._color("cText%d" % i, fg=GOLD)
                 continue
             on = g == sel
@@ -610,7 +612,6 @@ class NovaPlaySite(Screen):
             # otherwise) -- so the growing row never slides under a neighbour
             self["cBg%d" % i].show() if on else self["cBg%d" % i].hide()
             self._color("cBg%d" % i, bg=(ROW_ON_M if self._modern else ROW_ON) if on else PANEL)
-            self["cEdge%d" % i].hide()        # no outline on the row (panel frame only)
             self["cBar%d" % i].show() if (on and side) else self["cBar%d" % i].hide()
             self._color("cText%d" % i, fg=WHITE if on else (MUTED if c.get("type") == "error" else TEXT))
         self._catPopFocus(sel - top if (side and n and 0 <= sel - top < CAT_ROWS
@@ -907,8 +908,6 @@ class NovaPlaySite(Screen):
         dw, dh = 20.0 * p, float(_CAT_STEP - _CAT_H) * p
         x0, y0 = 54 - dw / 2.0, y - dh / 2.0
         w, h = W + dw, H + dh
-        o = 2 + 2 * p                                   # outline 2 -> 4 px
-        self._mr("cEdge%d" % i, x0 - o, y0 - o, w + 2 * o, h + 2 * o)
         self._mr("cBg%d" % i, x0, y0, w, h)
         if self._modern:
             self._mr("cBar%d" % i, x0, y0 + 10 * h / H, 5, h - 20 * h / H)
