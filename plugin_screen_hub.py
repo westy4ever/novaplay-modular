@@ -30,7 +30,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 from Components.ProgressBar import ProgressBar
-from enigma import eTimer
+from enigma import eTimer, ePoint, eSize
 
 try:
     from skin import parseColor
@@ -45,7 +45,7 @@ from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _set_config, _continue_items, _history_items,
                           _favorite_items, _clear_continue_item, _hide_site, _is_site_hidden,
                           _set_site_custom_name, _DEFAULT_TMDB_API_KEY)
-from plugin_gridlist import resolve_icon_path, scale_skin_xml
+from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 from plugin_util import _single_line_text
 from novaplay_thread import callInMainThread
 from novaplay_dualclock import format_dual_dates
@@ -83,6 +83,16 @@ S_PAGE = S_COLS * S_ROWS
 _S_X = (430, 798, 1166, 1534)
 _S_Y = (440, 618, 796)
 _S_W, _S_H = 346, 158
+
+# [pop-anim] the selected card grows 8 % (same smooth pop as the poster
+# grids): (widget, x, y, w, h, resize) relative to the card's corner
+POP_ZOOM = 0.08
+_CONT_PARTS = (("kEdge", 0, 0, _CONT_W, _CONT_H, True), ("kBox", 3, 3, _CONT_W - 6, _CONT_H - 6, True),
+               ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, 336, 36, False),
+               ("kSub", 106, 58, 336, 30, False), ("kBar", 106, 100, 330, 6, False))
+_SITE_PARTS = (("sEdge", 0, 0, _S_W, _S_H, True), ("sBox", 3, 3, _S_W - 6, _S_H - 6, True),
+               ("sLogo", 18, 18, 132, 47, True), ("sDot", _S_W - 34, 34, 14, 14, False),
+               ("sName", 18, 74, 310, 36, False), ("sTag", 18, 112, 310, 30, False))
 
 
 def _skin():
@@ -238,6 +248,10 @@ class NovaPlayHub(Screen):
         self._art = eTimer()
         self._art.callback.append(self._artPoll)
         self._art_tries = 0
+        self._pop = eTimer()
+        self._pop.callback.append(self._popTick)
+        self._pop_card = None        # ("cont"|"sites", slot) being zoomed
+        self._pop_frame = 0
         self.onLayoutFinish.append(self._start)
         self.onClose.append(self._stopTimers)
 
@@ -252,7 +266,7 @@ class NovaPlayHub(Screen):
         self._healthSweep()
 
     def _stopTimers(self):
-        for t in (self._clock, self._art):
+        for t in (self._clock, self._art, self._pop):
             try:
                 t.stop()
             except Exception:
@@ -353,12 +367,69 @@ class NovaPlayHub(Screen):
             self._pix("rowIcon%d" % i, os.path.join(_ICONS, "side_%s_%s.png" % (ic, "on" if on else "off")))
         self._paintCont()
         self._paintSites()
+        self._popFocus()
         if side:
             self["hint"].setText("OK  Open    ▶  Back to the list    EXIT  Close")
         elif self._zone == "cont":
             self["hint"].setText("OK  Resume    MENU  Remove    ◀  Sections")
         else:
             self["hint"].setText("OK  Open site    MENU  Site options    ◀  Sections")
+
+    # ─── [pop-anim] zoom on the selected card ───────────────────────────
+
+    def _placeCard(self, card, p):
+        zone, i = card[0], card[1]
+        if zone == "cont":
+            x0, y0, W, H, parts = _CONT_X[i], _CONT_Y, _CONT_W, _CONT_H, _CONT_PARTS
+        else:
+            x0, y0, W, H, parts = _S_X[i % S_COLS], _S_Y[i // S_COLS], _S_W, _S_H, _SITE_PARTS
+        k = 1.0 + POP_ZOOM * p
+        cx, cy = x0 - (W * k - W) / 2.0, y0 - (H * k - H) / 2.0
+        for name, rx, ry, w, h, rs in parts:
+            inst = self["%s%d" % (name, i)].instance
+            if inst is None:
+                continue
+            try:
+                inst.move(ePoint(sc(cx + rx * k), sc(cy + ry * k)))
+                if rs:
+                    inst.resize(eSize(max(1, sc(w * k)), max(1, sc(h * k))))
+            except Exception:
+                pass
+
+    def _popFocus(self):
+        if self._zone == "cont" and self._cont:
+            card = ("cont", self._ci, 0)
+        elif self._zone == "sites" and self._sites:
+            card = ("sites", self._si % S_PAGE, self._si // S_PAGE)
+        else:
+            card = None
+        if card == self._pop_card:
+            return
+        try:
+            self._pop.stop()
+        except Exception:
+            pass
+        if self._pop_card:
+            self._placeCard(self._pop_card, 0.0)
+        self._pop_card = card
+        if not card:
+            return
+        self._pop_frame = 0
+        try:
+            self._pop.start(POP_ANIM_INTERVAL, False)
+        except Exception:
+            self._placeCard(card, 1.0)
+
+    def _popTick(self):
+        if not self._pop_card:
+            self._pop.stop()
+            return
+        import math
+        self._pop_frame += 1
+        t = min(1.0, self._pop_frame / float(max(1, POP_ANIM_FRAMES)))
+        self._placeCard(self._pop_card, math.sin(t * math.pi / 2))
+        if t >= 1.0:
+            self._pop.stop()
 
     def _paintCont(self):
         n = len(self._cont)

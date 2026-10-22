@@ -85,10 +85,26 @@ def _modern_style():
 # [carousel] 7 posters along the bottom, the middle one larger, over a
 # full-screen darkened backdrop with the title / details / plot on top
 K_SLOTS, K_MID = 7, 3
-KW, KH = 190, 285
-KCW, KCH = 232, 348
-_KX = (215, 425, 635, 845, 1097, 1307, 1517)
-_KY, _KCY = 620, 590
+# [carousel] graduated like the home carousel: the middle poster is the
+# biggest, each step out is smaller; all centred on one line (y = 725)
+_K_SIZES = ((150, 225), (180, 270), (220, 330), (300, 450), (220, 330), (180, 270), (150, 225))
+_K_GAP, _K_LINE = 30, 725
+
+
+def _k_slots():
+    total = sum(w for w, _h in _K_SIZES) + _K_GAP * (len(_K_SIZES) - 1)
+    x, out = (1920 - total) // 2, []
+    for w, h in _K_SIZES:
+        out.append((x, _K_LINE - h // 2, w, h))
+        x += w + _K_GAP
+    return tuple(out)
+
+
+_KG = _k_slots()
+_KX = tuple(g[0] for g in _KG)
+KW, KH = _KG[K_MID - 1][2], _KG[K_MID - 1][3]
+KCW, KCH = _KG[K_MID][2], _KG[K_MID][3]
+_KY, _KCY = _KG[K_MID - 1][1], _KG[K_MID][1]
 
 _PAGED_SITES = ("egydead", "egydead_coupons", "fasel", "faselhdx")
 _ADULT = ["18+", "للكبار", "سكس", "xxx", "adult", "إباح", "sex"]
@@ -160,13 +176,11 @@ def _skin():
         <widget name="kTitle" position="80,160" size="1380,66" halign="left" font="Bold;50" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="5" />
         <widget name="kMeta" position="80,232" size="1380,36" halign="left" font="Regular;26" foregroundColor="#E6EAF0" backgroundColor="{bg}" transparent="1" zPosition="5" />
         <widget name="kState" position="80,272" size="1380,32" halign="left" font="Regular;24" foregroundColor="#30C48D" backgroundColor="{bg}" transparent="1" zPosition="5" />
-        <widget name="kPlot" position="80,314" size="1060,250" font="Regular;26" foregroundColor="#E6EAF0" backgroundColor="{bg}" transparent="1" zPosition="5" />
+        <widget name="kPlot" position="80,314" size="1060,170" font="Regular;26" foregroundColor="#E6EAF0" backgroundColor="{bg}" transparent="1" zPosition="5" />
         <widget name="kCount" position="1480,170" size="400,34" halign="right" font="Regular;24" foregroundColor="#C9D0DA" backgroundColor="{bg}" transparent="1" zPosition="5" />
     """.format(gold=GOLD, bg=BG))
     for s_ in range(K_SLOTS):
-        mid = s_ == K_MID
-        w, h, y = (KCW, KCH, _KCY) if mid else (KW, KH, _KY)
-        x = _KX[s_]
+        x, y, w, h = _KG[s_]
         parts.append("""
         <widget name="kEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="10" zPosition="5" />
         <widget name="kBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" zPosition="6" />
@@ -876,10 +890,12 @@ class NovaPlaySite(Screen):
     def _kGeom(self, k):
         """slot k's box; off the strip = one more step left / right"""
         if 0 <= k < K_SLOTS:
-            return (_KX[k], _KCY, KCW, KCH) if k == K_MID else (_KX[k], _KY, KW, KH)
+            return _KG[k]
         if k < 0:
-            return (_KX[0] + k * (_KX[1] - _KX[0]), _KY, KW, KH)
-        return (_KX[-1] + (k - K_SLOTS + 1) * (_KX[-1] - _KX[-2]), _KY, KW, KH)
+            g0, g1 = _KG[0], _KG[1]
+            return (g0[0] + k * (g1[0] - g0[0]), g0[1], g0[2], g0[3])
+        gl, g2 = _KG[-1], _KG[-2]
+        return (gl[0] + (k - K_SLOTS + 1) * (gl[0] - g2[0]), gl[1], gl[2], gl[3])
 
     def _placeCarCentre(self, p):
         d = getattr(self, "_car_delta", 0)
@@ -1114,7 +1130,7 @@ class NovaPlaySite(Screen):
         if len(_p) < 60 or _p == (self._cat_name or "").strip():
             _p = ""
         self["infoPlot"].setText(_wrap_ui_text(_p, width=38, max_lines=11, fallback=""))
-        self["kPlot"].setText(_wrap_ui_text(_p, width=80, max_lines=7, fallback=""))
+        self["kPlot"].setText(_wrap_ui_text(_p, width=80, max_lines=5, fallback=""))
         self._paintBackdrop(it)
         if self._carousel():
             self._loadCarouselBackdrop(it)
@@ -1198,7 +1214,7 @@ class NovaPlaySite(Screen):
         _own = (it.get("plot") or "").strip()
         if meta.get("plot") and (len(_own) < 60 or _own == (self._cat_name or "").strip()):
             self["infoPlot"].setText(_wrap_ui_text(meta["plot"], width=38, max_lines=11, fallback=""))
-            self["kPlot"].setText(_wrap_ui_text(meta["plot"], width=80, max_lines=7, fallback=""))
+            self["kPlot"].setText(_wrap_ui_text(meta["plot"], width=80, max_lines=5, fallback=""))
         if meta.get("backdrop_url") and not (it.get("fanart") or it.get("backdrop")):
             it["fanart"] = meta["backdrop_url"]
             self._paintBackdrop(it)
