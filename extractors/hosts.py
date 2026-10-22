@@ -756,7 +756,7 @@ def resolve_streamruby(url):
                     "Sec-Fetch-Site": "cross-site",
                     "User-Agent": UA,
                     "Accept": "*/*",
-                    "Accept-Language": "ar-EG,ar;q=0.9,en;q=0.8",
+                    "Accept-Language": FRAME_ACCEPT_LANGUAGE,   # the stream must send the same value
                     "Cache-Control": "no-cache",
                     "Pragma": "no-cache",
                 }
@@ -1177,11 +1177,33 @@ def resolve_fastvip(url, referer=None):
     except Exception: pass
     return None
 
-def resolve_streamwish(url):
+def resolve_streamwish(url, _depth=0):
     try:
-        html, _ = fetch(url, referer=url)
+        html, final = fetch(url, referer=url)
         if not html:
             return None
+        # [2026-10-22] streamwish.to/e/<code> answered the box with an 819-byte
+        # stub; the player now lives on a mirror domain (hglamioz.com in the
+        # EgyDead capture, hls3 ".../master.txt" playlists). Follow the stub.
+        if len(html) < 4000 and _depth < 2:
+            nxt = None
+            m = re.search(r'(?:location(?:\.href)?\s*=|location\.replace\(|http-equiv=["\']refresh["\'][^>]*url=)\s*["\']?([^"\'\s>)]+)', html, re.I)
+            if m:
+                nxt = m.group(1)
+            if not nxt:
+                code = re.search(r"/e/([A-Za-z0-9]+)", url)
+                m = re.search(r'https?://[^"\'\s<>]+/(?:e|v|embed)/' + (re.escape(code.group(1)) if code else r"[A-Za-z0-9]+"), html)
+                nxt = m.group(0) if m else None
+            if nxt:
+                nxt = urljoin(final or url, nxt)
+                if nxt != (final or url):
+                    log("streamwish: stub page ({} bytes) -> {}".format(len(html), nxt[:90]))
+                    r = resolve_streamwish(nxt, _depth + 1)
+                    if r:
+                        return r
+            log("streamwish: stub page ({} bytes): {}".format(len(html), re.sub(r"\s+", " ", html)[:300]))
+        page = final or url
+        mt = re.search(r'https?://[^"\'\s<>]+/master\.txt[^"\'\s<>]*', html)
         best = _best_media_url(html)
         if best:
             return best
@@ -1189,9 +1211,13 @@ def resolve_streamwish(url):
             best = _best_media_url(txt)
             if best:
                 return best
+            if not mt:
+                mt = re.search(r'https?://[^"\'\s<>]+/master\.txt[^"\'\s<>]*', txt)
+        if mt:
+            return _with_page_referer(mt.group(0), page)
         return find_m3u8(html) or find_mp4(html)
-    except Exception:
-        pass
+    except Exception as e:
+        log("streamwish error: {}".format(e))
     return None
 
 
@@ -4470,6 +4496,29 @@ def _pjs_pick_episode(playlist, season, episode):
 
 
 FRAME_ACCEPT_LANGUAGE = "ar,en-US,en;q=0.9"   # = net.fetch's default and the proxy's
+
+_TOKEN_HLS_RE = re.compile(r"/hls\d?/.*[?&]t=", re.I)
+
+
+def with_page_accept_language(stream):
+    """[2026-10-22] the hls2/hls3 CDN family (LuluStream, StreamRuby, VidHide,
+    ...) ties its ?t= token to the Accept-Language the player page was asked
+    for with: a stream request without the same value gets 403 (box:
+    StreamRuby 403 -> 200 with it). Player pages are fetched with
+    FRAME_ACCEPT_LANGUAGE (= net.fetch's default), so a stream that carries
+    headers, or is one of these token playlists, carries that value too."""
+    try:
+        if not stream or not str(stream).startswith("http"):
+            return stream
+        s = str(stream)
+        main, _bar, pipe = s.partition("|")
+        if "accept-language=" in pipe.lower():
+            return s
+        if not pipe and not _TOKEN_HLS_RE.search(main):
+            return s
+        return main + "|" + (pipe + "&" if pipe else "") + "Accept-Language=" + FRAME_ACCEPT_LANGUAGE
+    except Exception:
+        return stream
 _IFRAME_HDRS = {"Sec-Fetch-Dest": "iframe", "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Site": "cross-site", "Upgrade-Insecure-Requests": "1",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -5643,6 +5692,8 @@ def extract_stream(url):
     q = _quality_label_for(stream)
 
     others = [(lbl, u) for lbl, u in variants if u != stream]
+    stream = with_page_accept_language(stream)
+    others = [(lbl, with_page_accept_language(u)) for lbl, u in others]
 
     log("extract_stream SUCCESS: {} ({}), {} extra variant(s)".format(stream[:120], q, len(others)))
     return stream, q, ref, others

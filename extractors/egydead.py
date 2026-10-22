@@ -1502,6 +1502,22 @@ class EgyDeadExtractor(BaseExtractor):
         return result
 
     def extract_stream(self, url, _depth=0):
+        """[2026-10-22] every stream EgyDead returns carries the Accept-Language
+        its player page was fetched with (hosts.with_page_accept_language):
+        StreamRuby / VidHide tokens 403 without it."""
+        res = self._extract_stream_impl(url, _depth=_depth)
+        try:
+            from .hosts import with_page_accept_language as _wal
+            if res and res[0]:
+                stream, q, ref = res[0], res[1], res[2]
+                variants = res[3] if len(res) > 3 else []
+                return (_wal(stream), q, ref,
+                        [(lbl, _wal(u)) for lbl, u in (variants or [])])
+        except Exception as e:
+            log("EgyDead: accept-language pass failed: {}".format(e))
+        return res
+
+    def _extract_stream_impl(self, url, _depth=0):
         """
         Resolve a server URL to a playable stream.
 
