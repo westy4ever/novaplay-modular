@@ -19,6 +19,7 @@ Keys
   BLUE next page       EXIT   posters -> categories -> up a folder -> close
 """
 import os
+import re
 import threading
 import time
 
@@ -64,7 +65,25 @@ def _rate_color(v):
     return "#30C48D" if v >= 7 else (GOLD if v >= 5 else MUTED)
 
 
-SKELETON = "#1E2633"             # [loading] grey placeholder cards
+SKELETON = "#1E2633"
+
+# [quality] badge from the site's own label or the title: (text, bg, fg)
+_Q_RE = re.compile(r"\b(4k|2160p|uhd|1080p|720p|480p|hdcam|cam|hdts|ts|web[- ]?dl|webrip|blu[- ]?ray|bdrip|hdrip|dvdrip|hdtv)\b", re.I)
+
+
+def _quality_badge(it):
+    raw = " ".join(str(it.get(k) or "") for k in ("quality", "title"))
+    m = _Q_RE.search(raw)
+    if not m:
+        return None
+    q = m.group(1).lower().replace(" ", "").replace("-", "")
+    if q in ("4k", "2160p", "uhd"):
+        return ("4K", GOLD, "#0C1017")
+    if q in ("cam", "hdcam", "ts", "hdts"):
+        return ("CAM", "#E5484D", "#FFFFFF")
+    label = {"webdl": "WEB-DL", "webrip": "WEBRip", "bluray": "BluRay", "bdrip": "BDRip",
+             "hdrip": "HDRip", "dvdrip": "DVDRip", "hdtv": "HDTV"}.get(q, q.upper().replace("P", "p"))
+    return (label, "#3E7BFA" if q in ("1080p", "bluray", "webdl") else "#566070", "#FFFFFF")             # [loading] grey placeholder cards
 
 CAT_ROWS = 10
 _CAT_Y0, _CAT_STEP, _CAT_H = 212, 62, 56
@@ -178,11 +197,12 @@ def _skin():
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" zPosition="3" />
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
         <widget name="pRate{i}" position="{rx},{ry}" size="78,30" font="Bold;19" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="5" />
+        <widget name="pQual{i}" position="{qx},{ry}" size="84,26" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="6" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
         <widget name="pName{i}" halign="left" position="{x},{ty}" size="{w},32" font="Regular;22" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         <widget name="pYear{i}" position="{x},{yy}" size="{w},26" font="Regular;18" foregroundColor="#A3ADBB" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 4, ey=y - 4, ew=PW + 8, eh=PH + 8,
-                   rx=x + 8, ry=y + 8, my=y + PH - 28, ty=y + PH + 6, yy=y + PH + 36,
+                   rx=x + 8, ry=y + 8, qx=x + PW - 92, my=y + PH - 28, ty=y + PH + 6, yy=y + PH + 36,
                    gold=GOLD, card=CARD, white=WHITE, bg=BG))
     parts.append("""
         <widget name="kTitle" position="80,160" size="1380,66" halign="left" font="Bold;50" foregroundColor="{gold}" backgroundColor="{bg}" transparent="1" zPosition="5" />
@@ -266,11 +286,12 @@ def _skin_modern():
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" cornerRadius="10" zPosition="3" />
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
         <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#300C1017" cornerRadius="8" zPosition="5" />
+        <widget name="pQual{i}" position="{qx},{ry}" size="84,26" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="8" zPosition="5" />
         <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
         <widget name="pName{i}" halign="center" position="{nx},{ty}" size="{nw},32" font="Regular;21" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         <widget name="pYear{i}" halign="center" position="{nx},{yy}" size="{nw},26" font="Regular;17" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 6, ey=y - 6, ew=PW + 12, eh=PH + 12,
-                   rx=x + PW - 78, ry=y + 8, my=y + PH - 28, ty=y + PH + 10, yy=y + PH + 40,
+                   rx=x + PW - 78, ry=y + 8, qx=x + 8, my=y + PH - 28, ty=y + PH + 10, yy=y + PH + 40,
                    nx=x - 12, nw=PW + 24, gold=GOLD, card=CARD, white=WHITE, bg=BG, muted=MUTED))
     # carousel widgets are shared with the classic skin
     classic = _skin()
@@ -358,7 +379,7 @@ class NovaPlaySite(Screen):
             self["cBar%d" % i] = Label("")
             self["cText%d" % i] = Label("")
         for i in range(self._view):
-            for n in ("pEdge", "pBack", "pRate", "pMark", "pName", "pYear"):
+            for n in ("pEdge", "pBack", "pRate", "pQual", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)] = Label("")
             self["pImg%d" % i] = Pixmap()
 
@@ -410,7 +431,7 @@ class NovaPlaySite(Screen):
             self._vis(["cBg%d" % i, "cBar%d" % i, "cText%d" % i], False)
         # same for the poster slots (gold focus frames) until posters load
         for i in range(self._view):
-            self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")], False)
+            self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear")], False)
         self._applyLayout()
         self._tick()
         self._clock.start(10000, False)
@@ -515,7 +536,7 @@ class NovaPlaySite(Screen):
             self._vis(["kLeft", "kRight"], False)
         if car:
             for i in range(self._view):
-                self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")], False)
+                self._vis(["%s%d" % (n, i) for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear")], False)
         # carousel + category list open: a "peek" -- the section name, the
         # counter and the poster strip stay in view beside the panel (was a
         # large empty hint card in the middle of the screen)
@@ -753,7 +774,7 @@ class NovaPlaySite(Screen):
         self["gridMsg"].setText(text)
         self["gridMsg"].show()
         for i in range(self._view):
-            for n in ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear"):
+            for n in ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)].hide()
         self["gridCount"].setText("")
         self["gridMore"].setText("")
@@ -773,7 +794,7 @@ class NovaPlaySite(Screen):
         self._vis(["gridLeft", "gridRight", "kLeft", "kRight"], False)
         car = self._carousel()
         for i in range(self._view):
-            for n in ("pEdge", "pImg", "pRate", "pMark", "pName", "pYear"):
+            for n in ("pEdge", "pImg", "pRate", "pQual", "pMark", "pName", "pYear"):
                 self["%s%d" % (n, i)].hide()
             if car:
                 self["pBack%d" % i].hide()
@@ -839,7 +860,7 @@ class NovaPlaySite(Screen):
         missing = False
         for i in range(self._view):
             g = base + i
-            names = ("pEdge", "pBack", "pImg", "pRate", "pMark", "pName", "pYear")
+            names = ("pEdge", "pBack", "pImg", "pRate", "pQual", "pMark", "pName", "pYear")
             if g >= n:
                 for nm in names:
                     self["%s%d" % (nm, i)].hide()
@@ -873,6 +894,14 @@ class NovaPlaySite(Screen):
                         fill_item_rating_async(it, on_done=self._repaintSoon)
                     except Exception:
                         pass
+            # quality badge (4K / 1080p / CAM ...) when the site says so
+            qb = _quality_badge(it)
+            if qb:
+                self["pQual%d" % i].setText(qb[0])
+                self._color("pQual%d" % i, bg=qb[1], fg=qb[2])
+                self["pQual%d" % i].show()
+            else:
+                self["pQual%d" % i].hide()
             # watched / resume band
             mark = ""
             url = it.get("url", "")
@@ -1069,6 +1098,7 @@ class NovaPlaySite(Screen):
             self._mr("pImg%d" % i, x, y, PW, PH)
             self._mr("pEdge%d" % i, x - 4, y - 4, PW + 8, PH + 8)
             self._mr("pRate%d" % i, x + 8, y + 8)
+            self._mr("pQual%d" % i, x + PW - 92, y + 8)
             self._mr("pMark%d" % i, x, y + PH - 28, PW, 28)
             self._mr("pName%d" % i, x, y + PH + 6)
             self._mr("pYear%d" % i, x, y + PH + 36)
@@ -1080,6 +1110,7 @@ class NovaPlaySite(Screen):
         self._mr("pImg%d" % i, x, y, w, h)
         self._mr("pEdge%d" % i, x - 6, y - 6, w + 12, h + 12)
         self._mr("pRate%d" % i, x + w - 78, y + 8)
+        self._mr("pQual%d" % i, x + 8, y + 8)
         self._mr("pMark%d" % i, x, y + h - 28, w, 28)
         self._mr("pName%d" % i, bx - 12, by + PH + 10 + dy)
         self._mr("pYear%d" % i, bx - 12, by + PH + 40 + dy)
