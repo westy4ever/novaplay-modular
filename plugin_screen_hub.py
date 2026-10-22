@@ -90,6 +90,8 @@ POP_ZOOM = 0.08
 _CONT_PARTS = (("kEdge", 0, 0, _CONT_W, _CONT_H, True), ("kBox", 3, 3, _CONT_W - 6, _CONT_H - 6, True),
                ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, 336, 36, False),
                ("kSub", 106, 58, 336, 30, False), ("kBar", 106, 100, 330, 6, False))
+_SIDE_PARTS = (("rowBg", 0, 0, 332, 66, True), ("rowBar", 0, 0, 5, 66, True),
+               ("rowIcon", 18, 15, 36, 36, True), ("rowText", 70, 0, 256, 66, False))
 _SITE_PARTS = (("sEdge", 0, 0, _S_W, _S_H, True), ("sBox", 3, 3, _S_W - 6, _S_H - 6, True),
                ("sLogo", 18, 18, 132, 47, True), ("sDot", _S_W - 34, 34, 14, 14, False),
                ("sName", 18, 74, 310, 36, False), ("sTag", 18, 112, 310, 30, False))
@@ -379,6 +381,22 @@ class NovaPlayHub(Screen):
 
     def _placeCard(self, card, p):
         zone, i = card[0], card[1]
+        if zone == "side":
+            # section rows grow less (6 %) -- they nearly fill the panel width
+            x0, y0, W, H, parts = 54, _SIDE_Y0 + i * _SIDE_STEP, 332, 66, _SIDE_PARTS
+            k = 1.0 + 0.06 * p
+            cx, cy = x0 - (W * k - W) / 2.0, y0 - (H * k - H) / 2.0
+            for name, rx, ry, w, h, rs in parts:
+                inst = self["%s%d" % (name, i)].instance
+                if inst is None:
+                    continue
+                try:
+                    inst.move(ePoint(sc(cx + rx * k), sc(cy + ry * k)))
+                    if rs:
+                        inst.resize(eSize(max(1, sc(w * k)), max(1, sc(h * k))))
+                except Exception:
+                    pass
+            return
         if zone == "cont":
             x0, y0, W, H, parts = _CONT_X[i], _CONT_Y, _CONT_W, _CONT_H, _CONT_PARTS
         else:
@@ -397,7 +415,9 @@ class NovaPlayHub(Screen):
                 pass
 
     def _popFocus(self):
-        if self._zone == "cont" and self._cont:
+        if self._zone == "side":
+            card = ("side", self._sec, 0)
+        elif self._zone == "cont" and self._cont:
             card = ("cont", self._ci, 0)
         elif self._zone == "sites" and self._sites:
             card = ("sites", self._si % S_PAGE, self._si // S_PAGE)

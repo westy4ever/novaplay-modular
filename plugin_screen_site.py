@@ -364,6 +364,11 @@ class NovaPlaySite(Screen):
         self._infoTimer.callback.append(self._loadInfo)
         self._pop = eTimer()
         self._pop.callback.append(self._popTick)
+        self._catPop = eTimer()
+        self._catPop.callback.append(self._catPopTick)
+        self._cat_key = None
+        self._cat_slot = -1
+        self._cat_frame = 0
         self._carPop = eTimer()
         self._carPop.callback.append(self._carPopTick)
         self._car_frame = 0
@@ -404,7 +409,7 @@ class NovaPlaySite(Screen):
         self._loadCategories()
 
     def _stop(self):
-        for t in (self._clock, self._art, self._infoTimer, self._pop, self._carPop):
+        for t in (self._clock, self._art, self._infoTimer, self._pop, self._carPop, self._catPop):
             try:
                 t.stop()
             except Exception:
@@ -597,6 +602,9 @@ class NovaPlaySite(Screen):
             self._color("cBg%d" % i, bg=(ROW_ON_M if self._modern else ROW_ON) if on else PANEL)
             self["cBar%d" % i].show() if (on and side) else self["cBar%d" % i].hide()
             self._color("cText%d" % i, fg=WHITE if on else (MUTED if c.get("type") == "error" else TEXT))
+        self._catPopFocus(sel - top if (side and n and 0 <= sel - top < CAT_ROWS
+                                          and items[sel].get("type") != "separator") else -1,
+                          (len(self._levels), sel))
         pages = max(1, (n + CAT_ROWS - 1) // CAT_ROWS)
         self["catPage"].setText("{} / {}".format(sel + 1, n) if pages > 1 else "")
         if len(self._levels) > 1:
@@ -819,6 +827,54 @@ class NovaPlaySite(Screen):
             self._popFocus(view, n)
         self._scheduleInfo()
         self._applyLayout()
+
+    # ─── [pop-anim] category rows: the selected one grows 6 % ───────────
+
+    def _placeCat(self, i, p):
+        y = _CAT_Y0 + i * _CAT_STEP
+        W = 322 if self._modern else 332
+        k = 1.0 + 0.06 * p
+        cx, cy = 54 - (W * k - W) / 2.0, y - (_CAT_H * k - _CAT_H) / 2.0
+        if self._modern:
+            parts = (("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 10, 5, _CAT_H - 20, True),
+                     ("cText", 20, 0, 290, _CAT_H, False))
+        else:
+            parts = (("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 0, 5, _CAT_H, True),
+                     ("cText", 18, 0, 304, _CAT_H, False))
+        for name, rx, ry, w, h, rs in parts:
+            self._mr("%s%d" % (name, i), cx + rx * k, cy + ry * k,
+                     (w * k) if rs else None, (h * k) if rs else None)
+
+    def _catPopFocus(self, slot, key):
+        key = (slot,) + tuple(key) if slot >= 0 else None
+        if key == self._cat_key:
+            return
+        try:
+            self._catPop.stop()
+        except Exception:
+            pass
+        if 0 <= self._cat_slot < CAT_ROWS:
+            self._placeCat(self._cat_slot, 0.0)
+        self._cat_key = key
+        self._cat_slot = slot
+        if slot < 0:
+            return
+        self._cat_frame = 0
+        try:
+            self._catPop.start(POP_MS, False)
+        except Exception:
+            self._placeCat(slot, 1.0)
+
+    def _catPopTick(self):
+        if self._cat_slot < 0:
+            self._catPop.stop()
+            return
+        import math
+        self._cat_frame += 1
+        t = min(1.0, self._cat_frame / float(POP_FRAMES))
+        self._placeCat(self._cat_slot, math.sin(t * math.pi / 2))
+        if t >= 1.0:
+            self._catPop.stop()
 
     # ─── [theme] Modern: pop zoom on the selected poster ────────────────
 
