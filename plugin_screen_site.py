@@ -27,7 +27,7 @@ from novaplay_choice import NovaMessageBox as MessageBox
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
-from enigma import eTimer, ePoint, eSize
+from enigma import eTimer, ePoint, eSize, gFont
 
 try:
     from skin import parseColor
@@ -606,7 +606,9 @@ class NovaPlaySite(Screen):
                 self._color("cText%d" % i, fg=GOLD)
                 continue
             on = g == sel
-            self["cBg%d" % i].show()
+            # only the selected row has a box (same colour as the panel
+            # otherwise) -- so the growing row never slides under a neighbour
+            self["cBg%d" % i].show() if on else self["cBg%d" % i].hide()
             self._color("cBg%d" % i, bg=(ROW_ON_M if self._modern else ROW_ON) if on else PANEL)
             self["cEdge%d" % i].show() if (on and side) else self["cEdge%d" % i].hide()
             self["cBar%d" % i].show() if (on and side) else self["cBar%d" % i].hide()
@@ -887,21 +889,33 @@ class NovaPlaySite(Screen):
     # ─── [pop-anim] category rows: the selected one grows 6 % ───────────
 
     def _placeCat(self, i, p):
+        """[pop-anim] like the posters: the row grows in width AND height
+        (into the gap to its neighbours), its gold outline thickens and the
+        text gets 3 pt bigger."""
         y = _CAT_Y0 + i * _CAT_STEP
-        W = 322 if self._modern else 332
-        k = 1.0 + 0.06 * p
-        cx, cy = 54 - (W * k - W) / 2.0, y - (_CAT_H * k - _CAT_H) / 2.0
+        W, H = (322 if self._modern else 332), _CAT_H
+        dw, dh = 20.0 * p, float(_CAT_STEP - _CAT_H) * p
+        x0, y0 = 54 - dw / 2.0, y - dh / 2.0
+        w, h = W + dw, H + dh
+        o = 2 + 2 * p                                   # outline 2 -> 4 px
+        self._mr("cEdge%d" % i, x0 - o, y0 - o, w + 2 * o, h + 2 * o)
+        self._mr("cBg%d" % i, x0, y0, w, h)
         if self._modern:
-            parts = (("cEdge", -2, -2, W + 4, _CAT_H + 4, True),
-                     ("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 10, 5, _CAT_H - 20, True),
-                     ("cText", 20, 0, 290, _CAT_H, False))
+            self._mr("cBar%d" % i, x0, y0 + 10 * h / H, 5, h - 20 * h / H)
+            self._mr("cText%d" % i, x0 + 20, y0, w - 30, h)
+            base = 24
         else:
-            parts = (("cEdge", -2, -2, W + 4, _CAT_H + 4, True),
-                     ("cBg", 0, 0, W, _CAT_H, True), ("cBar", 0, 0, 5, _CAT_H, True),
-                     ("cText", 18, 0, 304, _CAT_H, False))
-        for name, rx, ry, w, h, rs in parts:
-            self._mr("%s%d" % (name, i), cx + rx * k, cy + ry * k,
-                     (w * k) if rs else None, (h * k) if rs else None)
+            self._mr("cBar%d" % i, x0, y0, 5, h)
+            self._mr("cText%d" % i, x0 + 18, y0, w - 28, h)
+            base = 25
+        size = sc(base + 3 * p)
+        inst = self["cText%d" % i].instance
+        if inst is not None and getattr(self, "_cat_font", {}).get(i) != size:
+            try:
+                inst.setFont(gFont("Regular", size))
+                self.__dict__.setdefault("_cat_font", {})[i] = size
+            except Exception:
+                pass
 
     def _catPopFocus(self, slot, key):
         key = (slot,) + tuple(key) if slot >= 0 else None

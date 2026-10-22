@@ -30,7 +30,7 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 from Components.ProgressBar import ProgressBar
-from enigma import eTimer, ePoint, eSize
+from enigma import eTimer, ePoint, eSize, gFont
 
 try:
     from skin import parseColor
@@ -368,6 +368,7 @@ class NovaPlayHub(Screen):
         for i, (_k, _t, ic) in enumerate(SECTIONS):
             on = i == self._sec
             self._color("rowBg%d" % i, bg=ROW_ON if on else PANEL)
+            self["rowBg%d" % i].show() if on else self["rowBg%d" % i].hide()
             self["rowEdge%d" % i].show() if (on and side) else self["rowEdge%d" % i].hide()
             self["rowBar%d" % i].show() if on else self["rowBar%d" % i].hide()
             self._color("rowText%d" % i, fg=WHITE if on else TEXT)
@@ -434,18 +435,33 @@ class NovaPlayHub(Screen):
     def _placeCard(self, card, p):
         zone, i = card[0], card[1]
         if zone == "side":
-            # section rows grow less (6 %) -- they nearly fill the panel width
-            x0, y0, W, H, parts = 54, _SIDE_Y0 + i * _SIDE_STEP, 332, 66, _SIDE_PARTS
-            k = 1.0 + 0.06 * p
-            cx, cy = x0 - (W * k - W) / 2.0, y0 - (H * k - H) / 2.0
-            for name, rx, ry, w, h, rs in parts:
+            # like the cards: wider AND taller (into the gap), thicker gold
+            # outline, icon and text grow too
+            W, H = 332, 66
+            dw, dh = 20.0 * p, float(_SIDE_STEP - H) * p
+            x0, y0 = 54 - dw / 2.0, _SIDE_Y0 + i * _SIDE_STEP - dh / 2.0
+            w, h = W + dw, H + dh
+            o = 2 + 2 * p
+            ic = 36 + 6 * p
+            for name, x, y, ww, hh in (("rowEdge", x0 - o, y0 - o, w + 2 * o, h + 2 * o),
+                                       ("rowBg", x0, y0, w, h), ("rowBar", x0, y0, 5, h),
+                                       ("rowIcon", x0 + 18, y0 + (h - ic) / 2.0, ic, ic),
+                                       ("rowText", x0 + 70 + 6 * p, y0, w - 76, h)):
                 inst = self["%s%d" % (name, i)].instance
                 if inst is None:
                     continue
                 try:
-                    inst.move(ePoint(sc(cx + rx * k), sc(cy + ry * k)))
-                    if rs:
-                        inst.resize(eSize(max(1, sc(w * k)), max(1, sc(h * k))))
+                    inst.move(ePoint(sc(x), sc(y)))
+                    inst.resize(eSize(max(1, sc(ww)), max(1, sc(hh))))
+                except Exception:
+                    pass
+            size = sc(28 + 3 * p)
+            inst = self["rowText%d" % i].instance
+            fonts = self.__dict__.setdefault("_side_font", {})
+            if inst is not None and fonts.get(i) != size:
+                try:
+                    inst.setFont(gFont("Regular", size))
+                    fonts[i] = size
                 except Exception:
                     pass
             return
