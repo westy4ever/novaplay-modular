@@ -30,7 +30,6 @@ except ImportError:
 from Screens.Screen import Screen
 from Components.ActionMap import ActionMap
 from Components.Label import Label
-from Components.MenuList import MenuList
 
 from novaplay_thread import callInMainThread
 from plugin_gridlist import scale_skin_xml
@@ -158,7 +157,7 @@ class NovaDiagnosticsScreen(Screen):
         <eLabel position="0,0" size="1500,860" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
         <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
         <widget name="header" position="40,18" size="1420,44" font="Bold;32" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
+        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
         <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
     </screen>""")
 
@@ -168,7 +167,9 @@ class NovaDiagnosticsScreen(Screen):
         self.rows = []
         self["header"] = Label("Diagnostics — running…")
         self["hint"] = Label("EXIT = close (site probes are slow)")
-        self["list"] = MenuList([])
+        from novaplay_cardlist import CardList
+        self["list"] = CardList(width=1440, row_h=48, title_size=24)   # [diag-ui]
+        self._done = False
         self["actions"] = ActionMap(["OkCancelActions"], {
             "ok": self._noop,
             "cancel": self.close,
@@ -180,12 +181,73 @@ class NovaDiagnosticsScreen(Screen):
 
     def _run(self):
         def on_row(name, status):
-            callInMainThread(self._add_row, "%s:  %s" % (name, status))
+            callInMainThread(self._add_row, name, status)
         run_diagnostics(on_row, lambda: callInMainThread(self._finish))
 
-    def _add_row(self, text):
-        self.rows.append((text,))
-        self["list"].setList(self.rows)
+    # ── [diag-ui] grouped, coloured results + a summary in the header ──
+    _GROUPS = (
+        ("Dependencies", ("curl_cffi", "brotli", "pillow", "cryptography", "requests", "yt-dlp",
+                          "ffmpeg", "serviceapp", "exteplayer3")),
+        ("Network", ("network", "browser proxy", "local proxy", "proxy stats")),
+        ("API keys", ("api key",)),
+        ("TorrServer", ("torrserver",)),
+        ("Disk", ("disk",)),
+        ("Sites", ("site base",)),
+    )
+
+    @classmethod
+    def _groupOf(cls, name):
+        n = name.lower()
+        for g, keys in cls._GROUPS:
+            if any(k in n for k in keys):
+                return g
+        return "Other"
+
+    @staticmethod
+    def _kind(name, status):
+        """ok / warn / fail / skip / info"""
+        st = str(status)
+        if st == "OK":
+            return "ok"
+        if st == "SKIP":
+            return "skip"
+        if st == "FAIL":
+            optional = "optional" in name.lower() or "browser proxy" in name.lower()
+            return "warn" if optional else "fail"
+        if st.startswith("ERROR"):
+            return "fail"
+        return "info"
+
+    def _add_row(self, name, status):
+        self.rows.append((name, status))
+        self._paint()
+
+    def _paint(self):
+        from novaplay_cardlist import line, header_row, GREEN, ORANGE, RED, GREY, MUTED
+        icon = {"ok": (u"\u2713", GREEN), "warn": (u"\u26a0", ORANGE), "fail": (u"\u2717", RED),
+                "skip": (u"\u2013", GREY), "info": (u"\u2022", MUTED)}
+        word = {"ok": "OK", "warn": "Not set", "fail": "Failed", "skip": "Skipped"}
+        order = [g for g, _ in self._GROUPS] + ["Other"]
+        out = []
+        for g in order:
+            items = [(n, st) for n, st in self.rows if self._groupOf(n) == g]
+            if not items:
+                continue
+            out.append(header_row(None, 1440, 48, g))
+            for n, st in items:
+                k = self._kind(n, st)
+                ic, col = icon[k]
+                right = word.get(k) or str(st)
+                if str(st).startswith("ERROR"):
+                    right = str(st)
+                out.append(line((n, st), 1440, 48, n, icon=ic, icon_color=col, right=right,
+                                right_color=col if k in ("warn", "fail") else MUTED))
+        self["list"].setRows(out)
+        kinds = [self._kind(n, st) for n, st in self.rows]
+        summ = u"%d OK  \u00b7  %d warning%s  \u00b7  %d failed" % (
+            kinds.count("ok"), kinds.count("warn"), "" if kinds.count("warn") == 1 else "s", kinds.count("fail"))
+        self["header"].setText(u"Diagnostics \u2014 " + summ + ("" if self._done else u"   (running\u2026)"))
 
     def _finish(self):
-        self["header"].setText("Diagnostics — done (%d checks)" % len(self.rows))
+        self._done = True
+        self._paint()

@@ -1795,8 +1795,8 @@ class NovaOnlineSubsScreen(Screen):
         <eLabel position="0,0" size="1700,940" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
         <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
         <widget name="header" position="50,20" size="1600,50" font="Bold;38" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-        <widget name="list" position="40,110" size="1620,720" scrollbarMode="showOnDemand" foregroundColor="#F0F6FC" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" font="Regular;40" itemHeight="60" zPosition="2" />
-        <widget name="hint" position="50,860" size="1600,40" font="Regular;28" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
+        <widget name="list" position="40,110" size="1620,688" scrollbarMode="showOnDemand" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
+        <widget name="hint" position="50,860" size="1600,40" font="Regular;24" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
     </screen>"""
 
     def __init__(self, session, title="", video_url="", provider="subsource", api_key=""):
@@ -1812,13 +1812,92 @@ class NovaOnlineSubsScreen(Screen):
         prov_name = _PROVIDERS[self.provider]["name"]
 
         self["header"] = Label("Searching %s ..." % prov_name)
-        self["hint"] = Label("OK = download      EXIT = back")
-        self["list"] = MenuList([])
-        self["actions"] = ActionMap(["OkCancelActions"], {
+        self["hint"] = Label(u"OK download   \u00b7   \u25b2\u25bc move   \u00b7   \u25c0\u25b6 page   \u00b7   EXIT back")
+        from novaplay_cardlist import CardList
+        self["list"] = CardList(width=1620, row_h=86)      # [subs-ui] two-line cards
+        self["actions"] = ActionMap(["OkCancelActions", "DirectionActions"], {
             "ok": self._ok,
             "cancel": self._cancel,
+            "left": self._pageUp,
+            "right": self._pageDown,
         }, -1)
         threading.Thread(target=self._searchThread, daemon=True).start()
+
+    def _pageUp(self):
+        try:
+            self["list"].instance.moveSelection(self["list"].instance.pageUp)
+        except Exception:
+            pass
+
+    def _pageDown(self):
+        try:
+            self["list"].instance.moveSelection(self["list"].instance.pageDown)
+        except Exception:
+            pass
+
+    # ── [subs-ui] how well a release fits the playing file ───────────
+    _NOISE = set("mkv mp4 avi ts m3u8 stream play link index www com net org".split())
+
+    def _fileTokens(self):
+        """words of the playing file's release name that are not the title
+        itself (1080p, web, dl, flux, ...); [] when the URL has no name"""
+        try:
+            from urllib.parse import urlparse, unquote
+            base = unquote(urlparse(self.video_url).path.rsplit("/", 1)[-1])
+        except Exception:
+            base = ""
+        base = re.sub(r"\.[a-z0-9]{2,4}$", "", base.lower())
+        title_words = set(re.findall(r"[a-z0-9]+", self.search_title.lower()))
+        toks = [t for t in re.findall(r"[a-z0-9]+", base)
+                if t not in title_words and t not in self._NOISE and not re.match(r"^(19|20)\d\d$", t)
+                and len(t) >= 2 and not re.match(r"^[0-9a-f]{16,}$", t)]
+        return list(dict.fromkeys(toks)) if len(set(toks)) >= 2 else []
+
+    @staticmethod
+    def _kfmt(n):
+        n = int(n or 0)
+        if n >= 1000000:
+            return "%.1fM" % (n / 1000000.0)
+        if n >= 1000:
+            return "%dk" % (n // 1000)
+        return str(n)
+
+    def _cardRows(self, items):
+        from novaplay_cardlist import card, CHIP_BG, GOLD, DARK, GREEN
+        ft = self._fileTokens()
+        pcts = []
+        for it in items:
+            if ft:
+                rel = set(re.findall(r"[a-z0-9]+", str(it.get("title") or "").lower()))
+                pcts.append(int(round(100.0 * sum(1 for t in ft if t in rel) / len(ft))))
+            else:
+                pcts.append(-1)
+        # BEST: the top language group (the list is sorted Arabic first), best fit there
+        best = -1
+        if len(items) >= 2:
+            lang0 = str(items[0].get("language") or "").lower()
+            group = [i for i, it in enumerate(items) if str(it.get("language") or "").lower() == lang0]
+            best = max(group, key=lambda i: (pcts[i], -i)) if group else 0
+        prov = _PROVIDERS[self.provider]["name"]
+        rows = []
+        for i, it in enumerate(items):
+            lang = str(it.get("language") or "").strip()
+            is_ar = lang.lower() in ("arabic", "ar", "ara", u"العربية")
+            chips = []
+            if lang:
+                chips.append((lang, DARK if is_ar else 0xF0F6FC, GOLD if is_ar else 0x2E3A4D))
+            chips.append(prov)
+            if pcts[i] > 0:
+                chips.append(("%d%% match" % pcts[i], 0xF0F6FC if pcts[i] >= 70 else 0xC9D0DA,
+                              0x1E7A4A if pcts[i] >= 70 else CHIP_BG))
+            if it.get("downloads"):
+                chips.append(u"\u2b07 " + self._kfmt(it["downloads"]))
+            if "(HI)" in str(it.get("label") or ""):
+                chips.append("HI")
+            title = str(it.get("title") or it.get("label") or "Subtitle")
+            rows.append(card(i, 1620, 86, title, chips,
+                             badge=("BEST", DARK, GOLD) if i == best else None))
+        return rows
 
     def _searchThread(self):
         title = self.search_title
@@ -1890,10 +1969,10 @@ class NovaOnlineSubsScreen(Screen):
             self._fail(error or 'No subtitles found.')
             return
         self.results = [i for _, i in pairs]
-        self["list"].setList([l for l, _ in pairs])
+        self["list"].setRows(self._cardRows(self.results))
         ar = sum(1 for i in self.results if str(i.get("language", "")).lower() in ("arabic", "ar", "ara", "العربية"))
         en = sum(1 for i in self.results if str(i.get("language", "")).lower() in ("english", "en", "eng"))
-        self["header"].setText("%s: %d subs — Arabic %d / English %d (scroll down)" % (
+        self["header"].setText(u"%s  \u00b7  %d subtitles  \u00b7  Arabic %d  \u00b7  English %d" % (
             _PROVIDERS[self.provider]["name"], len(pairs), ar, en))
         
     def _onDownloadDone(self, ok, error, path):
@@ -1942,7 +2021,7 @@ class NovaSubtitleBrowser(Screen):
         <eLabel position="0,0" size="1500,860" backgroundColor="#121822" cornerRadius="18" zPosition="0" />
         <eLabel position="40,78" size="140,4" backgroundColor="#F2C230" cornerRadius="2" zPosition="2" />
         <widget name="path" position="40,18" size="1420,44" font="Bold;30" foregroundColor="#F2C230" transparent="1" zPosition="2" />
-        <widget name="list" position="30,100" size="1440,680" scrollbarMode="showOnDemand" foregroundColor="#D6DCE5" foregroundColorSelected="#F2C230" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
+        <widget name="list" position="30,100" size="1440,672" scrollbarMode="showOnDemand" backgroundColor="#121822" backgroundColorSelected="#2B3648" zPosition="2" />
         <widget name="hint" position="40,800" size="1420,36" font="Regular;24" foregroundColor="#A3ADBB" transparent="1" zPosition="2" />
     </screen>"""
 
@@ -1957,8 +2036,9 @@ class NovaSubtitleBrowser(Screen):
         self.current_dir = start_dir or subtitle_dir() or "/media/hdd"
 
         self["path"] = Label(self.current_dir)
-        self["hint"] = Label("OK = select      EXIT = up / back")
-        self["list"] = MenuList([])
+        self["hint"] = Label(u"OK open / select   \u00b7   EXIT up a folder / back")
+        from novaplay_cardlist import CardList
+        self["list"] = CardList(width=1440, row_h=56, title_size=26)   # [subs-ui]
         self["actions"] = ActionMap(["OkCancelActions"], {
             "ok": self._ok,
             "cancel": self._cancel,
@@ -1983,15 +2063,29 @@ class NovaSubtitleBrowser(Screen):
                 if sc > best_score:
                     best_score, best_path = sc, full
 
-        labels = []
+        # [subs-ui] folder / file icons, size + date in grey, BEST in gold
+        from novaplay_cardlist import line, GOLD, MUTED
+        rows = []
         self.entries = []
-        for name, full, is_dir in entries:
+        for n_, (name, full, is_dir) in enumerate(entries):
             if is_dir:
-                labels.append("[ %s ]" % name)
+                rows.append(line(n_, 1440, 56, name, icon=u"\U0001F4C1", icon_color=GOLD))
             else:
-                labels.append(name + ("  [BEST]" if full == best_path and best_score > 0 else ""))
+                info = ""
+                try:
+                    st = os.stat(full)
+                    kb = st.st_size / 1024.0
+                    info = ("%.1f MB" % (kb / 1024.0) if kb >= 1024 else "%d KB" % max(1, kb)) + \
+                        "   " + time.strftime("%d %b %Y", time.localtime(st.st_mtime))
+                except Exception:
+                    pass
+                best = full == best_path and best_score > 0
+                rows.append(line(n_, 1440, 56, name, icon=u"\U0001F4C4", icon_color=MUTED,
+                                 right=(u"\u2605 BEST   " + info) if best else info,
+                                 right_color=GOLD if best else MUTED,
+                                 text_color=0xF2C230 if best else 0xF0F6FC))
             self.entries.append((name, full, is_dir))
-        self["list"].setList(labels)
+        self["list"].setRows(rows)
         self["path"].setText(self.current_dir or "/")
 
     # ── _ok / _cancel are the only new code in this class (the original
