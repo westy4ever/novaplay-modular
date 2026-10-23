@@ -157,10 +157,30 @@ def check_logic():
            ("20 min left", 33))
 
 
+def check_sites_offline():
+    print("\n[4] sites, played back from recordings (tests/fixtures)")
+    import test_sites_offline as T
+    paths = T.fixtures()
+    if not paths:
+        ok("no recordings yet (run_site_test.py <site> --record on the box)")
+        return
+    for p in paths:
+        try:
+            good, lines = T.replay(p)
+        except Exception as e:
+            fail("%s: %r" % (os.path.basename(p), e))
+            continue
+        if good:
+            ok(lines[0])
+        else:
+            fail(lines[0] + "\n        " + "\n        ".join(lines[1:]))
+
+
 def main():
     check_compile()
     check_screens()
     check_logic()
+    check_sites_offline()
     print("\n%s" % ("ALL PASSED" if not FAILS else "%d FAILED" % len(FAILS)))
     return 1 if FAILS else 0
 

@@ -522,6 +522,51 @@ def test_site(name, ext, args, quick=False):
     return rep
 
 
+# ─── [tape] record a run for the offline tests ──────────────────────────────
+FIXTURE_DIR = "/tmp/novaplay_fixtures"
+
+
+def normalize_report(lines):
+    """the parts of a report that must be the same when a recorded run is
+    played back: step status + title (no times); a server step keeps only its
+    title and first detail line (what extract_stream returned)"""
+    import re as _re
+    out, in_server, first = [], False, False
+    for line in lines:
+        if line.startswith("["):
+            m = _re.match(r"^\[(\w+)\s*\] (.*?)(?: \(\d+(?:\.\d+)?s\))?$", line)
+            if not m:
+                continue
+            status, title = m.group(1), m.group(2)
+            in_server = title.startswith("server ")
+            first = True
+            out.append("{} {}".format(status, title))
+        elif line.startswith("         ") and line.strip():
+            if in_server and not first:
+                continue
+            first = False
+            out.append("    " + line.strip())
+    return out
+
+
+def record_fixture(key, args, rep, responses, stream_checks):
+    import gzip
+    import json
+    try:
+        os.makedirs(FIXTURE_DIR)
+    except OSError:
+        pass
+    path = os.path.join(FIXTURE_DIR, "{}.json.gz".format(key))
+    fx = {"version": 1, "site": key, "target": str(args.target), "recorded": time.strftime("%Y-%m-%d %H:%M:%S"),
+          "args": {"page": args.page, "search": args.search, "servers": args.servers,
+                   "all_servers": bool(args.all_servers)},
+          "responses": responses, "stream_checks": stream_checks,
+          "expected": normalize_report(rep.lines)}
+    with gzip.open(path, "wt") as f:
+        json.dump(fx, f)
+    return path
+
+
 def apply_plugin_settings():
     """Use the same browser-proxy setting the plugin applies at startup
     (plugin.py), so Cloudflare-protected sites behave exactly as on screen."""
@@ -544,6 +589,8 @@ def main():
     ap.add_argument("--servers", type=int, default=5, help="max servers to try (default 5)")
     ap.add_argument("--all-servers", action="store_true", help="keep testing servers after one works")
     ap.add_argument("--only", help="with --all: comma-separated site keys to check")
+    ap.add_argument("--record", action="store_true",
+                    help="save this run's pages for the offline tests (/tmp/novaplay_fixtures/<site>.json.gz)")
     ap.add_argument("--old-ua", action="store_true",
                     help="check with the old Chrome/120 browser identity (A/B against Chrome/155)")
     args = ap.parse_args()
@@ -595,7 +642,24 @@ def main():
         return 2
 
     name, ext = load_extractor(args.target)
+    stream_checks = {}
+    if args.record:
+        import extractors.net as _net
+        _net.tape_start("record")
+        global check_stream
+        _real_check = check_stream
+
+        def check_stream(stream_url, referer=None):     # noqa: F811 -- recording wrapper
+            res = _real_check(stream_url, referer)
+            stream_checks["{} | {}".format(stream_url, referer or "")] = list(res)
+            return res
     rep = test_site(name, ext, args)
+    if args.record:
+        _net.tape_stop()
+        check_stream = _real_check
+        fx = record_fixture(args.target if os.sep not in str(args.target) else name, args, rep,
+                            _net._TAPE["data"], stream_checks)
+        rep.out("recorded for the offline tests: {}  ({} pages)".format(fx, len(_net._TAPE["data"])))
     rep.out("-" * 64)
     verdict = "FAILED" if rep.fails else ("PASSED with warnings" if rep.warns else "PASSED")
     rep.out("RESULT: {}  ({} fail, {} warn)".format(verdict, rep.fails, rep.warns))

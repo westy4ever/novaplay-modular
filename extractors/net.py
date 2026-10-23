@@ -746,10 +746,61 @@ def _apply_browser_cookies(url, headers):
         headers["User-Agent"] = ua
 
 
+# [tape 2026-10-23] offline site tests: run_site_test.py --record saves every
+# fetch() answer of a run ("record"); tests/ plays them back without network
+# ("replay"). Off (None) in the plugin itself.
+_TAPE = {"mode": None, "data": {}, "missing": []}
+
+
+def _tape_key(url, post_data):
+    if post_data:
+        import hashlib
+        raw = post_data if isinstance(post_data, bytes) else str(post_data).encode("utf-8", "replace")
+        return "POST {} #{}".format(url, hashlib.sha1(raw).hexdigest()[:12])
+    return "GET {}".format(url)
+
+
+def tape_start(mode, data=None):
+    _TAPE["mode"] = mode
+    _TAPE["data"] = data if data is not None else {}
+    _TAPE["missing"] = []
+
+
+def tape_stop():
+    _TAPE["mode"] = None
+
+
+def _tape_fetch(url, referer, extra_headers, post_data, timeout, max_retries):
+    key = _tape_key(url, post_data)
+    if _TAPE["mode"] == "replay":
+        hit = _TAPE["data"].get(key)
+        if hit is None:
+            _TAPE["missing"].append(key)
+            return None, url
+        body = hit.get("t")
+        if body is None and hit.get("b") is not None:
+            import base64
+            body = base64.b64decode(hit["b"])
+        return body, hit.get("u") or url
+    res = _fetch(url, referer, extra_headers, post_data, timeout, max_retries)
+    try:
+        body, final = (res if isinstance(res, tuple) else (res, url))[:2]
+        if isinstance(body, bytes):
+            import base64
+            _TAPE["data"][key] = {"b": base64.b64encode(body).decode("ascii"), "u": final}
+        else:
+            _TAPE["data"][key] = {"t": body, "u": final}
+    except Exception:
+        pass
+    return res
+
+
 def fetch(url, referer=None, extra_headers=None, post_data=None,
            timeout=None, max_retries=None):
     """same as _fetch(); with Debug Log on, one line per request:
     URL, result size and time"""
+    if _TAPE["mode"]:
+        return _tape_fetch(url, referer, extra_headers, post_data, timeout, max_retries)
     if not debug_enabled():
         return _fetch(url, referer, extra_headers, post_data, timeout, max_retries)
     t0 = time.time()
