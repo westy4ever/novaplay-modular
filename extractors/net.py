@@ -753,6 +753,9 @@ _TAPE = {"mode": None, "data": {}, "missing": []}
 
 
 def _tape_key(url, post_data):
+    # API keys never go into a recording (the repo may be public); the same
+    # mask on playback still matches
+    url = re.sub(r"((?:api_key|apikey|key|token)=)[^&]+", r"\1****", str(url))
     if post_data:
         import hashlib
         raw = post_data if isinstance(post_data, bytes) else str(post_data).encode("utf-8", "replace")
