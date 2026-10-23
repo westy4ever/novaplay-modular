@@ -196,6 +196,13 @@ def _detail_skin_modern():
 
         <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
         <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
+        <widget name="torLead" position="-400,-100" size="200,40" font="Bold;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="6" />
+        <widget name="tq0" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq1" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq2" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq3" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq4" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="torHint" position="-400,-100" size="200,40" font="Regular;20" valign="center" foregroundColor="#8C96A5" transparent="1" zPosition="6" />
         <widget name="svPos" position="1230,706" size="620,36" font="Regular;20" halign="right" foregroundColor="#A3ADBB" backgroundColor="#121822" transparent="1" zPosition="4" />
         <widget name="menu" position="440,700" size="930,60" zPosition="0" scrollbarMode="showNever" transparent="1" backgroundColor="#121822" backgroundColorSelected="#121822" />
         <widget name="svLeft" position="48,800" size="40,64" font="Regular;52" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
@@ -420,6 +427,13 @@ class NovaPlayDetail(Screen):
         <widget name="source" position="62,662" size="316,280" font="Regular;22" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
 
         <widget name="section" position="430,152" size="950,48" font="Bold;30" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
+        <widget name="torLead" position="-400,-100" size="200,40" font="Bold;26" valign="center" foregroundColor="#FFFFFF" transparent="1" zPosition="6" />
+        <widget name="tq0" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq1" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq2" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq3" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="tq4" position="-400,-100" size="120,40" font="Bold;22" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" transparent="0" cornerRadius="20" zPosition="6" />
+        <widget name="torHint" position="-400,-100" size="200,40" font="Regular;20" valign="center" foregroundColor="#8C96A5" transparent="1" zPosition="6" />
         <widget name="menu_box" position="430,210" size="950,750" backgroundColor="#161C26" cornerRadius="14" zPosition="2" />
         <widget name="menu" position="440,222" size="930,720" zPosition="4"
                 scrollbarMode="showNever"
@@ -615,6 +629,15 @@ class NovaPlayDetail(Screen):
         self["plot_title"] = Label("Plot")
         self["plot"]   = Label("")
         self["section"] = Label("Preparing...")
+        self["torLead"] = Label("")
+        self["torHint"] = Label("")
+        for _i in range(5):
+            self["tq%d" % _i] = Label("")
+        self._tq_geo = {}
+        self._tq_pop = -1
+        self._tq_f = 0
+        self._tqT = eTimer()
+        self._tqT.callback.append(self._tqTick)
         self["menu"]   = StreamList(width=930)
         self["siteLogo"] = Pixmap()
         self["clock_time"] = Label("")
@@ -1522,6 +1545,12 @@ class NovaPlayDetail(Screen):
         # any list with 2+ torrents (YTS adds embed servers after its torrents)
         if sum(1 for x in srv if str(x.get("url", "")).startswith("magnet:")) >= 2:
             self._tor_all = srv
+            # [tor-tabs] open on the quality chosen in Settings when it has torrents
+            pref = str(_get_config("torrent_quality", "1080p") or "1080p")
+            if pref in self._TOR_BUCKETS and self._torCounts().get(pref):
+                self._tor_filter = pref
+                self._servers = [x for x in srv if str(x.get("url", "")).startswith("magnet:")
+                                 and self._torBucket(x) == pref]
         try:
             self["key_yellow"].setText(self._yellowLabel())
         except Exception:
@@ -1538,20 +1567,119 @@ class NovaPlayDetail(Screen):
 
     def _yellowLabel(self):
         if getattr(self, "_tor_all", None):
-            return u"Quality: {}".format(self._tor_filter)
+            return u"Quality \u25b8"
         return "Update TMDb"
+
+    # ── [tor-tabs] quality filter as pill tabs ───────────────────────
+    _TQ_GOLD, _TQ_OFF, _TQ_TXT = "#F2C230", "#2A3342", "#D6DCE5"
+
+    def _tqHide(self):
+        try:
+            self._tqT.stop()
+        except Exception:
+            pass
+        self._tq_pop = -1
+        for k in ["torLead", "torHint"] + ["tq%d" % i for i in range(5)]:
+            try:
+                self[k].hide()
+            except Exception:
+                pass
+
+    def _setSection(self, text):
+        """section line for anything but the torrent tabs"""
+        self._tqHide()
+        try:
+            self["section"].setText(text)
+            self["section"].show()
+        except Exception:
+            pass
+
+    def _tqRow(self):
+        # (x, y, h, right edge) of the tab row, same place as the section line
+        if getattr(self, "_modern", False):
+            return 70, 704, 40, 1220
+        return 430, 156, 40, 1380
+
+    def _paintTorTabs(self, pop=True):
+        c = self._torCounts()
+        tabs = [b for b in self._TOR_BUCKETS if b == "All" or c[b]]
+        x, y, h, right = self._tqRow()
+        self["section"].setText("")
+        lead = u"🧲 Torrents"
+        lw = 190 if getattr(self, "_modern", False) else 196
+        self["torLead"].setText(lead)
+        self._moveResize("torLead", x, y, lw, h)
+        self["torLead"].show()
+        cx = x + lw
+        active = -1
+        self._tq_geo = {}
+        for i in range(5):
+            k = "tq%d" % i
+            if i >= len(tabs):
+                self[k].hide()
+                continue
+            b = tabs[i]
+            n = c["All"] + c["_other"] if b == "All" else c[b]
+            txt = u"{} {}".format(b, n)
+            w = 30 + 13 * len(txt)
+            on = b == self._tor_filter
+            if on:
+                active = i
+            self[k].setText(txt)
+            self._svColor(k, bg=self._TQ_GOLD if on else self._TQ_OFF,
+                          fg="#0C1017" if on else self._TQ_TXT)
+            self._tq_geo[i] = (cx, y, w, h)
+            self._moveResize(k, cx, y, w, h)
+            self[k].show()
+            cx += w + 12
+        hint = u"\u25c0 CH- / CH+ \u25b6" if getattr(self, "_modern", False) else u"\u25c0 CH \u25b6"
+        hw = 190 if getattr(self, "_modern", False) else 90
+        if len(tabs) > 1 and cx + hw <= right:
+            self["torHint"].setText(hint)
+            self._moveResize("torHint", cx + 6, y, hw, h)
+            self["torHint"].show()
+        else:
+            self["torHint"].hide()
+        if pop and active >= 0 and anim_frames() > 1:
+            self._tq_pop = active
+            self._tq_f = 0
+            self._tqPlace(active, 0.0)
+            try:
+                self._tqT.start(POP_ANIM_INTERVAL, False)
+            except Exception:
+                self._tqPlace(active, 1.0)
+
+    def _tqPlace(self, i, p):
+        g = self._tq_geo.get(i)
+        if not g:
+            return
+        x, y, w, h = g
+        # grows ~14% and settles back: a quick "pop" on the new tab
+        import math
+        s = 1.0 + 0.14 * math.sin(p * math.pi)
+        nw, nh = w * s, h * s
+        self._moveResize("tq%d" % i, x - (nw - w) / 2.0, y - (nh - h) / 2.0, nw, nh)
+
+    def _tqTick(self):
+        if self._tq_pop < 0 or getattr(self, "_closed", False):
+            self._tqT.stop()
+            return
+        self._tq_f += 1
+        t = min(1.0, self._tq_f / float(max(1, anim_frames())))
+        self._tqPlace(self._tq_pop, t)
+        if t >= 1.0:
+            self._tqT.stop()
+            self._tqPlace(self._tq_pop, 1.0)
+            self._tq_pop = -1
 
     def _setServerSection(self):
         if getattr(self, "_tor_all", None):
-            c = self._torCounts()
-            tabs = u"   ".join((u"[{}]" if b == self._tor_filter else u"{}").format(
-                u"{} {}".format(b, c[b]) if b != "All" else u"All")
-                for b in self._TOR_BUCKETS if b == "All" or c[b])
-            other = u"   + {} other".format(c["_other"]) if (c["_other"] and self._tor_filter == "All") else u""
-            self["section"].setText(_single_line_text(
-                u"🧲 Torrents {}   {}{}".format(c["All"], tabs, other), width=90))
+            try:
+                self._paintTorTabs()
+            except Exception as e:
+                my_log("torrent tabs: {}".format(e))
         else:
-            self["section"].setText(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
+            self._setSection(_single_line_text("Available servers: {}  |  pick a quality or server".format(len(self._servers)), width=90))
 
     def _onYellow(self):
         if getattr(self, "_tor_all", None):
@@ -1630,7 +1758,7 @@ class NovaPlayDetail(Screen):
             self._closeLater.start(10, True)
 
     def _onCloseCleanup(self):
-        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer", "_clockTimer", "_svPopT"):
+        for t in ("_reveal_timer", "_stagger_timer", "_progress_timer", "_clockTimer", "_svPopT", "_tqT"):
             try:
                 timer = getattr(self, t, None)
                 if timer:
@@ -2093,7 +2221,7 @@ class NovaPlayDetail(Screen):
             _list_label = "Available seasons" if _all_seasons else "Available episodes"
             _pick_hint = "Choose a season" if _all_seasons else "Choose an episode"
             _ok_hint = "Choose a season — OK" if _all_seasons else "Choose an episode — OK"
-            self["section"].setText(_single_line_text("{}: {}  |  {}".format(_list_label, len(self._episodes), _pick_hint), width=90))
+            self._setSection(_single_line_text("{}: {}  |  {}".format(_list_label, len(self._episodes), _pick_hint), width=90))
             items = [self._format_episode_item(ep) for ep in self._episodes]
             self._setMenuStaggered(items)
             self["status"].setText(self._status_hint(_ok_hint))
@@ -2103,11 +2231,11 @@ class NovaPlayDetail(Screen):
             self._setMenuStaggered(items)
             self["status"].setText(self._status_hint("Choose a server — OK"))
         elif is_series_item:
-            self["section"].setText("Available episodes: 0")
+            self._setSection("Available episodes: 0")
             self._setMenu([("No episodes available", "", "", "")])
             self["status"].setText("No episodes")
         else:
-            self["section"].setText("Available servers: 0")
+            self._setSection("Available servers: 0")
             self._setMenu([("No servers available", "", "", "")])
             self["status"].setText("No servers")
 
@@ -2716,7 +2844,7 @@ class NovaPlayDetail(Screen):
             _qt = ("4K" if _qm.group(0).lower() == "4k" or _qm.group(1) == "2160" else _qm.group(1) + "P") if _qm else "HD"
             quality_labels.append((_qt, label, "", ""))
 
-        self["section"].setText(_single_line_text("Available qualities: {}  |  pick a quality".format(len(choices)), width=90))
+        self._setSection(_single_line_text("Available qualities: {}  |  pick a quality".format(len(choices)), width=90))
         # [detail-stagger] quality menu pops in one row at a time
         self._setMenuStaggered(quality_labels)
         self["status"].setText(self._status_hint("Choose a quality — OK"))
