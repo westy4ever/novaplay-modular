@@ -397,6 +397,10 @@ class NovaPlaySettings(Screen):
             lib.insert(4, ("trailermode", "grid", "Trailer",
                            "Download" if _get_config("trailer_mode", "stream") == "download" else "Stream first",
                            "Stream first: starts at once (360p) when YouTube allows; Download: sharper 480p, waits"))
+            _tq = str(_get_config("torrent_quality", "1080p") or "1080p")
+            lib.insert(len(lib) - 1, ("torrquality", "magnet", "Torrent Quality",
+                                      {"720p": "720p first", "4K": "4K first", "any": "Most seeders"}.get(_tq, "1080p first"),
+                                      "Which torrents are listed first (each quality sorted by seeders)"))
             _am = str(_get_config("anim_mode", "full") or "full")
             lib.insert(3, ("animmode", "grid", "Animations",
                            {"light": "Light", "off": "Off"}.get(_am, "Full"),
@@ -702,6 +706,11 @@ class NovaPlaySettings(Screen):
             self._refresh()
         elif key == "trailermode":
             _set_config("trailer_mode", "stream" if _get_config("trailer_mode", "stream") == "download" else "download")
+            self._refresh()
+        elif key == "torrquality":
+            _order = ["1080p", "720p", "4K", "any"]
+            _cur = str(_get_config("torrent_quality", "1080p") or "1080p")
+            _set_config("torrent_quality", _order[(_order.index(_cur) + 1) % 4 if _cur in _order else 1])
             self._refresh()
         elif key == "animmode":
             _order = ["full", "light", "off"]

@@ -1203,6 +1203,9 @@ class NovaPlayDetail(Screen):
         dict_size = str(s.get("size") or "").strip()
         if dict_seeders or dict_size:
             seeders = "Seeders: " + dict_seeders if dict_seeders else ""
+            if dict_seeders.isdigit() and int(dict_seeders) < 5 and \
+                    str(s.get("url", "")).startswith("magnet:"):
+                seeders += " (weak)"      # [2026-10-23] likely to buffer
             size = "Size: " + dict_size if dict_size else ""
             seeders_source = " | ".join([x for x in [seeders] if x])
             return (quality, release_name, size, seeders_source)
@@ -1477,7 +1480,42 @@ class NovaPlayDetail(Screen):
             return "720p"
         return "SD"
 
+    @staticmethod
+    def _torSeeds(sv):
+        try:
+            return int(re.sub(r"[^\d]", "", str(sv.get("seeders") or "")) or -1)
+        except Exception:
+            return -1
+
+    _TOR_PREF = {"1080p": ("1080p", "720p", "4K", "SD"),
+                 "720p": ("720p", "1080p", "SD", "4K"),
+                 "4K": ("4K", "1080p", "720p", "SD")}
+
+    def _orderTorrents(self, srv):
+        """[2026-10-23] magnets: the quality chosen in Settings first, then by
+        seeders inside each quality (more seeders = fills the buffer faster);
+        CAM/TS copies last. Non-magnet servers keep their place after them."""
+        mags = [x for x in srv if str(x.get("url", "")).startswith("magnet:")]
+        if len(mags) < 2:
+            return srv
+        pref = str(_get_config("torrent_quality", "1080p") or "1080p")
+        order = self._TOR_PREF.get(pref)
+
+        def key(sv):
+            q = "{} {}".format(sv.get("quality") or "", sv.get("name") or "").upper()
+            cam = 1 if re.search(r"\b(HD-?CAM|CAM|TELESYNC|HDTS|TS)\b", q) else 0
+            b = self._torBucket(sv)
+            rank = order.index(b) if order and b in order else 0
+            return (cam, rank, -self._torSeeds(sv))
+        mags.sort(key=key)
+        it = iter(mags)
+        return [next(it) if str(x.get("url", "")).startswith("magnet:") else x for x in srv]
+
     def _initTorrentFilter(self):
+        try:
+            self._servers = self._orderTorrents(list(self._servers or []))
+        except Exception as e:
+            my_log("torrent order: {}".format(e))
         srv = list(self._servers or [])
         self._tor_all = None
         self._tor_filter = "All"
@@ -2411,6 +2449,7 @@ class NovaPlayDetail(Screen):
             get_payload = json.dumps({"action": "get", "hash": torrent_hash}).encode("utf-8")
             file_index = 0
             file_path = "stream"
+            file_size = 0
             video_exts = ('.mpg', '.vob', '.m4v', '.mkv', '.avi', '.divx', '.dat', '.flv', '.mp4', '.mov', '.wmv', '.asf', '.3gp', '.3g2', '.mpeg', '.mpe', '.rm', '.rmvb', '.ogm', '.ogv', '.m2ts', '.mts', '.webm', '.ts')
 
             for attempt in range(20):
@@ -2450,6 +2489,7 @@ class NovaPlayDetail(Screen):
                         if (f.get("path") or "").lower().endswith(video_exts):
                             file_index = f.get("id", want_ix + 1)
                             file_path = f.get("path", "stream")
+                            file_size = f.get("length") or f.get("size") or 0
                             my_log("TorrServer: file {} of {} (from the torrent's file index): {}".format(
                                 want_ix + 1, len(files), file_path[-80:]))
                             break
@@ -2467,6 +2507,7 @@ class NovaPlayDetail(Screen):
                         if largest_file:
                             file_index = largest_file.get("id", 0)
                             file_path = largest_file.get("path", "stream")
+                            file_size = max_size
                             break
 
                 callInMainThread(self["status"].setText, "TorrServer: Fetching metadata ({}s)...".format((attempt+1)*2))
@@ -2482,6 +2523,11 @@ class NovaPlayDetail(Screen):
                 ts_url, encoded_path, torrent_hash, file_index)
             my_log("TorrServer Stream URL: {}".format(stream_url))
 
+            # [2026-10-23] fill TorrServer's cache before the player starts --
+            # starting on an empty cache was the main cause of torrent spinning
+            if not self._torrPreload(ts_url, torrent_hash, file_index, encoded_path, file_size, token):
+                return
+
             callInMainThread(self._onStreamFound, stream_url, server.get("quality", "HD"), stream_url, server)
 
         except Exception as e:
@@ -2494,6 +2540,90 @@ class NovaPlayDetail(Screen):
                 with self._extract_lock:
                     if token == self._extract_token:
                         self._extracting = False
+
+    _TORR_WAIT_S = 75            # longest wait for the buffer before giving up / playing
+
+    def _torrPreload(self, ts_url, thash, idx, enc_path, file_size, token=None):
+        """Ask TorrServer to preload the start of the file and wait until a
+        buffer is ready, showing "Buffering 45% · 12 peers · 2.3 MB/s".
+        Target: ~1/400 of the file (16-48 MB; a 2 GB 1080p ~16 MB, a 15 GB 4K
+        ~37 MB), never more than TorrServer's own preload size. Returns False
+        when the user left / picked another server, or nothing arrived."""
+        import json
+        import urllib.request as _ur
+        MB = 1024 * 1024
+        target = max(16 * MB, min(48 * MB, int(file_size or 0) // 400))
+        done = []
+
+        def _kick():
+            u = "{}/stream/{}?link={}&index={}&preload".format(ts_url, enc_path, thash, idx)
+            try:
+                with _ur.urlopen(u, timeout=self._TORR_WAIT_S + 30) as r:
+                    r.read(256)
+            except Exception as e:
+                my_log("TorrServer preload request: {}".format(e))
+            done.append(1)
+        threading.Thread(target=_kick, daemon=True).start()
+
+        payload = json.dumps({"action": "get", "hash": thash}).encode("utf-8")
+        t0 = time.time()
+        got = 0
+        peers = 0
+        while True:
+            if getattr(self, "_closed", False):
+                return False
+            if token is not None and token != getattr(self, "_extract_token", token):
+                return False
+            st = None
+            try:
+                req = _ur.Request(ts_url + "/torrents", data=payload,
+                                  headers={"Content-Type": "application/json"})
+                with _ur.urlopen(req, timeout=8) as resp:
+                    st = json.loads(resp.read().decode("utf-8"))
+                if isinstance(st, list):
+                    st = st[0] if st else None
+            except Exception:
+                st = None
+            speed = 0.0
+            if isinstance(st, dict):
+                ps = int(st.get("preload_size") or 0)
+                if ps > 0:
+                    target = min(target, ps)
+                got = max(int(st.get("preloaded_bytes") or 0),
+                          int(st.get("bytes_read_useful_data") or 0))
+                speed = float(st.get("download_speed") or 0)
+                peers = int(st.get("active_peers") or 0)
+                seeds = int(st.get("connected_seeders") or 0)
+                pct = min(100, int(got * 100 / target)) if target else 100
+                txt = u"Buffering {}%  ·  {} peers{}  ·  {:.1f} MB/s".format(
+                    pct, peers, u" ({} seeds)".format(seeds) if seeds else u"", speed / MB)
+                try:
+                    callInMainThread(self["status"].setText, txt)
+                except Exception:
+                    pass
+            elapsed = time.time() - t0
+            if done and got == 0 and elapsed > 8:
+                # preload refused/unsupported (older TorrServer): play as before
+                my_log("TorrServer: preload gave nothing -- playing without the buffer")
+                return True
+            if got >= target or (done and got > 0):
+                my_log("TorrServer: buffered {:.1f} MB in {:.0f} s -- playing".format(got / float(MB), elapsed))
+                return True
+            if elapsed >= self._TORR_WAIT_S:
+                if got >= 4 * MB:
+                    my_log("TorrServer: only {:.1f} MB after {:.0f} s -- playing anyway".format(
+                        got / float(MB), elapsed))
+                    return True
+                my_log("TorrServer: {:.1f} MB after {:.0f} s, {} peers -- giving up".format(
+                    got / float(MB), elapsed, peers))
+                try:
+                    callInMainThread(self["status"].setText,
+                                     u"Too slow ({} peers) — try a torrent with more seeders".format(peers))
+                    callInMainThread(self._stopProgress)
+                except Exception:
+                    pass
+                return False
+            time.sleep(1.0)
 
     def _showProxyWarningPopup(self, msg):
         self.session.open(MessageBox, msg, MessageBox.TYPE_WARNING, timeout=8)

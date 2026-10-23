@@ -186,6 +186,19 @@ def _build_remote_play_candidates(url):
         seen.add(key)
         candidates.append((p_type, svc_url, label, uses_proxy))
 
+    # [2026-10-23] TorrServer stream (".../stream/<file>?link=<hash>&index=N&play"):
+    # it's already a local HTTP server that reads ahead -- straight to the
+    # player, never through NovaPlay's proxy (an extra hop on the box's CPU
+    # that made torrents buffer). exteplayer3 first: it asks for byte ranges
+    # (seek/resume work) and plays every container a torrent comes in.
+    _pl = plain_url.lower()
+    if "/stream/" in _pl and "link=" in _pl and ("&play" in _pl or "?play" in _pl):
+        if os.path.exists("/usr/bin/exteplayer3"):
+            add_candidate(5002, plain_url, "5002 exteplayer3 (TorrServer)")
+        add_candidate(5001, plain_url, "5001 direct (TorrServer)")
+        add_candidate(4097, plain_url, "4097 direct (TorrServer)")
+        return candidates
+
     proxied = ""
     legacy_proxied = ""
     if plain_url.startswith("https://") or plain_url.startswith("http://"):
