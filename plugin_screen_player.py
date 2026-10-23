@@ -439,6 +439,8 @@ class NovaPlaySimplePlayer(Screen):
         <!-- [osd-ui 2026-10-23] three rows inside the TV safe area (ends at y 1000):
              title / episode / video / subtitles / clock -- seek bar with elapsed and
              remaining + "Ends 23:14" -- colour keys + one help line -->
+        <widget name="overlayEdge"  position="158,798" size="1604,204" backgroundColor="#262E3B" cornerRadius="22" zPosition="9" />
+        <widget name="posterEdge"   position="182,504" size="192,282" backgroundColor="#262E3B" cornerRadius="14" zPosition="11" />
         <widget name="overlay_bg"   position="160,800" size="1600,200" backgroundColor="#121822" cornerRadius="20" zPosition="10" />
         <widget name="osdPosterBox" position="184,506" size="188,278" backgroundColor="#121822" cornerRadius="12" zPosition="12" transparent="0" />
         <widget name="osdPoster" position="188,510" size="180,270" zPosition="12" alphatest="blend" scale="1" />
@@ -528,7 +530,7 @@ class NovaPlaySimplePlayer(Screen):
     """)
 
     _OSD_WIDGETS = [
-        "overlay_bg", "osdPosterBox", "osdPoster",
+        "overlayEdge", "overlay_bg", "posterEdge", "osdPosterBox", "osdPoster",
         "osd_title", "osd_episode", "osd_videinfo", "osd_subdetail", "osd_clock",
         "seekFrame", "seekbar", "seekMarker",
         "osd_elapsed", "osd_state", "status", "osd_durtext",
@@ -539,7 +541,7 @@ class NovaPlaySimplePlayer(Screen):
                     "prog_bar", "osd_hints", "osd_keybar", "osd_botline", "osd_jump")
 
     _OSD_DESIGN_Y = {
-        "overlay_bg": 800, "osdPosterBox": 506, "osdPoster": 510,
+        "overlayEdge": 798, "overlay_bg": 800, "posterEdge": 504, "osdPosterBox": 506, "osdPoster": 510,
         "osd_title": 812, "osd_episode": 812, "osd_videinfo": 812, "osd_subdetail": 812, "osd_clock": 812,
         "seekFrame": 870, "seekbar": 872, "seekMarker": 866,
         "osd_elapsed": 890, "osd_state": 890, "status": 890, "osd_durtext": 890,
@@ -663,6 +665,8 @@ class NovaPlaySimplePlayer(Screen):
         self["osd_jump"]     = Label("")
         self["seekFlash"]    = Label("")
         self["seekFlash"].hide()
+        self["overlayEdge"]  = Label("")     # [osd-ui] thin outline around panel / poster
+        self["posterEdge"]   = Label("")
         self["seekBubble"]   = Label("")      # [osd-ui] target time above the marker
         self["seekBubble"].hide()
         self["pauseBadge"]   = Label(u"\u275a\u275a")   # [osd-ui] big pause sign
@@ -1417,10 +1421,12 @@ class NovaPlaySimplePlayer(Screen):
             self["osdPoster"].instance.setPixmapFromFile(path)
             self["osdPoster"].show()
             self["osdPosterBox"].show()
+            self["posterEdge"].show()
         except Exception:
             try:
                 self["osdPoster"].hide()
                 self["osdPosterBox"].hide()
+                self["posterEdge"].hide()
             except Exception:
                 pass
 
