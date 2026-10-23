@@ -19,6 +19,7 @@ Keys
   EXIT       close NovaPlay
 """
 import os
+import re
 import threading
 import time
 
@@ -46,7 +47,7 @@ from plugin_state import (_get_config, _set_config, _continue_items, _history_it
                           _favorite_items, _clear_continue_item, _hide_site, _is_site_hidden,
                           _set_site_custom_name, _DEFAULT_TMDB_API_KEY)
 from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames, anim_light
-from plugin_util import _single_line_text
+from plugin_util import _single_line_text, _split_episode_label
 from novaplay_thread import callInMainThread
 from plugin_toast import TOAST_XML, toast_init, toast
 from novaplay_dualclock import format_dual_dates
@@ -94,13 +95,17 @@ _S_W, _S_H = 328, 158
 POP_ZOOM = 0.08
 POP_STEPS, POP_STEP_MS = POP_ANIM_FRAMES, POP_ANIM_INTERVAL
 _CONT_PARTS = (("kEdge", 0, 0, _CONT_W, _CONT_H, True), ("kBox", 3, 3, _CONT_W - 6, _CONT_H - 6, True),
-               ("kPoster", 16, 16, 72, 100, True), ("kTitle", 106, 18, _CONT_TW, 36, False),
-               ("kSub", 106, 58, _CONT_TW, 30, False), ("kBar", 106, 100, _CONT_TW, 6, False))
+               ("kPoster", 12, 10, 76, 112, True), ("kTitle", 104, 18, _CONT_TW, 36, False),
+               ("kSub", 104, 58, _CONT_TW, 30, False), ("kBar", 104, 100, _CONT_TW, 6, False))
 _SIDE_PARTS = (("rowBg", 0, 0, 332, 66, True), ("rowBar", 0, 0, 5, 66, True),
                ("rowIcon", 18, 15, 36, 36, True), ("rowText", 70, 0, 256, 66, False))
 _SITE_PARTS = (("sEdge", 0, 0, _S_W, _S_H, True), ("sBox", 3, 3, _S_W - 6, _S_H - 6, True),
                ("sLogo", 18, 18, 132, 47, True), ("sDot", _S_W - 34, 34, 14, 14, False),
-               ("sName", 18, 74, _S_W - 36, 36, False), ("sTag", 18, 112, _S_W - 36, 30, False))
+               ("sName", 18, 74, _S_W - 36, 36, False), ("sTag", 18, 112, _S_W - 36, 30, False),
+               ("sChip", _S_W - 140, 26, 122, 30, False))
+_K_POSTER = (76, 112)             # [hub-ui] Continue Watching thumbnail
+# [hub-ui] what the site dot colours mean
+_HEALTH_CHIP = {"down": (u"Offline", "#E5484D"), "blocked": (u"Needs proxy", "#F2A33A")}
 
 
 def _skin():
@@ -119,7 +124,18 @@ def _skin():
         <eLabel position="68,174" size="300,30" text="SECTIONS" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
         <eLabel position="68,690" size="304,1" backgroundColor="#2A3240" zPosition="3" />
         <eLabel position="68,704" size="300,30" text="LIBRARY" font="Regular;20" foregroundColor="{muted}" backgroundColor="{panel}" transparent="1" zPosition="3" />
-        <widget name="libinfo" position="68,740" size="316,212" font="Regular;22" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="3" />
+        <widget name="libinfo" position="68,740" size="2,2" font="Regular;10" foregroundColor="#C9D0DA" backgroundColor="{panel}" transparent="1" zPosition="0" />
+        <eLabel position="68,742" size="96,88" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
+        <eLabel position="178,742" size="96,88" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
+        <eLabel position="288,742" size="96,88" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
+        <widget name="libFav" position="68,748" size="96,44" font="Bold;32" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="libHist" position="178,748" size="96,44" font="Bold;32" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="libDl" position="288,748" size="96,44" font="Bold;32" halign="center" valign="center" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <eLabel position="68,796" size="96,26" text="★ Favorites" font="Regular;15" halign="center" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <eLabel position="178,796" size="96,26" text="History" font="Regular;15" halign="center" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <eLabel position="288,796" size="96,26" text="Downloading" font="Regular;15" halign="center" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
+        <widget name="libTmdb" position="68,846" size="150,36" font="Bold;19" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#2A3240" cornerRadius="18" zPosition="4" />
+        <widget name="libProxy" position="232,846" size="150,36" font="Bold;19" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#2A3240" cornerRadius="18" zPosition="4" />
 
         <eLabel position="430,148" size="900,58" text="Continue Watching" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="contCount" position="1380,162" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
@@ -132,6 +148,12 @@ def _skin():
         <widget name="contEmpty" position="465,222" size="1380,132" font="Regular;26" valign="center" foregroundColor="{muted}" backgroundColor="{card}" cornerRadius="14" zPosition="2" />
 
         <eLabel position="430,376" size="900,58" text="Sites" font="Bold;42" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <eLabel position="610,401" size="14,14" backgroundColor="#30C48D" cornerRadius="7" zPosition="2" />
+        <eLabel position="632,390" size="120,36" text="Working" font="Regular;21" valign="center" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <eLabel position="760,401" size="14,14" backgroundColor="#F2A33A" cornerRadius="7" zPosition="2" />
+        <eLabel position="782,390" size="160,36" text="Needs proxy" font="Regular;21" valign="center" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
+        <eLabel position="950,401" size="14,14" backgroundColor="#E5484D" cornerRadius="7" zPosition="2" />
+        <eLabel position="972,390" size="100,36" text="Down" font="Regular;21" valign="center" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
         <widget name="siteCount" position="1380,390" size="500,36" font="Regular;24" halign="right" foregroundColor="{muted}" backgroundColor="{bg}" transparent="1" zPosition="2" />
 
         <eLabel position="40,976" size="1840,76" backgroundColor="{panel}" cornerRadius="16" zPosition="1" />
@@ -158,12 +180,12 @@ def _skin():
         parts.append("""
         <widget name="kEdge{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{edge}" cornerRadius="14" zPosition="2" />
         <widget name="kBox{i}" position="{x3},{y3}" size="{w3},{h3}" backgroundColor="{card}" cornerRadius="12" zPosition="3" />
-        <widget name="kPoster{i}" position="{px},{py}" size="72,100" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="kPoster{i}" position="{px},{py}" size="76,112" alphatest="blend" scale="1" zPosition="4" />
         <widget name="kTitle{i}" halign="left" position="{tx},{ty}" size="{tw},36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
         <widget name="kSub{i}" position="{tx},{sy}" size="{tw},30" font="Regular;20" foregroundColor="{muted}" backgroundColor="{card}" transparent="1" zPosition="4" />
         <widget name="kBar{i}" position="{tx},{by}" size="{tw},6" backgroundColor="#2A3240" foregroundColor="{gold}" borderWidth="0" cornerRadius="3" zPosition="4" />
         """.format(i=i, x=x, y=y, w=_CONT_W, h=_CONT_H, x3=x + 3, y3=y + 3, w3=_CONT_W - 6, h3=_CONT_H - 6,
-                   px=x + 16, py=y + 16, tx=x + 106, ty=y + 18, sy=y + 58, by=y + 100, tw=_CONT_TW,
+                   px=x + 12, py=y + 10, tx=x + 104, ty=y + 18, sy=y + 58, by=y + 100, tw=_CONT_TW,
                    edge=EDGE, card=CARD, white=WHITE, muted=MUTED, gold=GOLD))
     for i in range(S_PAGE):
         x, y = _S_X[i % S_COLS], _S_Y[i // S_COLS]
@@ -174,7 +196,8 @@ def _skin():
         <widget name="sDot{i}" position="{dx},{dy}" size="14,14" backgroundColor="{card}" cornerRadius="7" zPosition="4" />
         <widget name="sName{i}" halign="left" position="{nx},{ny}" size="{tw},36" font="Bold;26" foregroundColor="{white}" backgroundColor="{card}" transparent="1" zPosition="4" />
         <widget name="sTag{i}" position="{nx},{gy}" size="{tw},30" font="Regular;20" foregroundColor="#B4BCC8" backgroundColor="{card}" transparent="1" zPosition="4" />
-        """.format(i=i, x=x, y=y, w=_S_W, h=_S_H, x3=x + 3, y3=y + 3, w3=_S_W - 6, h3=_S_H - 6,
+        <widget name="sChip{i}" position="{cx},{cy}" size="122,30" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#E5484D" cornerRadius="15" zPosition="5" />
+        """.format(cx=x + _S_W - 140, cy=y + 26, i=i, x=x, y=y, w=_S_W, h=_S_H, x3=x + 3, y3=y + 3, w3=_S_W - 6, h3=_S_H - 6,
                    lx=x + 18, ly=y + 18, dx=x + _S_W - 34, dy=y + 34, nx=x + 18, ny=y + 74, gy=y + 112, tw=_S_W - 36,
                    edge=EDGE, card=CARD, white=WHITE))
     parts.append(TOAST_XML)
@@ -224,6 +247,8 @@ class NovaPlayHub(Screen):
         self["sideEdge"] = Label("")
         self["sidePanel"] = Label("")
         self["libinfo"] = Label("")
+        for _n in ("libFav", "libHist", "libDl", "libTmdb", "libProxy"):
+            self[_n] = Label("")
         self["contCount"] = Label("")
         self["contEmpty"] = Label("")
         self["contLeft"] = Label(u"\u2039")
@@ -245,7 +270,7 @@ class NovaPlayHub(Screen):
             self["kPoster%d" % i] = Pixmap()
             self["kBar%d" % i] = ProgressBar()
         for i in range(S_PAGE):
-            for n in ("sEdge", "sBox", "sDot", "sName", "sTag"):
+            for n in ("sEdge", "sBox", "sDot", "sName", "sTag", "sChip"):
                 self["%s%d" % (n, i)] = Label("")
             self["sLogo%d" % i] = Pixmap()
 
@@ -367,15 +392,31 @@ class NovaPlayHub(Screen):
             dl = len([t for t in plugin_downloads.get_all_tasks() if t.status == "downloading"])
         except Exception:
             pass
-        self["libinfo"].setText("\n".join([
-            "Favorites: {}".format(fav),
-            "History: {}".format(hist),
-            "Downloads: {} active".format(dl),
-            "TMDb: {}".format("Built-in key" if key == _DEFAULT_TMDB_API_KEY else ("Your key" if key else "Off")),
-            "Proxy: {}".format("On" if proxy else "Off"),
-        ]))
+        # [hub-ui] numbers as tiles, TMDb / Proxy as green (on) / grey (off) chips
+        self["libFav"].setText(str(fav))
+        self["libHist"].setText(str(hist))
+        self["libDl"].setText(str(dl))
+        for _n, _on, _lbl in (("libTmdb", bool(key), "TMDb"), ("libProxy", bool(proxy), "Proxy")):
+            self[_n].setText(u"{}  {}".format(_lbl, "On" if _on else "Off"))
+            self._color(_n, bg="#1E7A4A" if _on else "#2A3240", fg=WHITE if _on else MUTED)
+        # [hub-ui] greeting + what's here, instead of the fixed tagline
+        _h = time.localtime().tm_hour
+        _greet = "Good morning" if 5 <= _h < 12 else ("Good afternoon" if 12 <= _h < 17 else "Good evening")
+        _bits = [_greet, "{} sites".format(len(self._sites))]
+        if self._cont:
+            _bits.append("{} to continue".format(len(self._cont)))
+        self["subtitle"].setText(u"  \u00b7  ".join(_bits))
 
     # ─── painting ───────────────────────────────────────────────────────
+
+    def _siteTitle(self, key):
+        """site key -> its name as shown on the cards ('' when unknown)"""
+        if not key:
+            return ""
+        for s_ in self._sites:
+            if s_["key"] == key:
+                return s_["title"]
+        return ""
 
     def _color(self, name, bg=None, fg=None):
         inst = self[name].instance
@@ -603,7 +644,7 @@ class NovaPlayHub(Screen):
         else:
             self["contCount"].setText(("{} of {}  ·  MENU to clear".format(n, tot) if tot > n else "{} items".format(n)) if n else "")
         if not n:
-            self["contEmpty"].setText("      Nothing in progress — pick a site below")
+            self["contEmpty"].setText(u"      Nothing in progress \u2014 pick a site below or press YELLOW to search")
             self["contEmpty"].show()
         else:
             self["contEmpty"].hide()
@@ -623,16 +664,25 @@ class NovaPlayHub(Screen):
             it = self._cont[g]
             sel = self._zone == "cont" and g == self._ci
             self._color("kEdge%d" % i, bg=GOLD if sel else EDGE)
-            self["kTitle%d" % i].setText(_single_line_text(it.get("title", ""), width=24, fallback="—"))
+            # [hub-ui] episode marker and the site it plays from on the second line
+            ep, name = _split_episode_label(it.get("title", ""))
+            if not ep and it.get("type") == "episode":
+                _m = re.search(r"(?:\u0627\u0644\u062d\u0644\u0642\u0629|\u062d\u0644\u0642\u0629)\s*(\d+)", name)
+                if _m:
+                    ep = "EP " + _m.group(1)
+            self["kTitle%d" % i].setText(_single_line_text(name or it.get("title", ""), width=24, fallback="—"))
             self._color("kTitle%d" % i, fg=GOLD if sel else WHITE)
             left, pct = _remaining(it)
-            kind = {"episode": "Episode", "series": "Series"}.get(it.get("type", ""), "Movie")
-            self["kSub%d" % i].setText("{}  ·  {}".format(kind, left))
+            site = self._siteTitle(it.get("_site"))
+            if not ep and not site:
+                ep = {"episode": "Episode", "series": "Series"}.get(it.get("type", ""), "Movie")
+            self["kSub%d" % i].setText(_single_line_text(u"  \u00b7  ".join(x for x in (ep, site, left) if x),
+                                                         width=34, fallback=""))
             self["kBar%d" % i].setValue(pct)
             url = it.get("poster") or it.get("thumbnail") or ""
-            path = plugin_imagecache.getCachedImage(url, target_size=(72, 100)) if url else ""
+            path = plugin_imagecache.getCachedImage(url, target_size=_K_POSTER) if url else ""
             if url and not path:
-                plugin_imagecache.requestImageAsyncPriority(url, target_size=(72, 100))
+                plugin_imagecache.requestImageAsyncPriority(url, target_size=_K_POSTER)
                 missing = True
             self._pix("kPoster%d" % i, path or placeholder_for_item(it))
         if missing:
@@ -644,7 +694,7 @@ class NovaPlayHub(Screen):
         done = True
         for it in self._cont[self._cbase:self._cbase + CONT_N]:
             url = it.get("poster") or it.get("thumbnail") or ""
-            if url and not plugin_imagecache.getCachedImage(url, target_size=(72, 100)):
+            if url and not plugin_imagecache.getCachedImage(url, target_size=_K_POSTER):
                 done = False
         if done or self._art_tries > 15:
             self._art.stop()
@@ -660,7 +710,7 @@ class NovaPlayHub(Screen):
         base = page * S_PAGE
         for i in range(S_PAGE):
             g = base + i
-            names = ["sEdge%d", "sBox%d", "sLogo%d", "sDot%d", "sName%d", "sTag%d"]
+            names = ["sEdge%d", "sBox%d", "sLogo%d", "sDot%d", "sName%d", "sTag%d", "sChip%d"]
             if g >= n:
                 for nm in names:
                     self[nm % i].hide()
@@ -670,10 +720,20 @@ class NovaPlayHub(Screen):
             s = self._sites[g]
             sel = self._zone == "sites" and g == self._si
             self._color("sEdge%d" % i, bg=GOLD if sel else EDGE)
+            st = plugin_health.get(s["key"])
+            chip = _HEALTH_CHIP.get(st)
             self["sName%d" % i].setText(_single_line_text(s["title"], width=20, fallback=s["key"]))
-            self._color("sName%d" % i, fg=GOLD if sel else WHITE)
+            # [hub-ui] an offline site is dimmed (unless it's the selected one)
+            self._color("sName%d" % i, fg=GOLD if sel else (MUTED if st == "down" else WHITE))
             self["sTag%d" % i].setText(_single_line_text(s.get("tagline") or "", width=30, fallback=""))
-            self._color("sDot%d" % i, bg=DOT.get(plugin_health.get(s["key"]), CARD))
+            self._color("sDot%d" % i, bg=DOT.get(st, CARD))
+            if chip:
+                self["sChip%d" % i].setText(chip[0])
+                self._color("sChip%d" % i, bg=chip[1], fg="#FFFFFF" if st == "down" else "#0C1017")
+                self["sChip%d" % i].show()
+                self["sDot%d" % i].hide()
+            else:
+                self["sChip%d" % i].hide()
             self._pix("sLogo%d" % i, resolve_icon_path(s))
 
     # ─── health dots (same check the classic home runs) ─────────────────
