@@ -440,8 +440,8 @@ class NovaPlaySimplePlayer(Screen):
              title / episode / video / subtitles / clock -- seek bar with elapsed and
              remaining + "Ends 23:14" -- colour keys + one help line -->
         <widget name="overlay_bg"   position="160,800" size="1600,200" backgroundColor="#121822" cornerRadius="20" zPosition="10" />
-        <widget name="osdPosterBox" position="160,546" size="168,248" backgroundColor="#121822" cornerRadius="12" zPosition="12" transparent="0" />
-        <widget name="osdPoster" position="164,550" size="160,240" zPosition="12" alphatest="blend" scale="1" />
+        <widget name="osdPosterBox" position="184,506" size="188,278" backgroundColor="#121822" cornerRadius="12" zPosition="12" transparent="0" />
+        <widget name="osdPoster" position="188,510" size="180,270" zPosition="12" alphatest="blend" scale="1" />
         <widget name="osd_title"    position="184,812" size="576,40" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="left" valign="center" />
         <widget name="osd_episode"  position="770,812" size="180,40" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="left" valign="center" />
         <widget name="osd_videinfo" position="960,812" size="260,40" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="12" halign="left" valign="center" />
@@ -539,7 +539,7 @@ class NovaPlaySimplePlayer(Screen):
                     "prog_bar", "osd_hints", "osd_keybar", "osd_botline", "osd_jump")
 
     _OSD_DESIGN_Y = {
-        "overlay_bg": 800, "osdPosterBox": 546, "osdPoster": 550,
+        "overlay_bg": 800, "osdPosterBox": 506, "osdPoster": 510,
         "osd_title": 812, "osd_episode": 812, "osd_videinfo": 812, "osd_subdetail": 812, "osd_clock": 812,
         "seekFrame": 870, "seekbar": 872, "seekMarker": 866,
         "osd_elapsed": 890, "osd_state": 890, "status": 890, "osd_durtext": 890,
@@ -1384,12 +1384,12 @@ class NovaPlaySimplePlayer(Screen):
             path = ""
         if not path:
             try:
-                path = plugin_imagecache.getCachedImage(url, target_size=(160, 240)) or ""
+                path = plugin_imagecache.getCachedImage(url, target_size=(180, 270)) or ""
             except Exception:
                 path = ""
         if not path and not getattr(self, "_poster_requested", False):
             try:
-                plugin_imagecache.requestImageAsyncPriority(url, target_size=(160, 240))
+                plugin_imagecache.requestImageAsyncPriority(url, target_size=(180, 270))
                 self._poster_requested = True
             except Exception:
                 pass
