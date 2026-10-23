@@ -62,6 +62,11 @@ class NovaPlaySplash(Screen):
             except Exception:
                 pass
             try:
+                import novaplay_fonts               # Arabic-capable fallback font
+                novaplay_fonts.ensure_arabic()
+            except Exception:
+                pass
+            try:
                 import novaplay_kbfix               # keyboard Google suggestions (in memory)
                 novaplay_kbfix.apply()
             except Exception:

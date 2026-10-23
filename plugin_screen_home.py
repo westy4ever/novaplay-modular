@@ -3209,6 +3209,12 @@ class NovaPlayHome(Screen):
             self.close()
 
     def _onPluginClose(self):
+        if not getattr(self, "_hub", False):
+            try:
+                import novaplay_fonts               # [fonts] classic home = leaving NovaPlay
+                novaplay_fonts.restore_skin()
+            except Exception:
+                pass
         try: self._artworkPollTimer.stop()
         except: pass
         try: self._clockTimer.stop()

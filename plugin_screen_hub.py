@@ -278,10 +278,24 @@ class NovaPlayHub(Screen):
         self._pop_frame = 0
         self.onLayoutFinish.append(self._start)
         self.onClose.append(self._stopTimers)
+        self.onClose.append(self._restoreFonts)
 
     # ─── lifecycle ──────────────────────────────────────────────────────
 
+    def _restoreFonts(self):
+        """[fonts] leaving NovaPlay: the skin's own fallback font again"""
+        try:
+            import novaplay_fonts
+            novaplay_fonts.restore_skin()
+        except Exception:
+            pass
+
     def _start(self):
+        try:
+            import novaplay_fonts               # [fonts] Arabic always drawable here
+            novaplay_fonts.ensure_arabic()
+        except Exception:
+            pass
         self._tick()
         self._clock.start(10000, False)
         self._reload()
@@ -757,6 +771,11 @@ class NovaPlayHub(Screen):
 
     def _back(self, *args):
         """Returned from another screen: refresh what may have changed."""
+        try:
+            import novaplay_fonts               # a plugin opened meanwhile may have
+            novaplay_fonts.ensure_arabic()      # swapped the fallback font again
+        except Exception:
+            pass
         try:
             self._reload()
             self._paint()
