@@ -192,7 +192,7 @@ def _detail_skin_modern():
         <widget name="source" position="420,250" size="900,30" font="Regular;21" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
         <widget name="proxy_warning" position="420,284" size="900,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
         <widget name="plot_title" position="420,535" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
-        <widget name="plot" position="420,565" size="900,112" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
+        <widget name="plot" position="420,565" size="1460,112" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
 
         <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
         <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
@@ -2017,7 +2017,7 @@ class NovaPlayDetail(Screen):
         my_log("Detail plot source: {} | len={}".format(plot_source, len(plot_text)))
 
         _pt = (plot_text or "").strip()
-        _cap = 330 if getattr(self, "_modern", False) else 500    # Modern: ~4 lines under the cast
+        _cap = 520 if getattr(self, "_modern", False) else 500    # Modern: ~4 wide lines under the cast
         if len(_pt) > _cap:
             _pt = _pt[:_cap].rsplit(" ", 1)[0] + "…"
         _ar_count = sum(1 for _c in _pt[:80] if "\u0600" <= _c <= "\u06ff")
