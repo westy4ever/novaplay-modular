@@ -100,7 +100,7 @@ say "Installing to $TARGET"
 mkdir -p "$TARGET" || fail "cannot create $TARGET"
 cp -a "$SRC/." "$TARGET/" || fail "copy failed"
 # documents and repo files aren't needed on the box
-rm -rf "$TARGET/.git" "$TARGET/.gitignore"
+rm -rf "$TARGET/.git" "$TARGET/.gitignore" "$TARGET/tests"
 rm -f "$TARGET"/*.docx "$TARGET"/*.pdf
 find "$TARGET" -type d -name __pycache__ | xargs rm -rf 2>/dev/null
 # files removed from NovaPlay (2026-10-23: the Classic home)
