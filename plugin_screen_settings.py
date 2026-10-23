@@ -165,6 +165,28 @@ def _read(path):
         return ""
 
 
+def _trailer_cache_files():
+    """[trailers] the saved trailer files (both cache places) -> (paths, bytes)"""
+    out, size = [], 0
+    for d in ("/media/hdd/NovaPlay/cache/trailers", "/tmp/ap_trailers"):
+        try:
+            for n in os.listdir(d):
+                fp = os.path.join(d, n)
+                if os.path.isfile(fp):
+                    out.append(fp)
+                    size += os.path.getsize(fp)
+        except Exception:
+            pass
+    return out, size
+
+
+def _trailer_cache_summary():
+    files, size = _trailer_cache_files()
+    if not files:
+        return u"None saved"
+    return u"{} · {:.0f} MB".format(len(files), size / 1048576.0)
+
+
 def _sites_summary():
     try:
         from extractors import get_site_names, get_home_sites
@@ -386,6 +408,8 @@ class NovaPlaySettings(Screen):
                  "Check sites, proxy, TMDb and the player"),
                 ("downloads", "download", "Downloads", "Open  ›",
                  "Downloads and recordings in progress"),
+                ("cleartrailers", "download", "Downloaded Trailers", _trailer_cache_summary(),
+                 "Delete the trailers saved for instant replay (OK)"),
                 ("install", "package", "Install Dependencies", "Run  ›",
                  "Install missing packages the plugin needs"),
                 ("restart", "restart", "Restart Enigma2", "Restart  ›",
@@ -697,6 +721,31 @@ class NovaPlaySettings(Screen):
             self.session.open(NovaDiagnosticsScreen)
         elif key == "install":
             open_installer_with_restart(self.session)
+        elif key == "cleartrailers":
+            files, size = _trailer_cache_files()
+            if not files:
+                self._refresh()
+                return
+
+            def _yes(ok):
+                if ok:
+                    n = 0
+                    for f in files:
+                        try:
+                            os.remove(f)
+                            n += 1
+                        except Exception:
+                            pass
+                    try:
+                        from plugin_toast import toast
+                        toast(self, u"{} trailer{} deleted".format(n, "" if n == 1 else "s"))
+                    except Exception:
+                        pass
+                self._refresh()
+            self.session.openWithCallback(_yes, MessageBox,
+                u"Delete {} downloaded trailer{} ({:.0f} MB)?\n\nThey download again the next time you watch them.".format(
+                    len(files), "" if len(files) == 1 else "s", size / 1048576.0),
+                MessageBox.TYPE_YESNO, default=False)
         elif key == "restart":
             open_restart_prompt(self.session)
 

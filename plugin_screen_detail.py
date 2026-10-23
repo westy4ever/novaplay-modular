@@ -166,9 +166,9 @@ _SV_GOLD, _SV_CARD, _SV_ON = "#F2C230", "#161C26", "#2A2717"
 # [cast] 2 rows x 3 round TMDb photos with names, right of the plot
 CAST_N = 6
 # [cast] one row of 6 round photos (no panel) under the details, over the backdrop
-_CAST_PHOTO, _CAST_W = 100, 146
-_CAST_X = tuple(420 + i * _CAST_W for i in range(6))
-_CAST_Y = 324
+_CAST_PHOTO, _CAST_W = 116, 170
+_CAST_X = tuple(1356 + c * 176 for c in range(3))      # 2 rows x 3 on the right
+_CAST_Y = (176, 420)
 
 
 def _detail_skin_modern():
@@ -191,8 +191,8 @@ def _detail_skin_modern():
         <widget name="meta" position="420,212" size="900,34" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="4" />
         <widget name="source" position="420,250" size="900,30" font="Regular;21" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
         <widget name="proxy_warning" position="420,284" size="900,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
-        <widget name="plot_title" position="420,504" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
-        <widget name="plot" position="420,534" size="900,146" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
+        <widget name="plot_title" position="420,340" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
+        <widget name="plot" position="420,372" size="900,300" font="Regular;23" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
 
         <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
         <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
@@ -204,10 +204,10 @@ def _detail_skin_modern():
         <widget name="menuProgress" position="{px},936" size="180,6" backgroundColor="#F2C230" transparent="0" cornerRadius="3" zPosition="5" />
     """.format(px=_SV_X0)]
     for i in range(CAST_N):
-        x, y = _CAST_X[i], _CAST_Y
+        x, y = _CAST_X[i % 3], _CAST_Y[i // 3]
         p.append("""
         <widget name="castImg{i}" position="{ix},{y}" size="{ps},{ps}" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="castName{i}" position="{x},{ny}" size="{w},50" font="Regular;17" halign="center" valign="top" foregroundColor="#FFFFFF" backgroundColor="#0C1017" transparent="1" zPosition="4" />
+        <widget name="castName{i}" position="{x},{ny}" size="{w},52" font="Regular;18" halign="center" valign="top" foregroundColor="#FFFFFF" backgroundColor="#0C1017" transparent="1" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
         """.format(i=i, x=x, ix=x + (_CAST_W - _CAST_PHOTO) // 2, y=y, ny=y + _CAST_PHOTO + 6,
                    ps=_CAST_PHOTO, w=_CAST_W))
     for i in range(SV_CARDS):
@@ -372,7 +372,7 @@ def _modern_backdrop(img, w, h, is_landscape):
         if t < 0.42:
             a = 238
         elif t > 0.80:
-            a = 40
+            a = 40 + int((t - 0.80) / 0.20 * 70)       # cast names sit here
         else:
             a = int(238 - (t - 0.42) / 0.38 * 198)
         row.append(a)
@@ -490,8 +490,8 @@ class NovaPlayDetail(Screen):
             ("meta", 420, 212),
             ("source", 420, 250),
             ("proxy_warning", 420, 284),
-            ("plot_title", 420, 504),
-            ("plot", 420, 534),
+            ("plot_title", 420, 340),
+            ("plot", 420, 372),
         ), 260, 0, 2, 8),
         ("band", (
             ("menu_box", 40, 692),
@@ -845,7 +845,7 @@ class NovaPlayDetail(Screen):
         for i in range(CAST_N):
             if i < len(cast):
                 name, path = cast[i]
-                self["castName%d" % i].setText(_wrap_ui_text(name, width=15, max_lines=2, fallback=""))
+                self["castName%d" % i].setText(_wrap_ui_text(name, width=17, max_lines=2, fallback=""))
                 self["castName%d" % i].show()
                 inst = self["castImg%d" % i].instance
                 if path and inst is not None:
@@ -1811,7 +1811,7 @@ class NovaPlayDetail(Screen):
                     pass
 
             out_path = "{}_bd{}.jpg".format(os.path.splitext(src_path)[0],
-                                            "m1280" if getattr(self, "_modern", False) else ("" if w >= 1000 else "_s"))
+                                            "m1280b" if getattr(self, "_modern", False) else ("" if w >= 1000 else "_s"))
             fitted.save(out_path, format="JPEG", quality=82)
             if is_tmp and out_path not in self._tmp_posters:
                 self._tmp_posters.append(out_path)
