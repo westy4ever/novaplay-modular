@@ -48,7 +48,7 @@ from plugin_state import (_get_config, _entry_from_item, _upsert_library_item,
                           _is_favorite, _get_saved_position, _save_position,
                           _toggle_favorite_entry, _history_items)
 from urllib.parse import urlparse
-from plugin_util import (_single_line_text, _wrap_ui_text,
+from plugin_util import (_strip_shown_year, _single_line_text, _wrap_ui_text,
                           _strip_arabic_from_english_title,
                           _pick_plot_text, _pick_plot_text_with_source,
                           _poster_cache_path, _normalize_poster_url,
@@ -2267,7 +2267,8 @@ class NovaPlayDetail(Screen):
         self._quality_choices = []
         current_title = _strip_arabic_from_english_title(data.get("title") or self._item.get("title", ""))
         self._raw_title = re.sub(r"\s+", " ", current_title).strip()
-        self._fitTitle(current_title)
+        # [no-repeat] the year is on the poster badge -- not again after the title
+        self._fitTitle(_strip_shown_year(current_title, data.get("year") or self._item.get("year")))
         self._tagline = str((data.get("_tmdb") or {}).get("tagline") or "").strip() \
             if self._episode_index < 0 else ""
 

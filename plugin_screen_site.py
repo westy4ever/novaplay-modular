@@ -44,7 +44,7 @@ from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _get_saved_position, _is_favorite,
                           _entry_from_item, _toggle_favorite_entry)
 from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, anim_frames, anim_light
-from plugin_util import (_site_label, _site_search_item, _single_line_text, _wrap_ui_text,
+from plugin_util import (_strip_shown_year, _site_label, _site_search_item, _single_line_text, _wrap_ui_text,
                          _dedupe_items, _rank_search_items, _strip_arabic_from_english_title)
 from plugin_tmdb import _tmdb_search_metadata, fill_item_rating_async
 from novaplay_thread import callInMainThread
@@ -1040,7 +1040,7 @@ class NovaPlaySite(Screen):
             self["pBack%d" % i].show()
             self["pName%d" % i].show()
             # [badges] name only, up to 2 lines (the year is a badge now)
-            self["pName%d" % i].setText(_wrap_ui_text(_strip_arabic_from_english_title(it.get("title", "")) or it.get("title", ""),
+            self["pName%d" % i].setText(_wrap_ui_text(_strip_shown_year(_strip_arabic_from_english_title(it.get("title", "")) or it.get("title", ""), it.get("year")),
                                                       width=18 if self._modern else 16, max_lines=2, fallback="—"))
             self._color("pName%d" % i, fg=GOLD if sel else WHITE)
             mark = self._paintBadges("p", i, it)
@@ -1566,7 +1566,8 @@ class NovaPlaySite(Screen):
             return
         if self._modern and not self._carousel():
             return                    # [bigger] no info strip -> no TMDb lookup per move
-        title = _strip_arabic_from_english_title(it.get("title", "")) or it.get("title", "")
+        title = _strip_shown_year(_strip_arabic_from_english_title(it.get("title", "")) or it.get("title", ""),
+                                  it.get("year"))
         if self._modern:
             self["infoTitle"].setText(_single_line_text(title, width=40, fallback="—"))
         else:

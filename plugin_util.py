@@ -520,3 +520,20 @@ def _fetch_poster_bytes(url, referer, timeout=7):
     except Exception:
         pass
     return data
+
+def _strip_shown_year(title, year):
+    """[no-repeat] "Gladiator II (2024)" -> "Gladiator II" when the poster
+    already shows 2024 as a badge. Only a year at the very end, only when it
+    matches the badge (+-1, sites round release years differently), never
+    when the title is nothing but that year ("1917", "2012"). Display only --
+    searches keep the full title. "Blade Runner 2049", "Wonder Woman 1984"
+    (badge 2020) and "2001: A Space Odyssey" stay as they are."""
+    t = str(title or "")
+    y = str(year or "").strip()[:4]
+    if not y.isdigit() or not t:
+        return t
+    m = re.search(r"[\s\-\u2013|:]*[\(\[]?\s*((?:19|20)\d{2})\s*[\)\]]?\s*$", t)
+    if not m or abs(int(m.group(1)) - int(y)) > 1:
+        return t
+    rest = t[:m.start()].rstrip(" -\u2013:|")
+    return rest if rest.strip() else t
