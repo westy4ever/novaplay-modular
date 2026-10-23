@@ -60,7 +60,7 @@ from enigma import (eTimer, eServiceReference, iPlayableService,
 import novaplay_proxy
 from novaplay_proxy import start_proxy, _PROXY_PORT
 import plugin_imagecache
-from plugin_common import my_log
+from plugin_common import my_log, set_play_id
 
 
 def _tr_call(name, *a):
@@ -628,6 +628,14 @@ class NovaPlaySimplePlayer(Screen):
                  next_episode=None, on_next=None, poster_url="", quality_variants=None, server_url="",
                  is_preview=False, servers=None, site="", server_name=""):
         Screen.__init__(self, session)
+        # [log-tags] every log line of this playback carries this id
+        try:
+            import random
+            self._play_id = "P" + "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(3))
+            set_play_id(self._play_id)
+            my_log("playback start: {} ({} methods to try)".format(title, len(candidates or [])))
+        except Exception:
+            pass
         self["overlay_bg"]   = Label("")
         self["status"]       = Label("Playing...")
         self["osd_shadow"]   = Label("")
@@ -3072,6 +3080,11 @@ class NovaPlaySimplePlayer(Screen):
 
     def __stop(self):
         self._closed_flag = True
+        try:
+            my_log("playback end")
+            set_play_id("")
+        except Exception:
+            pass
         _tr_call("resume_later")
         self.__hideOSD()
         try:

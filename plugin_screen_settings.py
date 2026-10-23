@@ -405,6 +405,9 @@ class NovaPlaySettings(Screen):
             return [
                 ("diagnostics", "pulse", "Diagnostics", "Run  ›",
                  "Check sites, proxy, TMDb and the player"),
+                ("debuglog", "pulse", "Debug Log",
+                 "On" if str(_get_config("debug_log", "false")).lower() == "true" else "Off",
+                 "Also log every web request and its time (/tmp/novaplay.log) -- on when reporting a problem"),
                 ("downloads", "download", "Downloads", "Open  ›",
                  "Downloads and recordings in progress"),
                 ("cleartrailers", "download", "Downloaded Trailers", _trailer_cache_summary(),
@@ -692,6 +695,15 @@ class NovaPlaySettings(Screen):
             self._toggleAdult()
         elif key == "transmission":
             self._transmissionInfo()
+        elif key == "debuglog":
+            _on = str(_get_config("debug_log", "false")).lower() == "true"
+            _set_config("debug_log", "false" if _on else "true")
+            try:
+                from extractors.net import debug_reset
+                debug_reset()
+            except Exception:
+                pass
+            self._refresh()
         elif key == "layout":
             _set_config("layout_style", "grid" if _get_config("layout_style", "grid") == "carousel" else "carousel")
             self._refresh()

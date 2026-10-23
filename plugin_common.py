@@ -14,6 +14,7 @@ if PLUGIN_PATH not in sys.path:
     sys.path.insert(0, PLUGIN_PATH)
 
 from extractors.base import log as _base_log
+from extractors.net import debug as _base_debug, set_play_id     # noqa: F401  [log-tags]
 
 _PLUGIN_VERSION = "4.1.0"        # bumped: modular build
 _PLUGIN_NAME    = "NOVA Media Player"
@@ -22,3 +23,8 @@ _TYPE_LABELS    = {"movie": "Movie", "series": "Series", "episode": "Episode"}
 
 def my_log(msg):
     _base_log(msg)
+
+
+def my_debug(msg):
+    """only written when Settings > Tools > Debug Log is on"""
+    _base_debug(msg)

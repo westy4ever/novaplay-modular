@@ -17,6 +17,7 @@ Audit fixes baked in:
 
 import os
 import re
+import sys
 import time
 import gzip
 import zlib
@@ -103,6 +104,57 @@ _LOG_MAX_BYTES = 2 * 1024 * 1024  # 2 MB cap
 _LOG_LOCK = threading.Lock()
 _LOG_N = [0]
 
+# [log-tags 2026-10-23] every line says where it came from ("[player.__playNext]"),
+# lines written during a playback carry its id ("#P3A7") so one attempt can be
+# found with grep, and Settings > Tools > Debug Log adds a line per web request.
+_PLAY_ID = [""]
+_DEBUG = [0.0, False]
+_TAG_PREFIXES = ("plugin_screen_", "plugin_", "novaplay_", "extractors.")
+
+
+def set_play_id(pid):
+    """the player sets this when a playback starts and clears it on close"""
+    _PLAY_ID[0] = str(pid or "")
+
+
+def debug_enabled():
+    now = time.time()
+    if now - _DEBUG[0] > 5.0:
+        try:
+            from plugin_state import _get_config
+            _DEBUG[1] = str(_get_config("debug_log", "false")).lower() in ("true", "1", "on")
+        except Exception:
+            _DEBUG[1] = False
+        _DEBUG[0] = now
+    return _DEBUG[1]
+
+
+def debug_reset():
+    _DEBUG[0] = 0.0
+
+
+def _caller_tag():
+    try:
+        f = sys._getframe(2)
+        while f is not None and f.f_code.co_name in ("my_log", "my_debug", "log", "debug"):
+            f = f.f_back
+        if f is None:
+            return ""
+        mod = str(f.f_globals.get("__name__", "") or "")
+        for p in _TAG_PREFIXES:
+            if mod.startswith(p):
+                mod = mod[len(p):]
+                break
+        return "[{}.{}] ".format(mod.rsplit(".", 1)[-1], f.f_code.co_name)
+    except Exception:
+        return ""
+
+
+def debug(msg):
+    """written only when Settings > Tools > Debug Log is on"""
+    if debug_enabled():
+        log(msg)
+
 
 def log(msg):
     try:
@@ -124,9 +176,11 @@ def log(msg):
         safe_msg = re.sub(r'api_key=[^&]+', 'api_key=****', str(msg))
 
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        pid = ("#" + _PLAY_ID[0] + " ") if _PLAY_ID[0] else ""
+        line = "[{}] {}{}{}\n".format(ts, _caller_tag(), pid, safe_msg)
         with _LOG_LOCK:              # threads no longer interleave half-lines
             with open(_LOG_PATH, "a") as f:
-                f.write("[{}] {}\n".format(ts, safe_msg))
+                f.write(line)
     except Exception:
         pass
 
@@ -693,6 +747,23 @@ def _apply_browser_cookies(url, headers):
 
 
 def fetch(url, referer=None, extra_headers=None, post_data=None,
+           timeout=None, max_retries=None):
+    """same as _fetch(); with Debug Log on, one line per request:
+    URL, result size and time"""
+    if not debug_enabled():
+        return _fetch(url, referer, extra_headers, post_data, timeout, max_retries)
+    t0 = time.time()
+    res = _fetch(url, referer, extra_headers, post_data, timeout, max_retries)
+    try:
+        body = res[0] if isinstance(res, tuple) else res
+        log("web {} -> {} ({:.1f}s)".format(
+            str(url)[:140], "{} bytes".format(len(body)) if body else "nothing", time.time() - t0))
+    except Exception:
+        pass
+    return res
+
+
+def _fetch(url, referer=None, extra_headers=None, post_data=None,
            timeout=None, max_retries=None):
     """
     Robust fetch with:
