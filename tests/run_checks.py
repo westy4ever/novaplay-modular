@@ -139,7 +139,8 @@ def check_logic():
            {"url": "https://embed", "quality": "HD"},
            {"url": "magnet:d", "quality": "720p", "seeders": "999"},
            {"url": "magnet:e", "quality": "1080p HDTS", "seeders": "5000"}]
-    fake = type("F", (), {k: D.NovaPlayDetail.__dict__[k] for k in
+    import inspect
+    fake = type("F", (), {k: inspect.getattr_static(D.NovaPlayDetail, k) for k in
                           ("_torBucket", "_torSeeds", "_TOR_PREF", "_orderTorrents")})()
     expect("torrent order (1080p first, seeders, CAM last, embeds keep place)",
            [x["url"] for x in fake._orderTorrents(srv)],
