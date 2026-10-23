@@ -200,11 +200,11 @@ def _skin():
         <widget name="pEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="10" zPosition="2" />
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" zPosition="3" />
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="5" />
+        <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#0C1017" cornerRadius="6" zPosition="5" />
         <widget name="pQual{i}" position="{qx},{qy}" size="84,24" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="6" zPosition="5" />
         <widget name="pYear{i}" position="{yx},{ry}" size="64,26" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#C0392B" cornerRadius="6" zPosition="5" />
         <widget name="pLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="6" zPosition="5" />
-        <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
+        <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#1E7A4A" zPosition="5" />
         <widget name="pName{i}" halign="center" position="{x},{ty}" size="{w},54" font="Regular;19" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=PW, h=PH, ex=x - 4, ey=y - 4, ew=PW + 8, eh=PH + 8,
                    rx=x + PW - 78, ry=y + 8, qx=x + PW - 92, qy=y + 40, yx=x + 8, ly=y + 38,
@@ -225,11 +225,11 @@ def _skin():
         <widget name="kEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="10" zPosition="5" />
         <widget name="kBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" zPosition="6" />
         <widget name="kImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="7" />
-        <widget name="kRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#200C1017" cornerRadius="6" zPosition="8" />
+        <widget name="kRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#0C1017" cornerRadius="6" zPosition="8" />
         <widget name="kQual{i}" position="{qx},{qy}" size="84,24" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="6" zPosition="8" />
         <widget name="kYear{i}" position="{yx},{ry}" size="64,26" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#C0392B" cornerRadius="6" zPosition="8" />
         <widget name="kLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="6" zPosition="8" />
-        <widget name="kMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#301E7A4A" zPosition="8" />
+        <widget name="kMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#1E7A4A" zPosition="8" />
         """.format(i=s_, x=x, y=y, w=w, h=h, ex=x - 5, ey=y - 5, ew=w + 10, eh=h + 10,
                    rx=x + w - 78, ry=y + 8, qx=x + w - 92, qy=y + 40, yx=x + 8, ly=y + 38, my=y + h - 28,
                    gold=GOLD, card=CARD))
@@ -296,11 +296,11 @@ def _skin_modern():
         <widget name="pEdge{i}" position="{ex},{ey}" size="{ew},{eh}" backgroundColor="{gold}" cornerRadius="14" zPosition="2" />
         <widget name="pBack{i}" position="{x},{y}" size="{w},{h}" backgroundColor="{card}" cornerRadius="10" zPosition="3" />
         <widget name="pImg{i}" position="{x},{y}" size="{w},{h}" alphatest="blend" scale="1" zPosition="4" />
-        <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#300C1017" cornerRadius="8" zPosition="5" />
+        <widget name="pRate{i}" position="{rx},{ry}" size="70,28" font="Bold;18" halign="center" valign="center" foregroundColor="{gold}" backgroundColor="#0C1017" cornerRadius="8" zPosition="5" />
         <widget name="pQual{i}" position="{qx},{qy}" size="84,24" font="Bold;15" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#3E7BFA" cornerRadius="8" zPosition="5" />
         <widget name="pYear{i}" position="{yx},{ry}" size="64,26" font="Bold;17" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#C0392B" cornerRadius="8" zPosition="5" />
         <widget name="pLabel{i}" position="{yx},{ly}" size="90,24" font="Regular;15" halign="center" valign="center" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="8" zPosition="5" />
-        <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#301E7A4A" zPosition="5" />
+        <widget name="pMark{i}" position="{x},{my}" size="{w},28" font="Regular;18" halign="center" valign="center" foregroundColor="{white}" backgroundColor="#1E7A4A" zPosition="5" />
         <widget name="pName{i}" halign="center" position="{nx},{ty}" size="{nw},54" font="Regular;19" foregroundColor="{white}" backgroundColor="{bg}" transparent="1" zPosition="3" />
         """.format(i=i, x=x, y=y, w=MPW, h=MPH, ex=x - 6, ey=y - 6, ew=MPW + 12, eh=MPH + 12,
                    rx=x + MPW - 78, ry=y + 8, qx=x + MPW - 92, qy=y + 40, yx=x + 8, ly=y + 38,
