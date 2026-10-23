@@ -390,7 +390,8 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
     # the re-save below overwrites the stale file with the complete one.
     # [lang] entries saved before 'orig_lang' existed were filled Arabic-first
     # even for English films -- refetch them once (also brings the cast)
-    if cached is not None and all(k in cached for k in ("runtime", "release_date", "certification", "orig_lang")):
+    # [tagline] entries saved before "tagline" existed refetch once too
+    if cached is not None and all(k in cached for k in ("runtime", "release_date", "certification", "orig_lang", "tagline")):
         return cached
 
     # 2. Fetch from TMDB API
@@ -574,6 +575,8 @@ def _tmdb_search_metadata(title, year="", item_type="movie"):
         "tmdb_id": detail.get("id"),
         "tmdb_kind": media_kind,
         "orig_lang": orig_lang,
+        # [tagline] same language preference as the plot
+        "tagline": ((prefer[0].get("tagline") or "").strip() or (prefer[1].get("tagline") or "").strip()),
         # [cast] top 6 actors (English names, TMDb profile photo paths)
         "cast": [{"name": c.get("name", ""), "character": c.get("character", ""),
                   "photo": c.get("profile_path") or ""}

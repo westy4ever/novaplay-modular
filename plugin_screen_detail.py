@@ -46,7 +46,7 @@ from extractors import get_extractor
 from extractors.base import get_curl_failed_needs_proxy
 from plugin_state import (_get_config, _entry_from_item, _upsert_library_item,
                           _is_favorite, _get_saved_position, _save_position,
-                          _toggle_favorite_entry)
+                          _toggle_favorite_entry, _history_items)
 from urllib.parse import urlparse
 from plugin_util import (_single_line_text, _wrap_ui_text,
                           _strip_arabic_from_english_title,
@@ -168,7 +168,7 @@ CAST_N = 6
 # [cast] one row of 6 round photos (no panel) under the details, over the backdrop
 _CAST_PHOTO, _CAST_W = 90, 150
 _CAST_X = tuple(420 + c * _CAST_W for c in range(3))  # 2 rows x 3 under the details
-_CAST_Y = (290, 410)
+_CAST_Y = (318, 424)
 
 
 def _detail_skin_modern():
@@ -186,13 +186,20 @@ def _detail_skin_modern():
         <widget name="poster" position="52,152" size="316,470" zPosition="4" alphatest="blend" />
         <widget name="posterYear" position="62,162" size="86,34" font="Bold;22" foregroundColor="#0C1017" backgroundColor="#F2C230" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="9" />
         <widget name="posterRating" position="272,162" size="88,34" font="Bold;22" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="9" />
+        <widget name="posStrip" position="52,578" size="316,44" backgroundColor="#0C1017" zPosition="6" />
+        <widget name="posStatus" position="64,578" size="250,40" font="Bold;19" valign="center" foregroundColor="#FFFFFF" backgroundColor="#0C1017" transparent="1" zPosition="7" />
+        <widget name="posFav" position="318,578" size="44,40" font="Regular;26" halign="center" valign="center" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="1" zPosition="7" />
+        <widget name="posBarBg" position="52,618" size="316,4" backgroundColor="#3A4352" zPosition="7" />
+        <widget name="posBar" position="52,618" size="1,4" backgroundColor="#30A46C" zPosition="8" />
 
-        <widget name="title" position="420,140" size="900,66" font="Bold;52" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
-        <widget name="meta" position="420,212" size="900,34" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="4" />
-        <widget name="source" position="420,250" size="900,30" font="Regular;21" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
-        <widget name="proxy_warning" position="420,284" size="900,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="left" />
-        <widget name="plot_title" position="420,535" size="600,28" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" zPosition="4" />
-        <widget name="plot" position="420,565" size="1460,112" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" zPosition="4" />
+        <widget name="title" position="420,138" size="900,68" font="Bold;52" valign="center" foregroundColor="#FFFFFF" transparent="1" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
+        <widget name="tagline" position="420,208" size="900,30" font="Regular;22" foregroundColor="#C9D0DA" transparent="1" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
+        <widget name="metaCert" position="420,242" size="80,32" font="Bold;20" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#1A2130" borderWidth="2" borderColor="#C9D0DA" cornerRadius="6" transparent="0" zPosition="4" />
+        <widget name="meta" position="420,242" size="900,32" font="Regular;24" valign="center" foregroundColor="#F2C230" transparent="1" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
+        <widget name="source" position="420,280" size="900,30" font="Regular;21" foregroundColor="#C9D0DA" transparent="1" halign="left" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
+        <widget name="proxy_warning" position="1320,140" size="560,30" font="Regular;21" foregroundColor="#FF8A6B" transparent="1" zPosition="4" halign="right" shadowColor="#000000" shadowOffset="-2,-2" />
+        <widget name="plot_title" position="420,548" size="600,26" font="Bold;19" foregroundColor="#A3ADBB" transparent="1" halign="left" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
+        <widget name="plot" position="420,576" size="1460,110" font="Regular;22" foregroundColor="#E6EAF0" transparent="1" halign="left" valign="top" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
 
         <widget name="menu_box" position="40,692" size="1840,272" backgroundColor="#121822" cornerRadius="22" zPosition="2" />
         <widget name="section" position="70,702" size="1150,44" font="Bold;26" foregroundColor="#FFFFFF" backgroundColor="#121822" transparent="1" zPosition="4" />
@@ -213,10 +220,11 @@ def _detail_skin_modern():
     for i in range(CAST_N):
         x, y = _CAST_X[i % 3], _CAST_Y[i // 3]
         p.append("""
-        <widget name="castImg{i}" position="{ix},{y}" size="{ps},{ps}" alphatest="blend" scale="1" zPosition="4" />
+        <widget name="castInit{i}" position="{ix},{y}" size="{ps},{ps}" font="Bold;30" halign="center" valign="center" foregroundColor="#D6DCE5" backgroundColor="#2A3342" cornerRadius="{cr}" transparent="0" zPosition="4" />
+        <widget name="castImg{i}" position="{ix},{y}" size="{ps},{ps}" alphatest="blend" scale="1" zPosition="5" />
         <widget name="castName{i}" position="{x},{ny}" size="{w},26" font="Regular;16" halign="center" valign="top" foregroundColor="#FFFFFF" backgroundColor="#0C1017" transparent="1" shadowColor="#000000" shadowOffset="-2,-2" zPosition="4" />
         """.format(i=i, x=x, ix=x + (_CAST_W - _CAST_PHOTO) // 2, y=y, ny=y + _CAST_PHOTO + 4,
-                   ps=_CAST_PHOTO, w=_CAST_W))
+                   ps=_CAST_PHOTO, w=_CAST_W, cr=_CAST_PHOTO // 2))
     for i in range(SV_CARDS):
         x = _SV_X0 + i * (_SV_W + _SV_GAP)
         p.append("""
@@ -328,6 +336,16 @@ def _trailer_stream_url(yt_dlp, youtube_url):
     return best["url"] + ("|User-Agent={}".format(ua) if ua else "")
 
 
+def _initials(name):
+    """[hdr-ui] "Tom Hardy" -> "TH", "Zendaya" -> "Z" (cast without a photo)"""
+    words = [w for w in re.split(r"[\s\-]+", str(name or "").strip()) if w and w[0].isalnum()]
+    if not words:
+        return u"?"
+    if len(words) == 1:
+        return words[0][0].upper()
+    return (words[0][0] + words[-1][0]).upper()
+
+
 def _round_photo(path, size=116):
     """[cast] TMDb profile photo -> round PNG (transparent corners), cached."""
     if not path:
@@ -413,8 +431,9 @@ class NovaPlayDetail(Screen):
     <screen name="NovaPlayDetail" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="#0C1017">
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="1" />
         <widget name="siteLogo" position="40,40" size="180,64" zPosition="3" alphatest="blend" scale="1" />
-        <widget name="title" position="240,28" size="1120,56" font="Bold;40" foregroundColor="#F2C230" transparent="1" zPosition="4" />
-        <widget name="meta" position="240,86" size="1120,32" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="4" />
+        <widget name="title" position="240,28" size="1120,56" font="Bold;40" valign="center" foregroundColor="#F2C230" transparent="1" zPosition="4" />
+        <widget name="metaCert" position="240,86" size="80,30" font="Bold;19" halign="center" valign="center" foregroundColor="#FFFFFF" backgroundColor="#1A2130" borderWidth="2" borderColor="#A3ADBB" cornerRadius="6" transparent="0" zPosition="4" />
+        <widget name="meta" position="240,86" size="1120,32" font="Regular;22" valign="center" foregroundColor="#A3ADBB" transparent="1" zPosition="4" />
         <widget name="proxy_warning" position="240,118" size="1120,28" font="Regular;22" foregroundColor="#FF6B6B" transparent="1" zPosition="4" halign="left" />
         <widget name="clock_time" position="1380,22" size="500,62" font="Bold;54" halign="right" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
         <widget name="clock_date" position="1280,90" size="600,30" font="Regular;22" halign="right" foregroundColor="#A3ADBB" transparent="1" zPosition="4" />
@@ -424,6 +443,11 @@ class NovaPlayDetail(Screen):
         <widget name="poster" position="62,172" size="316,470" zPosition="4" alphatest="blend" />
         <widget name="posterYear" position="70,180" size="86,34" font="Bold;22" foregroundColor="#0C1017" backgroundColor="#F2C230" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
         <widget name="posterRating" position="282,180" size="88,34" font="Bold;22" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="0" zPosition="5" halign="center" valign="center" cornerRadius="8" />
+        <widget name="posStrip" position="62,598" size="316,44" backgroundColor="#0C1017" zPosition="6" />
+        <widget name="posStatus" position="74,598" size="250,40" font="Bold;19" valign="center" foregroundColor="#FFFFFF" backgroundColor="#0C1017" transparent="1" zPosition="7" />
+        <widget name="posFav" position="328,598" size="44,40" font="Regular;26" halign="center" valign="center" foregroundColor="#F2C230" backgroundColor="#0C1017" transparent="1" zPosition="7" />
+        <widget name="posBarBg" position="62,638" size="316,4" backgroundColor="#3A4352" zPosition="7" />
+        <widget name="posBar" position="62,638" size="1,4" backgroundColor="#30A46C" zPosition="8" />
         <widget name="source" position="62,662" size="316,280" font="Regular;22" foregroundColor="#C9D0DA" transparent="1" halign="left" zPosition="4" />
 
         <widget name="section" position="430,152" size="950,48" font="Bold;30" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
@@ -448,6 +472,7 @@ class NovaPlayDetail(Screen):
         <widget name="backdrop" position="1430,170" size="430,242" backgroundColor="#161C26" cornerRadius="12" zPosition="2" />
         <widget name="backdropImage" position="1430,170" size="430,242" zPosition="3" alphatest="blend" />
         <widget name="plot_title" position="1430,428" size="430,32" font="Bold;22" foregroundColor="#F2C230" transparent="1" halign="left" zPosition="4" />
+        <widget name="tagline" position="1430,462" size="430,56" font="Regular;20" foregroundColor="#A3ADBB" transparent="1" halign="left" valign="top" zPosition="4" />
         <widget name="plot" position="1430,466" size="430,476" font="Regular;23" foregroundColor="#D6DCE5" transparent="1" halign="left" valign="top" zPosition="4" />
 
         <eLabel position="40,976" size="1840,76" backgroundColor="#121822" cornerRadius="16" zPosition="2" />
@@ -474,9 +499,15 @@ class NovaPlayDetail(Screen):
             ("posterYear", 70, 180),
             ("posterRating", 282, 180),
             ("source", 62, 662),
+            ("posStrip", 62, 598),
+            ("posStatus", 74, 598),
+            ("posFav", 328, 598),
+            ("posBarBg", 62, 638),
+            ("posBar", 62, 638),
         ), -360, 0, 0, 8),
         ("info", (
             ("title", 240, 28),
+            ("metaCert", 240, 86),
             ("meta", 240, 86),
             ("proxy_warning", 240, 118),
         ), 220, 0, 2, 8),
@@ -489,6 +520,7 @@ class NovaPlayDetail(Screen):
             ("backdrop", 1430, 170),
             ("backdropImage", 1430, 170),
             ("plot_title", 1430, 428),
+            ("tagline", 1430, 462),
             ("plot", 1430, 466),
         ), 360, 0, 4, 8),
     )
@@ -498,14 +530,21 @@ class NovaPlayDetail(Screen):
             ("poster", 52, 152),
             ("posterYear", 62, 162),
             ("posterRating", 272, 162),
+            ("posStrip", 52, 578),
+            ("posStatus", 64, 578),
+            ("posFav", 318, 578),
+            ("posBarBg", 52, 618),
+            ("posBar", 52, 618),
         ), -400, 0, 0, 8),
         ("info", (
-            ("title", 420, 140),
-            ("meta", 420, 212),
-            ("source", 420, 250),
-            ("proxy_warning", 420, 284),
-            ("plot_title", 420, 535),
-            ("plot", 420, 565),
+            ("title", 420, 138),
+            ("tagline", 420, 208),
+            ("metaCert", 420, 242),
+            ("meta", 420, 242),
+            ("source", 420, 280),
+            ("proxy_warning", 1320, 140),
+            ("plot_title", 420, 548),
+            ("plot", 420, 576),
         ), 260, 0, 2, 8),
         ("band", (
             ("menu_box", 40, 692),
@@ -626,6 +665,16 @@ class NovaPlayDetail(Screen):
         self["meta"]   = Label("")
         self["source"] = Label("")
         self["proxy_warning"] = Label("")
+        # [hdr-ui] tagline, age-rating chip, poster resume/favourite strip
+        self["tagline"] = Label("")
+        self["metaCert"] = Label("")
+        for _k in ("posStrip", "posStatus", "posFav", "posBarBg", "posBar"):
+            self[_k] = Label("")
+        self._tagline = ""
+        self._rt_min = 0
+        self._hdr_pos = {}
+        self.onLayoutFinish.append(self._hdrInit)
+        self.onShown.append(self._paintPosterStatus)
         self["plot_title"] = Label("Plot")
         self["plot"]   = Label("")
         self["section"] = Label("Preparing...")
@@ -653,6 +702,7 @@ class NovaPlayDetail(Screen):
         if self._modern:
             for _i in range(CAST_N):
                 self["castImg%d" % _i] = Pixmap()
+                self["castInit%d" % _i] = Label("")
                 self["castName%d" % _i] = Label("")
             self._cast_token = None
             self["svPos"] = Label("")
@@ -756,6 +806,7 @@ class NovaPlayDetail(Screen):
             pass
         for i in range(CAST_N):
             self["castImg%d" % i].hide()
+            self["castInit%d" % i].hide()
             self["castName%d" % i].hide()
         try:
             # every selection move (incl. the auto-pick of the last server)
@@ -874,11 +925,16 @@ class NovaPlayDetail(Screen):
                 if path and inst is not None:
                     inst.setPixmapFromFile(path)
                     self["castImg%d" % i].show()
+                    self["castInit%d" % i].hide()
                 else:
+                    # [hdr-ui] no photo: a round circle with the initials
                     self["castImg%d" % i].hide()
+                    self["castInit%d" % i].setText(_initials(name))
+                    self["castInit%d" % i].show()
             else:
                 self["castName%d" % i].hide()
                 self["castImg%d" % i].hide()
+                self["castInit%d" % i].hide()
 
     def _svStep(self, d):
         n = len(self._sv_items)
@@ -1010,10 +1066,179 @@ class NovaPlayDetail(Screen):
         lines = sum(max(1, -(-len(par) // 92)) for par in t.split("\n"))
         return min(256, lines * 36)
 
+    # ── [hdr-ui] header: title size, tagline, rating chip, poster strip ──
+    def _hdrInit(self):
+        for k in ("tagline", "metaCert", "posStrip", "posStatus", "posFav", "posBarBg", "posBar"):
+            try:
+                self[k].hide()
+            except Exception:
+                pass
+        if getattr(self, "_modern", False):
+            for i in range(CAST_N):
+                try:
+                    self["castInit%d" % i].hide()
+                except Exception:
+                    pass
+
+    def _setFont(self, key, face, size):
+        try:
+            from enigma import gFont
+            inst = self[key].instance
+            if inst is not None:
+                inst.setFont(gFont(face, int(size)))
+        except Exception as e:
+            my_log("detail font {}: {}".format(key, e))
+
+    # (base size, smaller steps, 2-line size, box width)
+    _TITLE_FIT = {True: (52, (44, 38, 32), 30, 900), False: (40, (34, 30), 24, 1120)}
+
+    def _fitTitle(self, text):
+        """[hdr-ui] long titles: the font steps down until the title fits on
+        one line; still too long -> two smaller lines (never cut short)."""
+        text = re.sub(r"\s+", " ", str(text or "")).strip() or "Untitled"
+        base, steps, two, box = self._TITLE_FIT[bool(getattr(self, "_modern", False))]
+        n = len(text)
+        size = base
+        for sz in (base,) + tuple(steps):
+            size = sz
+            if n * sz * 0.55 <= box:
+                self._setFont("title", "Bold", sz)
+                self["title"].setText(text)
+                return
+        per_line = int(box / (two * 0.55))
+        self._setFont("title", "Bold", two)
+        self["title"].setText(_wrap_ui_text(text, width=per_line, max_lines=2, fallback="Untitled"))
+
+    def _setMetaLine(self, cert, text):
+        """[hdr-ui] age rating as an outlined chip, the rest after it"""
+        modern = bool(getattr(self, "_modern", False))
+        x0, y = (420, 242) if modern else (240, 86)
+        box = 900 if modern else 1120
+        cert = str(cert or "").strip()
+        if cert:
+            cw = 26 + 12 * len(cert)
+            self["metaCert"].setText(cert)
+            self["metaCert"].show()
+            mx = x0 + cw + 14
+        else:
+            cw = 0
+            self["metaCert"].hide()
+            mx = x0
+        self._metaCertW = cw
+        self._metaX = mx
+        self["meta"].setText(_single_line_text(text, width=max(20, int((box - (mx - x0)) / 12.5)), fallback=""))
+
     def _layoutHeader(self):
-        """[panel] title, details, facts and plot have fixed places in the
-        three-column layout (the skin positions); nothing to stack."""
+        """[hdr-ui] Modern: title / tagline / details / facts / cast / plot
+        stacked over the backdrop -- without a tagline everything below the
+        title moves up into its place. Classic: the tagline sits above the
+        plot in the right column."""
         self._hdr_y = {}
+        pos = {}
+        tag = getattr(self, "_tagline", "")
+        modern = bool(getattr(self, "_modern", False))
+        cw = getattr(self, "_metaCertW", 0)
+        mx = getattr(self, "_metaX", 420 if modern else 240)
+        if modern:
+            dy = 0 if tag else -34
+            if tag:
+                self["tagline"].setText(_single_line_text(tag, width=74, fallback=""))
+                self["tagline"].show()
+            else:
+                self["tagline"].hide()
+            pos["metaCert"] = (420, 242 + dy)
+            pos["meta"] = (mx, 242 + dy)
+            pos["source"] = (420, 280 + dy)
+            pos["plot_title"] = (420, 548 + dy)
+            pos["plot"] = (420, 576 + dy)
+            self._moveResize("metaCert", 420, 242 + dy, max(1, cw), 32)
+            self._moveResize("meta", mx, 242 + dy, 900 - (mx - 420), 32)
+            self._moveResize("source", 420, 280 + dy, 900, 30)
+            self._moveResize("plot_title", 420, 548 + dy, 600, 26)
+            self._moveResize("plot", 420, 576 + dy, 1460, 110 - dy)
+            for i in range(CAST_N):
+                x, y = _CAST_X[i % 3], _CAST_Y[i // 3] + dy
+                ix = x + (_CAST_W - _CAST_PHOTO) // 2
+                self._moveResize("castImg%d" % i, ix, y, _CAST_PHOTO, _CAST_PHOTO)
+                self._moveResize("castInit%d" % i, ix, y, _CAST_PHOTO, _CAST_PHOTO)
+                self._moveResize("castName%d" % i, x, y + _CAST_PHOTO + 4, _CAST_W, 26)
+        else:
+            pos["metaCert"] = (240, 86)
+            pos["meta"] = (mx, 86)
+            self._moveResize("metaCert", 240, 86, max(1, cw), 30)
+            self._moveResize("meta", mx, 86, 1120 - (mx - 240), 32)
+            if tag:
+                self["tagline"].setText(_wrap_ui_text(tag, width=40, max_lines=2, fallback=""))
+                self["tagline"].show()
+                th = 56 if len(tag) > 40 else 30
+                pos["plot"] = (1430, 466 + th + 6)
+                self._moveResize("plot", 1430, 466 + th + 6, 430, 476 - th - 6)
+            else:
+                self["tagline"].hide()
+                pos["plot"] = (1430, 466)
+                self._moveResize("plot", 1430, 466, 430, 476)
+        self._hdr_pos = pos
+
+    def _paintPosterStatus(self):
+        """[hdr-ui] strip at the bottom of the poster: "▶ Resume 42:10 · 65%"
+        with a progress line, "✓ Watched", and a gold ★ when it's a favourite."""
+        try:
+            url = (getattr(self, "_item", None) or {}).get("url", "")
+            if not url or getattr(self, "_closed", False):
+                return
+            fav = bool(_is_favorite(url))
+            pos = int(_get_saved_position(url) or 0)
+            dur = 0
+            for h in _history_items():
+                if h.get("url") == url:
+                    dur = int(h.get("total_duration") or h.get("duration") or h.get("total_seconds") or 0)
+                    break
+            if not dur and getattr(self, "_rt_min", 0) and self._episode_index < 0:
+                dur = int(self._rt_min) * 60
+            watched = False
+            try:
+                from plugin_watched import is_watched
+                watched = bool(is_watched(url))
+            except Exception:
+                pass
+            txt, pct = "", 0
+            if pos > 30:
+                hh, rem = divmod(pos, 3600)
+                mm, ss = divmod(rem, 60)
+                t = "{}:{:02d}:{:02d}".format(hh, mm, ss) if hh else "{}:{:02d}".format(mm, ss)
+                if dur > pos:
+                    pct = max(1, min(99, int(pos * 100 / dur)))
+                    txt = u"\u25b6 Resume {}  \u00b7  {}%".format(t, pct)
+                else:
+                    txt = u"\u25b6 Resume {}".format(t)
+            elif watched:
+                txt = u"\u2713 Watched"
+            fav_only = fav and not txt
+            if fav_only:
+                txt = u"\u2605 Favourite"
+            if not txt:
+                for k in ("posStrip", "posStatus", "posFav", "posBarBg", "posBar"):
+                    self[k].hide()
+                return
+            self["posStatus"].setText(txt)
+            self._svColor("posStatus", fg="#F2C230" if fav_only else "#FFFFFF")
+            self["posStrip"].show()
+            self["posStatus"].show()
+            if fav and not fav_only:
+                self["posFav"].setText(u"\u2605")
+                self["posFav"].show()
+            else:
+                self["posFav"].hide()
+            if pct:
+                px, py = (52, 152) if getattr(self, "_modern", False) else (62, 172)
+                self._moveResize("posBar", px, py + 466, max(2, int(316 * pct / 100)), 4)
+                self["posBarBg"].show()
+                self["posBar"].show()
+            else:
+                self["posBarBg"].hide()
+                self["posBar"].hide()
+        except Exception as e:
+            my_log("poster status: {}".format(e))
 
     # ── [detail-common] move+resize helper ─────────────────────────────
     def _moveResize(self, key, x, y, w, h):
@@ -1034,7 +1259,7 @@ class NovaPlayDetail(Screen):
         self._reveal_frame = 0
         for _name, widgets, ox, oy, _d, _dur in self._REVEAL_GROUPS:
             for key, dx, dy in widgets:
-                dy = getattr(self, "_hdr_y", {}).get(key, dy)
+                dx, dy = getattr(self, "_hdr_pos", {}).get(key, (dx, getattr(self, "_hdr_y", {}).get(key, dy)))
                 try:
                     inst = self[key].instance
                     if inst:
@@ -1067,11 +1292,11 @@ class NovaPlayDetail(Screen):
             xoff = int(ox * (1.0 - p_eased))
             yoff = int(oy * (1.0 - p_eased))
             for key, dx, dy in widgets:
-                dy = getattr(self, "_hdr_y", {}).get(key, dy)
+                dx, dy = getattr(self, "_hdr_pos", {}).get(key, (dx, getattr(self, "_hdr_y", {}).get(key, dy)))
                 try:
                     inst = self[key].instance
                     if inst:
-                        inst.move(ePoint(dx + xoff, dy + yoff))
+                        inst.move(ePoint(int(dx + xoff), int(dy + yoff)))
                 except Exception:
                     pass
         if all_done:
@@ -2042,7 +2267,9 @@ class NovaPlayDetail(Screen):
         self._quality_choices = []
         current_title = _strip_arabic_from_english_title(data.get("title") or self._item.get("title", ""))
         self._raw_title = re.sub(r"\s+", " ", current_title).strip()
-        self["title"].setText(_single_line_text(current_title, width=46, fallback="Untitled"))
+        self._fitTitle(current_title)
+        self._tagline = str((data.get("_tmdb") or {}).get("tagline") or "").strip() \
+            if self._episode_index < 0 else ""
 
         # [detail-tmdb-meta] real TMDb page shows one line right under the
         # title: certification badge + release date + genres + runtime
@@ -2101,23 +2328,24 @@ class NovaPlayDetail(Screen):
         # (certification/release_date/runtime) resolved. Gate on those
         # three instead; genres only decides whether it's appended once
         # the TMDb-style line is already going to be shown.
+        self._rt_min = _rt_min
         if _cert or _rd_fmt or _rt_fmt:
             tmdb_meta = []
-            if _cert:               tmdb_meta.append(_cert)
             if _rd_fmt:             tmdb_meta.append(_rd_fmt)
             # [lang] TMDb's own genres here (this is the TMDb line), never the site's
             _tg = (data.get("_tmdb") or {}).get("genres") or ""
             if _tg:                 tmdb_meta.append(_tg)
             if _rt_fmt:             tmdb_meta.append(_rt_fmt)
             # [no-repeat] no site name here (logo + "Source" fact show it)
-            self["meta"].setText(_single_line_text("  ·  ".join(tmdb_meta), width=96, fallback=""))
+            # [hdr-ui] the age rating is its own outlined chip in front
+            self._setMetaLine(_cert, "  ·  ".join(tmdb_meta))
         else:
             # [no-repeat] year and rating are on the poster badges already
             meta = []
             if data.get("type") in _TYPE_LABELS: meta.append(_TYPE_LABELS[data["type"]])
             if data.get("quality"): meta.append(data["quality"])          # [PATCH 111] print type e.g. HDCAM
             if data.get("genres"):  meta.append(data["genres"])
-            self["meta"].setText(_single_line_text("  ·  ".join(meta), width=96, fallback=""))
+            self._setMetaLine("", "  ·  ".join(meta))
         counts = []
         _nav_items = [e for e in data.get("items", []) if e.get("type") in ("episode", "series", "season")]
         has_episodes = bool(_nav_items)
@@ -2192,6 +2420,7 @@ class NovaPlayDetail(Screen):
         self["plot"].setText(_pt)
         try:
             self._layoutHeader()      # [plot-low] place the plot for its length
+            self._paintPosterStatus()
         except Exception as e:
             my_log("plot layout: {}".format(e))
 
