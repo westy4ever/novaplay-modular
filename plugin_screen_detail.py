@@ -176,7 +176,7 @@ def _detail_skin_modern():
     <screen name="NovaPlayDetailModern" position="center,center" size="1920,1080" flags="wfNoBorder" backgroundColor="#0C1017">
         <widget name="bg" position="0,0" size="1920,1080" backgroundColor="#0C1017" zPosition="1" />
         <widget name="backdrop" position="0,0" size="1920,690" backgroundColor="#0C1017" zPosition="1" />
-        <widget name="backdropImage" position="0,0" size="1920,690" zPosition="2" alphatest="blend" />
+        <widget name="backdropImage" position="0,0" size="1920,690" zPosition="2" scale="1" />
         <widget name="siteLogo" position="40,40" size="180,64" zPosition="3" alphatest="blend" scale="1" />
         <widget name="clock_time" position="1380,22" size="500,62" font="Bold;54" halign="right" foregroundColor="#FFFFFF" transparent="1" zPosition="4" />
         <widget name="clock_date" position="1280,90" size="600,30" font="Regular;22" halign="right" foregroundColor="#C9D0DA" transparent="1" zPosition="4" />
@@ -1678,6 +1678,11 @@ class NovaPlayDetail(Screen):
                 h = self["backdropImage"].instance.size().height()
             except Exception:
                 w, h = 1830, 600
+            if getattr(self, "_modern", False):
+                # [accel] the box has ~5.4 MB of graphics-accelerator memory; a
+                # 1920x690 picture (5.3 MB) never fits, so it was drawn by the
+                # CPU. Made at 1280x460 (2.4 MB) and scaled up by the widget.
+                w, h = 1280, 460
 
             img = Image.open(src_path).convert("RGB")
             # [FIX backdrop] trust the picture, not the caller: a portrait
@@ -1806,7 +1811,7 @@ class NovaPlayDetail(Screen):
                     pass
 
             out_path = "{}_bd{}.jpg".format(os.path.splitext(src_path)[0],
-                                            "m" if getattr(self, "_modern", False) else ("" if w >= 1000 else "_s"))
+                                            "m1280" if getattr(self, "_modern", False) else ("" if w >= 1000 else "_s"))
             fitted.save(out_path, format="JPEG", quality=82)
             if is_tmp and out_path not in self._tmp_posters:
                 self._tmp_posters.append(out_path)

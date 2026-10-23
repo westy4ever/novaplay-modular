@@ -27,7 +27,7 @@ def scale_skin_xml(xml):
 class NovaPlaySplash(Screen):
     skin = scale_skin_xml("""
     <screen name="NovaPlaySplash" position="0,0" size="1920,1080" flags="wfNoBorder" backgroundColor="#000000">
-        <widget name="splash_pic" position="0,0" size="1920,1080" zPosition="1" alphatest="blend" />
+        <widget name="splash_pic" position="0,0" size="1920,1080" zPosition="1" scale="1" />
     </screen>
     """.format(PLUGIN_PATH))
 
@@ -47,7 +47,9 @@ class NovaPlaySplash(Screen):
         # SCREEN_W/SCREEN_H import = the P2 NameError fix, now structural.
         splash_path = os.path.join(PLUGIN_PATH, "images", "splash.png")
         if os.path.exists(splash_path):
-            self.picLoad.setPara((SCREEN_W, SCREEN_H, 1, 1, 0, 1, "#000000"))
+            # [accel] decoded at 1280x720 (3.7 MB) so it fits the box's ~5.4 MB
+            # of accelerator memory; the widget scales it to the full screen
+            self.picLoad.setPara((min(SCREEN_W, 1280), min(SCREEN_H, 720), 1, 1, 0, 1, "#000000"))
             self.picLoad.startDecode(splash_path)
         self._timer.start(2500, True)
         self._preT.start(80, True)        # load the rest once the splash is drawn
