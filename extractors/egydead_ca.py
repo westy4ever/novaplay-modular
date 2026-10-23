@@ -203,7 +203,7 @@ class EgydeadCaExtractor(BaseExtractor):
         # silently re-fetched page 1 again, forever.
         #
         # [FIX] confirmed directly, live, against the real plugin
-        # framework code (plugin_screen_home.py): for a site key NOT in
+        # framework code (then plugin_screen_home.py, now plugin_screen_site.py): for a site key NOT in
         # its special-cased list (which "egydead_ca" correctly is not),
         # the generic path calls get_category_items(url) with NO page
         # argument at all -- so this function's own `page=1` default was

@@ -26,7 +26,6 @@ https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_imagec
 https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_ribbon.py
 https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_screen_detail.py
 https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_screen_downloads.py
-https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_screen_home.py
 https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_screen_player.py
 https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_screen_search.py
 https://raw.githubusercontent.com/westy4ever/novaplay-modular/main/plugin_screen_settings.py

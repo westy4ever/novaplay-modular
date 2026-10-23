@@ -377,24 +377,19 @@ class NovaPlaySettings(Screen):
             ]
         if sec == "library":
             lib = [
-                ("homestyle", "home", "Home Style",
-                 "Classic grid" if _get_config("home_style", "panel") == "classic" else "Panel",
-                 "Panel home with sidebar and cards, or the classic site grid"),
-
                 ("watchedbw", "contrast", "Watched Posters",
                  "Black & white" if _get_config("watched_poster_bw", False) else "Colour",
                  "How posters you already watched are shown"),
                 ("downloads", "download", "Downloads", "Open  ›",
                  "Downloads and recordings in progress"),
             ]
-            _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
-            lib.insert(1, ("layout", "grid", "Poster Layout",
-                           "Carousel" if _get_config("layout_style", _dflt) == "carousel" else "Grid",
+            lib.insert(0, ("layout", "grid", "Poster Layout",
+                           "Carousel" if _get_config("layout_style", "grid") == "carousel" else "Grid",
                            "Grid with info panel, or carousel over a big backdrop (GREEN on a site switches)"))
-            lib.insert(2, ("screenstyle", "grid", "Screen Style",
+            lib.insert(1, ("screenstyle", "grid", "Screen Style",
                            "Modern" if _get_config("screen_style", "classic") == "modern" else "Classic",
                            "Classic, or Modern: 7 x 2 posters without the info panel (site and detail screens)"))
-            lib.insert(4, ("trailermode", "grid", "Trailer",
+            lib.insert(3, ("trailermode", "grid", "Trailer",
                            "Download" if _get_config("trailer_mode", "stream") == "download" else "Stream first",
                            "Stream first: starts at once (360p) when YouTube allows; Download: sharper 480p, waits"))
             _tq = str(_get_config("torrent_quality", "1080p") or "1080p")
@@ -402,7 +397,7 @@ class NovaPlaySettings(Screen):
                                       {"720p": "720p first", "4K": "4K first", "any": "Most seeders"}.get(_tq, "1080p first"),
                                       "Which torrents are listed first (each quality sorted by seeders)"))
             _am = str(_get_config("anim_mode", "full") or "full")
-            lib.insert(3, ("animmode", "grid", "Animations",
+            lib.insert(2, ("animmode", "grid", "Animations",
                            {"light": "Light", "off": "Off"}.get(_am, "Full"),
                            "Full, Light (fewer steps, pictures don't rescale) or Off -- for a smoother box"))
             return lib
@@ -697,12 +692,8 @@ class NovaPlaySettings(Screen):
             self._toggleAdult()
         elif key == "transmission":
             self._transmissionInfo()
-        elif key == "homestyle":
-            _set_config("home_style", "panel" if _get_config("home_style", "panel") == "classic" else "classic")
-            self._refresh()
         elif key == "layout":
-            _dflt = "carousel" if _get_config("home_style", "panel") == "classic" else "grid"
-            _set_config("layout_style", "grid" if _get_config("layout_style", _dflt) == "carousel" else "carousel")
+            _set_config("layout_style", "grid" if _get_config("layout_style", "grid") == "carousel" else "carousel")
             self._refresh()
         elif key == "trailermode":
             _set_config("trailer_mode", "stream" if _get_config("trailer_mode", "stream") == "download" else "download")

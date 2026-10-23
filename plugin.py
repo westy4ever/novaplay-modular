@@ -56,7 +56,7 @@ def _load():
 
 
 _REEXPORTS = {
-    "NovaPlaySplash": "plugin_screen_splash", "NovaPlayHome": "plugin_screen_home",
+    "NovaPlaySplash": "plugin_screen_splash", "NovaPlayHub": "plugin_screen_hub",
     "NovaPlayDetail": "plugin_screen_detail", "NovaPlaySimplePlayer": "plugin_screen_player",
     "_play": "plugin_screen_player", "_build_remote_play_candidates": "plugin_screen_player",
     "NovaPlaySearch": "plugin_screen_search", "NovaPlaySettings": "plugin_screen_settings",
@@ -64,7 +64,7 @@ _REEXPORTS = {
 
 
 def __getattr__(name):
-    """Old names (plugin.NovaPlayHome, ...) still work -- loaded on first use."""
+    """Old names (plugin.NovaPlayDetail, ...) still work -- loaded on first use."""
     mod = _REEXPORTS.get(name)
     if not mod:
         raise AttributeError(name)

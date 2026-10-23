@@ -29,7 +29,7 @@ Fixes applied in this revision:
   * _parse_movie_items() extracts the release/quality label
     (CAM, HDTS, HD, WEB-DL, مدبلج, بالمصري, الاخيرة, …) into the item
     dict as "label", plus the site's own chip colour as "label_color".
-    plugin_screen_home.py renders both — the chip appears directly
+    plugin_screen_site.py renders both — the chip appears directly
     under the year badge in the carousel and poster grid views.
 
 Fixes carried over from previous revisions:

@@ -103,6 +103,8 @@ cp -a "$SRC/." "$TARGET/" || fail "copy failed"
 rm -rf "$TARGET/.git" "$TARGET/.gitignore"
 rm -f "$TARGET"/*.docx "$TARGET"/*.pdf
 find "$TARGET" -type d -name __pycache__ | xargs rm -rf 2>/dev/null
+# files removed from NovaPlay (2026-10-23: the Classic home)
+rm -f "$TARGET/plugin_screen_home.py"
 if [ -n "$KEYS" ]; then
     cp -p "$KEYS" "$TARGET/api_keys.conf" && chmod 600 "$TARGET/api_keys.conf"
     say "Kept your api_keys.conf"

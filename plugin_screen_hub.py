@@ -3,13 +3,10 @@
 
 The first screen: a sidebar (Home, Search, Favorites, History, Downloads,
 Settings), a Continue Watching row and the site cards (logo, name,
-tagline, health dot; 4 x 3 per page). It hands the browsing itself to the
-existing NovaPlayHome screen, opened "for one job" (a site, a library list
-or search results) -- when the user backs out of that job NovaPlayHome
-closes and this screen is shown again.
-
-The classic home grid stays available: Settings > Library & Display >
-Home Style (config "home_style": "panel" | "classic").
+tagline, health dot; 4 x 3 per page). Sites, library lists and search
+results open in their own screens (site / detail / search / downloads);
+backing out of them returns here. (The Classic home grid was removed
+2026-10-23.)
 
 Keys
   ▲ ▼ ◀ ▶   move (◀ from the first column goes to the sidebar)
@@ -899,11 +896,6 @@ class NovaPlayHub(Screen):
                                       loader=lambda: search_items(query, scope or "all"))
 
     def _afterSettings(self, *args):
-        if _get_config("home_style", "panel") == "classic":
-            from plugin_screen_home import NovaPlayHome
-            self.session.open(NovaPlayHome)
-            self.close()
-            return
         self._back()
 
     # ─── MENU ───────────────────────────────────────────────────────────

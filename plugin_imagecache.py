@@ -11,7 +11,7 @@ check the local cache instantly (no network call from the Enigma2 UI
 thread), and requestImageAsync()/requestImageAsyncPriority() to queue a
 background download if it's not cached yet. There is no completion
 callback - callers are expected to poll getCachedImage() again on a
-short timer (see NovaPlayHome._artworkPollTimer in plugin.py),
+short timer (see the site screen's artwork poll timer),
 which is the same pattern the source plugin's carousel screens use.
 
 Changes in this revision (audit fix):
