@@ -59,6 +59,7 @@ from plugin_screen_player import NovaPlaySimplePlayer, _play
 from plugin_widgets import StreamList
 from plugin_toast import TOAST_XML, toast_init, toast
 from plugin_gridlist import POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames
+from novaplay_ui import set_color                       # [ui-helpers]
 import plugin_health
 import plugin_imagecache
 from novaplay_thread import callInMainThread
@@ -953,19 +954,7 @@ class NovaPlayDetail(Screen):
         self._svPaint()
 
     def _svColor(self, name, bg=None, fg=None):
-        try:
-            from skin import parseColor
-            inst = self[name].instance
-            if inst is None:
-                return
-            if bg:
-                inst.setBackgroundColor(parseColor(bg))
-            if fg:
-                inst.setForegroundColor(parseColor(fg))
-            inst.invalidate()
-        except Exception:
-            pass
-
+        set_color(self, name, bg, fg)        # [ui-helpers]
     def _svPaint(self):
         if not getattr(self, "_modern", False) or getattr(self, "_closed", False):
             return

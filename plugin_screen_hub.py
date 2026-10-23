@@ -30,10 +30,6 @@ from Components.Pixmap import Pixmap
 from Components.ProgressBar import ProgressBar
 from enigma import eTimer, ePoint, eSize, gFont
 
-try:
-    from skin import parseColor
-except Exception:
-    parseColor = None
 
 from plugin_common import my_log, PLUGIN_PATH, _PLUGIN_VERSION
 from extractors import get_extractor, get_home_sites, get_family_members
@@ -44,6 +40,7 @@ from plugin_state import (_get_config, _set_config, _continue_items, _history_it
                           _favorite_items, _clear_continue_item, _hide_site, _is_site_hidden,
                           _set_site_custom_name, _DEFAULT_TMDB_API_KEY)
 from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames, anim_light
+from novaplay_ui import UiHelpers                       # [ui-helpers] _color / _mr
 from plugin_util import _single_line_text, _split_episode_label
 from novaplay_thread import callInMainThread
 from plugin_toast import TOAST_XML, toast_init, toast
@@ -221,7 +218,7 @@ def _remaining(item):
     return ("at {}:{:02d}:{:02d}".format(h, m, s) if h else "at {}:{:02d}".format(m, s)), 0
 
 
-class NovaPlayHub(Screen):
+class NovaPlayHub(UiHelpers, Screen):
     skin = scale_skin_xml(_skin())
 
     def __init__(self, session):
@@ -415,16 +412,6 @@ class NovaPlayHub(Screen):
                 return s_["title"]
         return ""
 
-    def _color(self, name, bg=None, fg=None):
-        inst = self[name].instance
-        if inst is None or parseColor is None:
-            return
-        if bg:
-            inst.setBackgroundColor(parseColor(bg))
-        if fg:
-            inst.setForegroundColor(parseColor(fg))
-        inst.invalidate()
-
     def _pix(self, name, path):
         inst = self[name].instance
         if inst is not None and path and os.path.exists(path):
@@ -553,26 +540,6 @@ class NovaPlayHub(Screen):
                 self._mrc("%s%d" % (name, i), cx + rx * k, cy + ry * k, w * k, h * k)
             else:
                 self._mrc("%s%d" % (name, i), cx + rx * k, cy + ry * k)
-
-    def _mrc(self, name, x, y, w=None, h=None):
-        """[perf] move / resize, skipped when it would not change a pixel"""
-        geo = self.__dict__.setdefault("_geo", {})
-        pos = (sc(x), sc(y))
-        size = (max(1, sc(w)), max(1, sc(h))) if w is not None else None
-        old = geo.get(name)
-        if old and old[0] == pos and (size is None or old[1] == size):
-            return
-        inst = self[name].instance
-        if inst is None:
-            return
-        try:
-            if not old or old[0] != pos:
-                inst.move(ePoint(*pos))
-            if size is not None and (not old or old[1] != size):
-                inst.resize(eSize(*size))
-            geo[name] = (pos, size if size is not None else (old[1] if old else None))
-        except Exception:
-            pass
 
     def _popFocus(self):
         if self._zone == "side":

@@ -24,12 +24,9 @@ from Components.GUIComponent import GUIComponent
 from Components.MultiContent import MultiContentEntryText
 from enigma import (eTimer, eListbox, eListboxPythonMultiContent, gFont, ePoint, eSize,
                     RT_HALIGN_LEFT, RT_HALIGN_CENTER, RT_HALIGN_RIGHT, RT_VALIGN_CENTER)
-try:
-    from skin import parseColor
-except Exception:
-    parseColor = None
 
 from plugin_common import PLUGIN_PATH
+from novaplay_ui import UiHelpers                       # [ui-helpers] _color / _mr
 from plugin_gridlist import scale_skin_xml, sc
 from plugin_rowzoom import RowZoom
 import plugin_downloads
@@ -163,7 +160,7 @@ class DownloadList(GUIComponent):
         self.l.setList(out)
 
 
-class NovaPlayDownloads(Screen):
+class NovaPlayDownloads(UiHelpers, Screen):
     # [panel 2026-10-21] full-screen, same style as the other screens
     skin = scale_skin_xml("""
     <screen name="NovaPlayDownloads" position="center,center" size="1920,1080" title="Downloads" flags="wfNoBorder" backgroundColor="#0C1017">
@@ -309,19 +306,6 @@ class NovaPlayDownloads(Screen):
             self._sel = max(0, min(n - 1, self._sel + d))
         self._last_rows = None
         self._set_rows(self._rows)
-
-    def _color(self, name, bg=None, fg=None):
-        inst = self[name].instance
-        if inst is None or parseColor is None:
-            return
-        try:
-            if bg:
-                inst.setBackgroundColor(parseColor(bg))
-            if fg:
-                inst.setForegroundColor(parseColor(fg))
-            inst.invalidate()
-        except Exception:
-            pass
 
     def _placeRow(self, i, p):
         """[cards] the selected download card grows a little (smooth)"""

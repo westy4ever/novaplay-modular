@@ -29,15 +29,12 @@ from Screens.VirtualKeyBoard import VirtualKeyBoard
 from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
-from enigma import eTimer, ePoint, eSize, gFont
+from enigma import eTimer, gFont
 
-try:
-    from skin import parseColor
-except Exception:
-    parseColor = None
 
 from plugin_common import _PLUGIN_VERSION, PLUGIN_PATH, my_log
 from plugin_gridlist import scale_skin_xml, sc, POP_ANIM_FRAMES, POP_ANIM_INTERVAL, anim_frames, anim_reset, anim_light
+from novaplay_ui import UiHelpers                       # [ui-helpers] _color / _mr
 from plugin_state import (_get_config, _set_config, _PLUGIN_OWNER, _favorite_items,
                           _history_items, _DEFAULT_TMDB_API_KEY)
 from plugin_util import _site_label, _site_tagline
@@ -233,7 +230,7 @@ def _system_lines():
     ])
 
 
-class NovaPlaySettings(Screen):
+class NovaPlaySettings(UiHelpers, Screen):
     skin = scale_skin_xml(_skin())
 
     SECTIONS = (
@@ -430,16 +427,6 @@ class NovaPlaySettings(Screen):
 
     # ─── painting ───────────────────────────────────────────────────────
 
-    def _color(self, name, bg=None, fg=None):
-        inst = self[name].instance
-        if inst is None or parseColor is None:
-            return
-        if bg:
-            inst.setBackgroundColor(parseColor(bg))
-        if fg:
-            inst.setForegroundColor(parseColor(fg))
-        inst.invalidate()
-
     def _icon(self, name, file):
         inst = self[name].instance
         if inst is not None:
@@ -494,25 +481,6 @@ class NovaPlaySettings(Screen):
             self["hint"].setText("OK  Change    ◀  Sections    EXIT  Close")
 
     # ─── [pop-anim] zoom: section row, card, panel frame ────────────────
-
-    def _mr(self, name, x, y, w, h):
-        """[perf] move / resize, skipped when it would not change a pixel"""
-        geo = self.__dict__.setdefault("_geo", {})
-        g = (sc(x), sc(y), max(1, sc(w)), max(1, sc(h)))
-        old = geo.get(name)
-        if old == g:
-            return
-        inst = self[name].instance
-        if inst is None:
-            return
-        try:
-            if not old or old[:2] != g[:2]:
-                inst.move(ePoint(g[0], g[1]))
-            if not old or old[2:] != g[2:]:
-                inst.resize(eSize(g[2], g[3]))
-            geo[name] = g
-        except Exception:
-            pass
 
     def _placeRow(self, i, p):
         W, H = 332, 66

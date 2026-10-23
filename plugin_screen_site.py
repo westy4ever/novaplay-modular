@@ -30,10 +30,6 @@ from Components.Label import Label
 from Components.Pixmap import Pixmap
 from enigma import eTimer, ePoint, eSize, gFont
 
-try:
-    from skin import parseColor
-except Exception:
-    parseColor = None
 
 from plugin_common import my_log, PLUGIN_PATH
 from extractors import get_extractor, get_search_site_order
@@ -44,6 +40,7 @@ from plugin_assets import placeholder_for_item
 from plugin_state import (_get_config, _get_saved_position, _is_favorite,
                           _entry_from_item, _toggle_favorite_entry)
 from plugin_gridlist import resolve_icon_path, scale_skin_xml, sc, anim_frames, anim_light
+from novaplay_ui import UiHelpers                       # [ui-helpers] _color / _mr
 from plugin_util import (_strip_shown_year, _site_label, _site_search_item, _single_line_text, _wrap_ui_text,
                          _dedupe_items, _rank_search_items, _strip_arabic_from_english_title)
 from plugin_tmdb import _tmdb_search_metadata, fill_item_rating_async
@@ -318,7 +315,7 @@ _SKIN_CLASSIC = scale_skin_xml(_skin())
 _SKIN_MODERN = scale_skin_xml(_skin_modern())
 
 
-class NovaPlaySite(Screen):
+class NovaPlaySite(UiHelpers, Screen):
     skin = _SKIN_CLASSIC
 
     def __init__(self, session, site, title=None, items=None, loader=None, m_type="movie", library=None):
@@ -524,16 +521,6 @@ class NovaPlaySite(Screen):
         self["subtitle"].setText(text)
 
     # ─── helpers ────────────────────────────────────────────────────────
-
-    def _color(self, name, bg=None, fg=None):
-        inst = self[name].instance
-        if inst is None or parseColor is None:
-            return
-        if bg:
-            inst.setBackgroundColor(parseColor(bg))
-        if fg:
-            inst.setForegroundColor(parseColor(fg))
-        inst.invalidate()
 
     def _ex(self):
         return get_extractor(self._site)
@@ -1205,27 +1192,6 @@ class NovaPlaySite(Screen):
         z = POP_ZOOM * p
         w, h = int(MPW * (1 + z)), int(MPH * (1 + z))
         return x - (w - MPW) // 2, y - (h - MPH) // 2, w, h, (h - MPH) // 2
-
-    def _mr(self, name, x, y, w=None, h=None):
-        """move / resize a widget -- skipped when it would not change a pixel
-        (each call makes Enigma2 redraw the widget)"""
-        inst = self[name].instance
-        if inst is None:
-            return
-        geo = self.__dict__.setdefault("_geo", {})
-        pos = (sc(x), sc(y))
-        size = (max(1, sc(w)), max(1, sc(h))) if w is not None else None
-        old = geo.get(name)
-        if old and old[0] == pos and (size is None or old[1] == size):
-            return
-        try:
-            if not old or old[0] != pos:
-                inst.move(ePoint(*pos))
-            if size is not None and (not old or old[1] != size):
-                inst.resize(eSize(*size))
-            geo[name] = (pos, size if size is not None else (old[1] if old else None))
-        except Exception:
-            pass
 
     def _placeSlot(self, i, p, xoff=0.0, text=True):
         if not self._modern:

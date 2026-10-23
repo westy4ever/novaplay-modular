@@ -16,14 +16,11 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.Pixmap import Pixmap
 
-try:
-    from skin import parseColor
-except Exception:
-    parseColor = None
 
 from extractors import get_family_members
 import plugin_health
 from plugin_gridlist import resolve_icon_path, scale_skin_xml
+from novaplay_ui import UiHelpers                       # [ui-helpers] _color / _mr
 from plugin_util import _site_label, _site_tagline, _single_line_text
 
 GOLD, EDGE, CARD, WHITE = "#F2C230", "#262E3B", "#1A212D", "#FFFFFF"
@@ -32,7 +29,7 @@ MAXR = 6
 _W, _RH, _GAP = 1200, 112, 14
 
 
-class NovaFamilyPicker(Screen):
+class NovaFamilyPicker(UiHelpers, Screen):
     def __init__(self, session, rep_key):
         self._rep = rep_key
         self._keys = list(get_family_members(rep_key))
@@ -80,16 +77,6 @@ class NovaFamilyPicker(Screen):
             acts[str(d)] = (lambda k=d: self.close(self._keys[k - 1]) if k <= len(self._keys) else None)
         self["actions"] = ActionMap(["OkCancelActions", "DirectionActions", "MenuActions", "NumberActions"], acts, -1)
         self.onLayoutFinish.append(self._paint)
-
-    def _color(self, name, bg=None, fg=None):
-        inst = self[name].instance
-        if inst is None or parseColor is None:
-            return
-        if bg:
-            inst.setBackgroundColor(parseColor(bg))
-        if fg:
-            inst.setForegroundColor(parseColor(fg))
-        inst.invalidate()
 
     def _paint(self):
         for i in range(self._n):
