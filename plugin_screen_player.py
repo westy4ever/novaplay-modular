@@ -869,7 +869,7 @@ class NovaPlaySimplePlayer(Screen):
         self._seek_verify_timer = eTimer()
         self._seek_verify_timer.callback.append(self.__verifySeek)
         self._hide_timer = eTimer()
-        self._hide_timer.callback.append(self.__hideOSD)
+        self._hide_timer.callback.append(self.__autoHideOSD)
         self._osd_update_timer = eTimer()
         self._osd_update_timer.callback.append(self.__updateOSD)
         self._osd_visible = False
@@ -1338,6 +1338,13 @@ class NovaPlaySimplePlayer(Screen):
         for w in self._AUTONEXT_WIDGETS:
             try: self[w].hide()
             except: pass
+
+    def __autoHideOSD(self):
+        """[osd-ui] the auto-hide timer: the OSD stays while paused and while
+        the player methods are still being tried (until one plays)"""
+        if self._paused or not getattr(self, "_play_confirmed", False):
+            return
+        self.__hideOSD()
 
     def __hideOSD(self):
         if self._osd_visible:
@@ -2863,7 +2870,13 @@ class NovaPlaySimplePlayer(Screen):
                     novaplay_tracker._GLOBAL_IS_PAUSED = True
                 self["status"].setText(u"Paused")
                 self._showPauseBadge()
-            self.__showOSD(True)
+            # [osd-ui] paused: stays on screen; playing again: hides as usual
+            self.__showOSD(not self._paused)
+            if self._paused:
+                try:
+                    self._hide_timer.stop()
+                except Exception:
+                    pass
         except Exception as e:
             my_log("togglePause error: {}".format(e))
             self.__showOSD(True)
