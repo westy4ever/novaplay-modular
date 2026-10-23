@@ -436,40 +436,43 @@ class NovaPlaySimplePlayer(Screen):
         <widget name="aspect_bar_l" position="0,0" size="1,1080" backgroundColor="#000000" zPosition="5" />
         <widget name="aspect_bar_r" position="1919,0" size="1,1080" backgroundColor="#000000" zPosition="5" />
         <widget name="recBlink" position="1660,42" size="190,54" font="Regular;36" halign="center" valign="center" foregroundColor="#00FF0000" backgroundColor="#AA000000" transparent="0" zPosition="95" cornerRadius="16" />
-        <widget name="osd_shadow"   position="148,856" size="1624,230" backgroundColor="#000000" zPosition="9" />
-        <widget name="overlay_bg"   position="160,860" size="1600,210" backgroundColor="#0A0E14" zPosition="10" />
-        <widget name="osd_topline"  position="160,860" size="1600,3" backgroundColor="#F2C230" zPosition="11" />
-        <widget name="osd_titlebar" position="160,860" size="1600,52" backgroundColor="#0D1520" zPosition="11" />
-        <widget name="osdPosterBox" position="160,606" size="168,248" backgroundColor="#121822" cornerRadius="12" zPosition="12" transparent="0" />
-        <widget name="osdPoster" position="164,610" size="160,240" zPosition="12" alphatest="blend" scale="1" />
-        <widget name="osd_title"    position="180,868" size="620,38" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_videinfo" position="820,868" size="400,38" font="Regular;26" foregroundColor="#D1D4D9" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_subinfo" position="1230,870" size="36,34" font="Regular;28" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="center" valign="center" />
-        <widget name="osd_clock" position="1630,868" size="110,38" font="Regular;28" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" />
-        <widget name="osd_durtext"  position="1290,866" size="370,42" font="Regular;30" foregroundColor="#F0F6FC" transparent="1" zPosition="12" halign="right" valign="center" />
-        <!-- [POLISH v1] seek-bar ring, percent chip, playhead marker (enigma2 alpha: 00 = solid, FF = clear) -->
-        <widget name="seekFrame" position="178,916" size="1484,10" zPosition="11" backgroundColor="#3A4450" cornerRadius="5" />
-        <widget name="progBack"  position="1656,904" size="108,30" zPosition="11" backgroundColor="#0E1521" cornerRadius="8" />
-        <widget name="seekbar" position="180,918" size="1480,6" zPosition="12" backgroundColor="#1C2333" foregroundColor="#F2C230" cornerRadius="3" />
-        <widget name="seekMarker" position="180,912" size="18,18" zPosition="13" backgroundColor="#00FFFFFF" cornerRadius="9" />
-        <widget name="prog_bar"  position="1660,906" size="100,26" font="Regular;20" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="right" />
-        <widget name="osd_elapsed"  position="180,938" size="320,44" font="Regular;36" foregroundColor="#F2C230" transparent="1" zPosition="12" />
-        <widget name="osd_state"    position="510,938" size="80,44" font="Regular;36" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" valign="center" />
-        <widget name="status"       position="640,938" size="640,44" font="Regular;36" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" />
-        <widget name="osd_hints"    position="1220,938" size="520,44" font="Regular;26" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="right" />
-        <widget name="osd_divider"  position="160,982" size="1600,2" backgroundColor="#1C2333" zPosition="11" />
-        <widget name="osd_keybar"   position="160,984" size="1600,46" backgroundColor="#0D1520" zPosition="11" />
-        <!-- [POLISH v1] colour-coded key chips (semi-transparent, like the subtitle boxes) -->
-        <widget name="keyRed"    position="180,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#681418" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="keyGreen"  position="395,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#18521F" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="keyYellow" position="610,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#695B0C" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="keyBlue"   position="825,990" size="205,36" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#141763" transparent="0" cornerRadius="8" zPosition="12" />
-        <widget name="osd_keys"     position="1050,992" size="710,34" font="Regular;24" foregroundColor="#C9D1D9" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_botline"  position="160,1027" size="1600,3" backgroundColor="#0A2040" zPosition="11" />
-        <!-- [POLISH v1] second info row (below the safe-area line at 990: check it is fully visible on the TV) -->
-        <widget name="osd_subdetail" position="180,1034" size="640,32" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="left" />
-        <widget name="osd_episode"   position="840,1034" size="280,32" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="center" />
-        <widget name="osd_jump"      position="1140,1034" size="280,32" font="Regular;24" foregroundColor="#8B949E" transparent="1" zPosition="12" halign="left" />
+        <!-- [osd-ui 2026-10-23] three rows inside the TV safe area (ends at y 1000):
+             title / episode / video / subtitles / clock -- seek bar with elapsed and
+             remaining + "Ends 23:14" -- colour keys + one help line -->
+        <widget name="overlay_bg"   position="160,800" size="1600,200" backgroundColor="#121822" cornerRadius="20" zPosition="10" />
+        <widget name="osdPosterBox" position="160,546" size="168,248" backgroundColor="#121822" cornerRadius="12" zPosition="12" transparent="0" />
+        <widget name="osdPoster" position="164,550" size="160,240" zPosition="12" alphatest="blend" scale="1" />
+        <widget name="osd_title"    position="184,812" size="576,40" font="Regular;30" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="left" valign="center" />
+        <widget name="osd_episode"  position="770,812" size="180,40" font="Regular;24" foregroundColor="#F2C230" transparent="1" zPosition="12" halign="left" valign="center" />
+        <widget name="osd_videinfo" position="960,812" size="260,40" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="12" halign="left" valign="center" />
+        <widget name="osd_subdetail" position="1230,812" size="370,40" font="Regular;20" foregroundColor="#A3ADBB" transparent="1" zPosition="12" halign="left" valign="center" />
+        <widget name="osd_clock"    position="1610,812" size="130,40" font="Regular;28" foregroundColor="#FFFFFF" transparent="1" zPosition="12" halign="right" valign="center" />
+        <widget name="seekFrame" position="182,870" size="1556,10" zPosition="11" backgroundColor="#2A3240" cornerRadius="5" />
+        <widget name="seekbar" position="184,872" size="1552,6" zPosition="12" backgroundColor="#1C2333" foregroundColor="#F2C230" cornerRadius="3" />
+        <widget name="seekMarker" position="184,866" size="18,18" zPosition="13" backgroundColor="#00FFFFFF" cornerRadius="9" />
+        <widget name="osd_elapsed"  position="184,890" size="330,40" font="Regular;28" foregroundColor="#E5D1A6" transparent="1" zPosition="12" valign="center" />
+        <widget name="osd_state"    position="520,890" size="60,40" font="Regular;30" foregroundColor="#39D98A" transparent="1" zPosition="12" halign="center" valign="center" />
+        <widget name="status"       position="590,890" size="640,40" font="Regular;24" foregroundColor="#FFFFFF" transparent="1" zPosition="12" halign="center" valign="center" />
+        <widget name="osd_durtext"  position="1240,890" size="500,40" font="Regular;26" foregroundColor="#FFFFFF" transparent="1" zPosition="12" halign="right" valign="center" />
+        <widget name="osd_divider"  position="184,936" size="1552,1" backgroundColor="#2A3240" zPosition="11" />
+        <widget name="keyRed"    position="184,948" size="205,38" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#681418" transparent="0" cornerRadius="10" zPosition="12" />
+        <widget name="keyGreen"  position="399,948" size="205,38" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#18521F" transparent="0" cornerRadius="10" zPosition="12" />
+        <widget name="keyYellow" position="614,948" size="205,38" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#695B0C" transparent="0" cornerRadius="10" zPosition="12" />
+        <widget name="keyBlue"   position="829,948" size="205,38" font="Regular;23" halign="center" valign="center" foregroundColor="#F0F6FC" backgroundColor="#141763" transparent="0" cornerRadius="10" zPosition="12" />
+        <widget name="osd_keys"     position="1050,948" size="690,38" font="Regular;22" foregroundColor="#A3ADBB" transparent="1" zPosition="12" halign="right" valign="center" />
+        <widget name="seekBubble"   position="184,818" size="150,40" font="Bold;24" foregroundColor="#0C1017" backgroundColor="#F2C230" cornerRadius="10" halign="center" valign="center" transparent="0" zPosition="14" />
+        <widget name="pauseBadge"   position="900,480" size="120,120" font="Regular;52" foregroundColor="#FFFFFF" backgroundColor="#400C1017" cornerRadius="60" halign="center" valign="center" transparent="0" zPosition="91" />
+        <!-- old OSD parts, no longer shown (kept so nothing that still sets them breaks) -->
+        <widget name="osd_shadow" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_topline" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_titlebar" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_subinfo" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="progBack" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="prog_bar" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_hints" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_keybar" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_botline" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
+        <widget name="osd_jump" position="-300,-300" size="1,1" font="Regular;10" transparent="1" zPosition="0" />
         <widget name="autoNextPanel" position="1110,92" size="750,255" zPosition="20" backgroundColor="#20000000" transparent="0" cornerRadius="24" />
         <widget name="autoNextAccent" position="1110,92" size="750,7" zPosition="21" backgroundColor="#F2C230" transparent="0" />
         <widget name="autoNextPoster" position="1140,105" size="100,150" zPosition="22" alphatest="blend" scale="1" />
@@ -525,30 +528,23 @@ class NovaPlaySimplePlayer(Screen):
     """)
 
     _OSD_WIDGETS = [
-        "osd_shadow","overlay_bg","osd_topline","osd_botline",
-        "osd_titlebar","osd_title","osd_durtext",
-        "osdPosterBox","osdPoster",
-        "prog_bar","seekbar","seekFrame","seekMarker","progBack",
-        "osd_elapsed","osd_state",
-        "status","osd_hints","osd_divider",
-        "osd_keybar","osd_keys",
-        "keyRed","keyGreen","keyYellow","keyBlue",
-        "osd_subdetail","osd_episode","osd_jump",
-        "osd_videinfo","osd_subinfo","osd_clock",
+        "overlay_bg", "osdPosterBox", "osdPoster",
+        "osd_title", "osd_episode", "osd_videinfo", "osd_subdetail", "osd_clock",
+        "seekFrame", "seekbar", "seekMarker",
+        "osd_elapsed", "osd_state", "status", "osd_durtext",
+        "osd_divider", "keyRed", "keyGreen", "keyYellow", "keyBlue", "osd_keys",
     ]
+    # [osd-ui] parts of the old layout: always hidden
+    _OSD_RETIRED = ("osd_shadow", "osd_topline", "osd_titlebar", "osd_subinfo", "progBack",
+                    "prog_bar", "osd_hints", "osd_keybar", "osd_botline", "osd_jump")
 
     _OSD_DESIGN_Y = {
-        "osd_shadow": 856, "overlay_bg": 860, "osd_topline": 860,
-        "osd_botline": 1027, "osd_titlebar": 860,
-        "osdPosterBox": 606, "osdPoster": 610,
-        "osd_title": 868, "osd_durtext": 868, "prog_bar": 906,
-        "seekbar": 918, "seekFrame": 916, "seekMarker": 912, "progBack": 904,
-        "osd_elapsed": 938, "osd_state": 938,
-        "status": 938, "osd_hints": 938, "osd_divider": 982,
-        "osd_keybar": 984, "osd_keys": 992,
-        "keyRed": 990, "keyGreen": 990, "keyYellow": 990, "keyBlue": 990,
-        "osd_subdetail": 1034, "osd_episode": 1034, "osd_jump": 1034,
-        "osd_videinfo": 868, "osd_subinfo": 870, "osd_clock": 868,
+        "overlay_bg": 800, "osdPosterBox": 546, "osdPoster": 550,
+        "osd_title": 812, "osd_episode": 812, "osd_videinfo": 812, "osd_subdetail": 812, "osd_clock": 812,
+        "seekFrame": 870, "seekbar": 872, "seekMarker": 866,
+        "osd_elapsed": 890, "osd_state": 890, "status": 890, "osd_durtext": 890,
+        "osd_divider": 936, "keyRed": 948, "keyGreen": 948, "keyYellow": 948, "keyBlue": 948,
+        "osd_keys": 948,
     }
     _OSD_SLIDE_OFFSET = 500
 
@@ -667,6 +663,10 @@ class NovaPlaySimplePlayer(Screen):
         self["osd_jump"]     = Label("")
         self["seekFlash"]    = Label("")
         self["seekFlash"].hide()
+        self["seekBubble"]   = Label("")      # [osd-ui] target time above the marker
+        self["seekBubble"].hide()
+        self["pauseBadge"]   = Label(u"\u275a\u275a")   # [osd-ui] big pause sign
+        self["pauseBadge"].hide()
         self["qualityWipe"]  = Label("")
         self["qualityWipe"].hide()
         self["syncToast"]    = Label("")
@@ -815,6 +815,8 @@ class NovaPlaySimplePlayer(Screen):
         # [player-anim] seek flash
         self._seek_flash_timer = eTimer()
         self._seek_flash_timer.callback.append(self._hideSeekFlash)
+        self._pause_badge_timer = eTimer()
+        self._pause_badge_timer.callback.append(self._hidePauseBadge)
 
         # [player-anim] quality wipe
         self._quality_wipe_frame = 0
@@ -1087,6 +1089,52 @@ class NovaPlaySimplePlayer(Screen):
     def _hideSeekFlash(self):
         try: self["seekFlash"].hide()
         except Exception: pass
+        try: self["seekBubble"].hide()
+        except Exception: pass
+
+    @staticmethod
+    def _clockText(secs):
+        """[osd-ui] 42:10 / 1:02:10"""
+        secs = max(0, int(secs))
+        h, rem = divmod(secs, 3600)
+        m, s_ = divmod(rem, 60)
+        return u"{}:{:02d}:{:02d}".format(h, m, s_) if h else u"{}:{:02d}".format(m, s_)
+
+    def _showSeekBubble(self, target_secs):
+        """[osd-ui] small gold bubble with the target time over the seek bar,
+        right above where the marker will be"""
+        try:
+            total = self._total_secs
+            if total <= 0:
+                return
+            pct = min(1.0, max(0.0, float(target_secs) / float(total)))
+            x = 184 + int(1552 * pct) - 75
+            x = max(170, min(1750 - 150, x))
+            inst = self["seekBubble"].instance
+            if inst is not None:
+                inst.move(ePoint(x, 818))
+            self["seekBubble"].setText(self._clockText(target_secs))
+            self["seekBubble"].show()
+        except Exception as e:
+            my_log("seek bubble: {}".format(e))
+
+    def _showPauseBadge(self):
+        try:
+            self["pauseBadge"].show()
+            self._pause_badge_timer.stop()
+            self._pause_badge_timer.start(1500, True)
+        except Exception:
+            pass
+
+    def _hidePauseBadge(self):
+        try:
+            self._pause_badge_timer.stop()
+        except Exception:
+            pass
+        try:
+            self["pauseBadge"].hide()
+        except Exception:
+            pass
 
     # ── [player-anim] quality switch wipe ───────────────────────────────
     def _startQualityWipe(self, on_midpoint=None):
@@ -1280,7 +1328,7 @@ class NovaPlaySimplePlayer(Screen):
 
     # ─── OSD ────────────────────────────────────────────────────────────
     def __initOSD(self):
-        for w in self._OSD_WIDGETS:
+        for w in self._OSD_WIDGETS + list(self._OSD_RETIRED) + ["seekBubble", "pauseBadge"]:
             try: self[w].hide()
             except: pass
         for w in self._AUTONEXT_WIDGETS:
@@ -1290,6 +1338,8 @@ class NovaPlaySimplePlayer(Screen):
     def __hideOSD(self):
         if self._osd_visible:
             self._osd_visible = False
+            try: self["seekBubble"].hide()
+            except Exception: pass
             try: self._osd_update_timer.stop()
             except: pass
             self._startOSDSlide(0.0)
@@ -1413,7 +1463,6 @@ class NovaPlaySimplePlayer(Screen):
                 elapsed = self._paused_elapsed
             else:
                 elapsed = current_play_secs()
-            he = elapsed // 3600; me = (elapsed % 3600) // 60; se = elapsed % 60
 
             color = "#F2C230" if self._paused else "#E5D1A6"
             try:
@@ -1421,7 +1470,7 @@ class NovaPlaySimplePlayer(Screen):
                     self["osd_elapsed"].instance.setForegroundColor(parseColor(color))
             except Exception:
                 pass
-            self["osd_elapsed"].setText("{:02d}:{:02d}:{:02d}".format(he, me, se))
+            self["osd_elapsed"].setText(self._clockText(elapsed))
 
             # [player-ux] state glyph
             try:
@@ -1515,7 +1564,7 @@ class NovaPlaySimplePlayer(Screen):
                     if _m2:
                         _ep_text += " → E" + _m2.group(1).zfill(2)
                 self["osd_episode"].setText(_ep_text)
-                self["osd_jump"].setText(u"‹› ±{}s".format(int(getattr(self, "_last_seek_step", 10) or 10)))
+                self._osd_step = int(getattr(self, "_last_seek_step", 10) or 10)
             except Exception:
                 pass
 
@@ -1533,14 +1582,10 @@ class NovaPlaySimplePlayer(Screen):
             if total > 0:
                 rem = max(0, total - elapsed)
                 pct = min(1.0, float(elapsed) / float(total))
-                hr = rem // 3600
-                mr = (rem % 3600) // 60
-                sr = rem % 60
-                ht = total // 3600
-                mt = (total % 3600) // 60
-                st = total % 60
-                self["osd_durtext"].setText("{:02d}:{:02d}:{:02d} / {:02d}:{:02d}:{:02d}".format(he, me, se, ht, mt, st))
-                self["osd_elapsed"].setText(u"−{:02d}:{:02d}:{:02d}".format(hr, mr, sr))
+                # [osd-ui] left: 42:10 / 2:10:00 -- right: -1:27:50 · Ends 23:14
+                self["osd_elapsed"].setText(u"{} / {}".format(self._clockText(elapsed), self._clockText(total)))
+                self["osd_durtext"].setText(u"\u2212{}  \u00b7  Ends {}".format(
+                    self._clockText(rem), time.strftime("%H:%M", time.localtime(time.time() + rem))))
                 try:
                     self["seekbar"].setRange((0, 100))
                     self["seekbar"].setValue(int(pct * 100))
@@ -1582,7 +1627,8 @@ class NovaPlaySimplePlayer(Screen):
             except Exception:
                 pass
             # [POLISH v1] the colour keys are shown as chips now
-            self["osd_keys"].setText("OK=pause   0-9=jump   ‹›±10s   Stop=exit")
+            self["osd_keys"].setText(u"OK pause  \u00b7  0-9 jump  \u00b7  \u25c0\u25b6 \u00b1{}s  \u00b7  STOP exit".format(
+                getattr(self, "_osd_step", 10)))
         except Exception as e:
             my_log("updateOSD error: {}".format(e))
 
@@ -2794,6 +2840,7 @@ class NovaPlaySimplePlayer(Screen):
                     novaplay_tracker._GLOBAL_PLAY_START_POS = self._paused_elapsed
                     novaplay_tracker._GLOBAL_PLAY_START_WALL = time.time()
                 self["status"].setText(u"Playing")
+                self._hidePauseBadge()
             else:
                 with novaplay_tracker._GLOBAL_POS_LOCK:
                     wall = novaplay_tracker._GLOBAL_PLAY_START_WALL
@@ -2809,6 +2856,7 @@ class NovaPlaySimplePlayer(Screen):
                     novaplay_tracker._GLOBAL_PLAY_START_POS = self._paused_elapsed
                     novaplay_tracker._GLOBAL_IS_PAUSED = True
                 self["status"].setText(u"Paused")
+                self._showPauseBadge()
             self.__showOSD(True)
         except Exception as e:
             my_log("togglePause error: {}".format(e))
@@ -2850,6 +2898,7 @@ class NovaPlaySimplePlayer(Screen):
             self["status"].setText(u"{} {:02d}:{:02d}:{:02d}".format(_arr, _th, _tm, _ts))
             self._showSeekFlash(1 if delta_secs > 0 else -1, delta_secs, target)
             self.__showOSD(True)
+            self._showSeekBubble(target)
             self._hide_timer.start(2500, True)
         except Exception as e:
             my_log("seek error: {}".format(e))
